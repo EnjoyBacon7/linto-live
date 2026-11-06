@@ -34,6 +34,25 @@ export async function loginWithPassword(api: LintoApi, email: string, password: 
   }
 }
 
+export type NavEvent = 'will-redirect' | 'will-navigate' | 'did-navigate' | 'did-redirect-navigation'
+export type RedirectAction = 'resolve-token' | 'exchange' | 'ignore'
+
+// Decides what to do per navigation event. Token is taken on the earliest event;
+// the cookie exchange runs at most once and only after navigation committed
+// (so the redirect response's Set-Cookie has been processed).
+export function createRedirectHandler(instance: string): (event: NavEvent, url: string) => { action: RedirectAction; token?: string } {
+  let exchanged = false
+  return (event, url) => {
+    const r = classifyRedirect(url, instance)
+    if (r.kind === 'token') return { action: 'resolve-token', token: r.token }
+    if (r.kind === 'exchange' && !exchanged && (event === 'did-navigate' || event === 'did-redirect-navigation')) {
+      exchanged = true
+      return { action: 'exchange' }
+    }
+    return { action: 'ignore' }
+  }
+}
+
 const PARTITION = 'persist:linto-sso'
 
 export async function ssoLogin(
@@ -83,20 +102,22 @@ export async function ssoLogin(
         finish(e instanceof Error ? e : new Error(String(e)))
       }
     }
-    const check = (event: { preventDefault(): void } | null, url: string) => {
+    const handle = createRedirectHandler(urls.instance)
+    const check = (ev: NavEvent, event: { preventDefault(): void } | null, url: string) => {
       if (done) return
-      const r = classifyRedirect(url, urls.instance)
-      if (r.kind === 'token') {
+      const r = handle(ev, url)
+      if (r.action === 'resolve-token') {
         event?.preventDefault()
         finish(null, r.token)
-      } else if (r.kind === 'exchange') {
+      } else if (r.action === 'exchange') {
         void exchange()
       }
     }
     const wc = win.webContents
-    wc.on('will-redirect', (e, url) => check(e, url))
-    wc.on('will-navigate', (e, url) => check(e, url))
-    wc.on('did-navigate', (_e, url) => check(null, url))
+    wc.on('will-redirect', (e, url) => check('will-redirect', e, url))
+    wc.on('will-navigate', (e, url) => check('will-navigate', e, url))
+    wc.on('did-navigate', (_e, url) => check('did-navigate', null, url))
+    wc.on('did-redirect-navigation', (_e, url) => check('did-redirect-navigation', null, url))
     win.on('closed', () => finish(new Error('cancelled')))
     win.loadURL(loginUrl).catch((e) => {
       if (!done && !/ERR_ABORTED/.test(String(e))) finish(e instanceof Error ? e : new Error(String(e)))

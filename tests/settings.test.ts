@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mkdtempSync, readFileSync, statSync, readdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, readFileSync, statSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SettingsStore } from '../src/main/settings'
@@ -40,7 +40,7 @@ describe('SettingsStore', () => {
   })
   it('corrupt file or undecryptable token => defaults / null', () => {
     const p = appPaths(dir, 'linux')
-    require('node:fs').writeFileSync(p.settingsFile, '{bad')
+    writeFileSync(p.settingsFile, '{bad')
     const s = new SettingsStore(p, crypto)
     expect(s.get().instance).toBe('https://studio.linto.ai')
     expect(s.getToken()).toBeNull()

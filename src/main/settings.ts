@@ -37,7 +37,9 @@ export class SettingsStore {
   }
 
   update(patch: Partial<Settings>): void {
-    this.data = { ...this.data, ...patch }
+    const clean = { ...patch }
+    if (clean.instance === undefined) delete clean.instance
+    this.data = { ...this.data, ...clean }
     this.save()
   }
 
