@@ -110,6 +110,25 @@ describe('CaptionStream', () => {
     expect(n).toBe(1)
     expect(sock.disconnected).toBe(true)
   })
+  it.each(['jwt expired', 'invalid signature', 'Unauthorized', 'unauthorised', 'Forbidden', 'Session expired'])(
+    'emits authError on connect_error %j', (msg) => {
+      const { s, sock } = mk()
+      let n = 0
+      s.on('authError', () => n++)
+      s.open('s1', 7)
+      sock.emit_('connect_error', new Error(msg))
+      expect(n).toBe(1)
+      expect(sock.disconnected).toBe(true)
+    }
+  )
+  it.each(['websocket error', 'timeout', 'xhr poll error'])('ignores network connect_error %j', (msg) => {
+    const { s, sock } = mk()
+    let n = 0
+    s.on('authError', () => n++)
+    s.open('s1', 7)
+    sock.emit_('connect_error', new Error(msg))
+    expect(n).toBe(0)
+  })
   it('emits authError on unauthorized event', () => {
     const { s, sock } = mk()
     let n = 0

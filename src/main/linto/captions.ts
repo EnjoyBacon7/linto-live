@@ -57,6 +57,7 @@ type IoFn = typeof realIo
 type Socket = ReturnType<IoFn>
 const STABLE_MS = 10000
 export type CaptionStatus = 'connecting' | 'live' | 'offline'
+const AUTH_ERROR_RE = /token|auth|jwt|expired|signature|unauthori[sz]ed|forbidden/i
 
 export class CaptionStream extends EventEmitter {
   private socket: Socket | null = null
@@ -116,7 +117,8 @@ export class CaptionStream extends EventEmitter {
     })
     socket.io.on('reconnect_attempt', () => { if (this.socket === socket) this.setStatus('connecting') })
     socket.on('connect_error', (err: Error) => {
-      if (/token|auth/i.test(err?.message ?? '')) authFail()
+      // Message wording varies by server version; LiveController also probes the API if captions stay down.
+      if (AUTH_ERROR_RE.test(err?.message ?? '')) authFail()
     })
     socket.on('unauthorized', authFail)
     socket.on('partial', (e: CaptionEvent) => this.emit('partial', e))
