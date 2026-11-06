@@ -53,6 +53,10 @@ describe('LintoApi', () => {
     expect(calls[0].url).toContain('limit=50')
     expect(r[0]).toEqual({ id: 's', name: 'Conf é&', status: 'active', owner: 'u', channels: [{ id: 7, name: 'c', streamEndpoints: { srt: 'srt://x' } }] })
   })
+  it('maps createdAt when present', async () => {
+    const { api } = mk(() => json({ sessions: [{ id: 's', name: 'n', status: 'active', createdAt: '2026-01-02T00:00:00Z', channels: [] }] }))
+    expect((await api.searchSessions('o1', 'n'))[0].createdAt).toBe('2026-01-02T00:00:00Z')
+  })
   it('createSession body matches the constraints payload', async () => {
     const { calls, api } = mk(() => json({ id: 'n', name: 'X', status: 'ready', channels: [{ id: 1, name: 'X' }] }))
     const s = await api.createSession('o1', 'X', 42)

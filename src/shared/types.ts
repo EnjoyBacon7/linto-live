@@ -6,7 +6,7 @@ export interface StreamEndpoints {
 
 export type SessionStatus = 'on_schedule' | 'ready' | 'active' | 'paused' | 'terminated'
 export interface Channel { id: number; name: string; streamEndpoints?: StreamEndpoints }
-export interface Session { id: string; name: string; status: SessionStatus; channels: Channel[]; owner?: string }
+export interface Session { id: string; name: string; status: SessionStatus; channels: Channel[]; owner?: string; createdAt?: string }
 export interface Organization { id: string; name: string }
 export interface TranscriberProfile { id: number; name: string; languages?: string[] }
 export interface AuthMethod { path: string; from: string; name: string }

@@ -21,6 +21,7 @@ function toSession(s: any): Session {
     channels: (s.channels ?? []).map(toChannel)
   }
   if (s.owner) out.owner = s.owner
+  if (s.createdAt) out.createdAt = s.createdAt
   return out
 }
 
