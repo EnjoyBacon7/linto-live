@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, screen, shell } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type LiveState, type SetupData } from '../shared/ipc'
-import { UnauthorizedError, type SavedDisplay, type Settings } from '../shared/types'
+import type { SavedDisplay, Settings } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -20,6 +20,7 @@ import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { loadSetupData } from './setupData'
+import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow, watchDisplays } from './appLifecycle'
 
 const SHUTDOWN_CAP_MS = 15_000
 
@@ -113,15 +114,8 @@ function main(): void {
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   live.on('auth-required', () => send(IPC.evtAuthRequired))
 
-  /** Any LinTO 401 outside the password login: let the controller decide (token kept during a show). */
-  const guarded = async <T>(fn: () => Promise<T>): Promise<T> => {
-    try {
-      return await fn()
-    } catch (e) {
-      if (e instanceof UnauthorizedError) live.reportUnauthorized()
-      throw e
-    }
-  }
+  // HDMI unplug/replug: OBS closes the projector of a vanished display; the controller reopens it.
+  watchDisplays(screen, () => void live.displaysChanged().catch((e) => console.error('display change', e)))
 
   const loggedIn = (t: string): void => {
     settings.setToken(t)
@@ -149,7 +143,9 @@ function main(): void {
 
   ipcMain.handle(IPC.setupLoad, async (): Promise<SetupData> => {
     await ensureUrls()
-    return loadSetupData({
+    // The display showing this window (else the primary): projecting there would cover the app.
+    const { x, y, width, height } = (win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay()).bounds
+    const data = await loadSetupData({
       getSettings: () => settings.get(),
       hasToken: () => settings.getToken() !== null,
       organizations: () => api.organizations(),
@@ -159,6 +155,7 @@ function main(): void {
       // Clears a stale token (unless a show is live) and asks the UI to log in.
       onUnauthorized: () => live.reportUnauthorized()
     })
+    return { ...data, appDisplay: { x, y, width, height } }
   })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
   ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))
@@ -170,16 +167,22 @@ function main(): void {
   ipcMain.handle(IPC.liveStop, () => live.stop())
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveChangeDisplay, (_e, d: SavedDisplay) => live.changeDisplay(d))
-  let quitting = false
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
+  const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
+    const parent = win && !win.isDestroyed() ? win : undefined
+    return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)
+  }
+  // Closing the app = Arrêter (stop the show, quit OBS, 15 s cap) — confirmed first while live.
+  const quitGuard = createQuitGuard({
+    phase: () => live.getState().phase,
+    ask: async () => (await show(QUIT_DIALOG)).response === 1,
+    quit: () => app.quit(),
+    shutdown: () => void shutdownCapped().finally(() => app.exit(0))
+  })
 
   ipcMain.handle(IPC.appUninstall, async () => {
     if (uninstalling) return
-    const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
-      const parent = win && !win.isDestroyed() ? win : undefined
-      return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)
-    }
     if (!app.isPackaged) {
       await show({ type: 'info', message: 'Désinstallation indisponible en mode développement.', buttons: ['OK'] })
       return
@@ -219,7 +222,7 @@ function main(): void {
     })
     if (response !== 1) return
     uninstalling = true
-    quitting = true // shutdown is done explicitly below; ignore before-quit
+    quitGuard.markQuitting() // shutdown is done explicitly below; ignore close/before-quit
     await shutdownCapped() // stop the show and OBS (killed on timeout/failure) before touching userData
     // No late IPC may re-create userData once it is deleted.
     if (win && !win.isDestroyed()) win.destroy()
@@ -241,20 +244,18 @@ function main(): void {
     app.exit(0)
   })
 
-  // Closing the app = Arrêter: stop the show and quit OBS before exiting (15 s cap).
-  app.on('before-quit', (e) => {
-    e.preventDefault() // always, while our shutdown is in progress; app.exit() below does not re-emit
-    if (quitting) return
-    quitting = true
-    void shutdownCapped().finally(() => app.exit(0))
-  })
+  app.on('before-quit', (e) => quitGuard.onBeforeQuit(e))
 
   win = createWindow()
+  win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
   // OBS + overlay start before login so device lists are ready for the setup screen.
   live.boot().catch((err) => console.error('OBS boot failed', err)) // state carries MSG_BOOT_FAILED
 }
 
 app.setName('LinTO Live')
-void app.whenReady().then(main)
-app.on('window-all-closed', () => app.quit())
+// A second instance would start a second OBS on the same profile: it quits before booting anything.
+if (acquireSingleInstance(app, () => focusWindow(win))) {
+  void app.whenReady().then(main)
+  app.on('window-all-closed', () => app.quit())
+}

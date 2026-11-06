@@ -10,6 +10,8 @@ export interface SetupData {
   videoDevices: DeviceItem[]
   audioDevices: DeviceItem[]
   displays: MonitorInfo[]
+  /** Bounds of the display showing the app window (projecting there would cover the app). */
+  appDisplay?: { x: number; y: number; width: number; height: number }
 }
 
 export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { ok: false; message: string }
