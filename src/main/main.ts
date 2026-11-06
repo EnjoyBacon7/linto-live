@@ -13,6 +13,7 @@ import { loadInstance, type LintoUrls } from './linto/instance'
 import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
+import { loadSetupData } from './setupData'
 
 const SHUTDOWN_CAP_MS = 15_000
 
@@ -128,17 +129,19 @@ function main(): void {
   })
   ipcMain.handle(IPC.authStatus, async () => ({ loggedIn: settings.getToken() !== null }))
 
-  ipcMain.handle(IPC.setupLoad, () =>
-    guarded(async (): Promise<SetupData> => {
-      await ensureUrls()
-      const s = settings.get()
-      const organizations = await api.organizations()
-      const orgId = s.orgId ?? (organizations.length === 1 ? organizations[0].id : undefined)
-      const profiles = orgId ? await api.transcriberProfiles(orgId) : []
-      const devices = await live.listDevices()
-      return { settings: s, organizations, profiles, ...devices }
+  ipcMain.handle(IPC.setupLoad, async (): Promise<SetupData> => {
+    await ensureUrls()
+    return loadSetupData({
+      getSettings: () => settings.get(),
+      hasToken: () => settings.getToken() !== null,
+      organizations: () => api.organizations(),
+      profiles: (orgId) => api.transcriberProfiles(orgId),
+      devices: () => live.listDevices(),
+      saveSettings: (p) => live.saveSettings(p),
+      // Clears a stale token (unless a show is live) and asks the UI to log in.
+      onUnauthorized: () => live.reportUnauthorized()
     })
-  )
+  })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
   ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))
 

@@ -16,12 +16,25 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
   const [confirming, setConfirming] = useState(false)
   const [displays, setDisplays] = useState<MonitorInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<'stop' | 'terminate' | null>(null)
+  useEffect(() => {
+    if (!confirming) return
+    const h = (e: KeyboardEvent): void => { if (e.key === 'Escape') setConfirming(false) }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [confirming])
 
   useEffect(() => window.lintoLive.on('preview', setPreview), [])
 
   const guard = async (fn: () => Promise<void>, after?: () => void): Promise<void> => {
     setError(null)
     try { await fn(); after?.() } catch (e) { setError(ipcErrorMessage(e)) }
+  }
+  const act = async (kind: 'stop' | 'terminate', fn: () => Promise<void>): Promise<void> => {
+    if (busy) return
+    setBusy(kind)
+    await guard(fn, onStopped)
+    setBusy(null)
   }
   const openDisplays = async (): Promise<void> => {
     await guard(async () => setDisplays((await window.lintoLive.setup.load()).displays))
@@ -56,9 +69,9 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
           </ul>
           <p className="caption" aria-live="polite">{state.lastLine ?? '—'}</p>
           <div className="actions">
-            <button type="button" className="primary big" onClick={() => void guard(() => window.lintoLive.live.stop(), onStopped)}>Arrêter</button>
-            <button type="button" className="danger" onClick={() => setConfirming(true)}>Terminer la session</button>
-            <button type="button" onClick={() => void openDisplays()}>Changer d'écran</button>
+            <button type="button" className="primary big" disabled={busy !== null} onClick={() => void act('stop', () => window.lintoLive.live.stop())}>{busy === 'stop' ? 'Arrêt…' : 'Arrêter'}</button>
+            <button type="button" className="danger" disabled={busy !== null} onClick={() => setConfirming(true)}>{busy === 'terminate' ? 'Fin de session…' : 'Terminer la session'}</button>
+            <button type="button" disabled={busy !== null} onClick={() => void openDisplays()}>Changer d'écran</button>
           </div>
           {displays && (
             <label>Nouvel écran
@@ -78,7 +91,7 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
           <p id="confirm-msg">Terminer définitivement la session « {name} » ? Elle ne pourra plus être reprise.</p>
           <div className="actions">
             <button type="button" autoFocus onClick={() => setConfirming(false)}>Annuler</button>
-            <button type="button" className="danger" onClick={() => { setConfirming(false); void guard(() => window.lintoLive.live.terminate(), onStopped) }}>Terminer définitivement</button>
+            <button type="button" className="danger" onClick={() => { setConfirming(false); void act('terminate', () => window.lintoLive.live.terminate()) }}>Terminer définitivement</button>
           </div>
         </div></div>
       )}

@@ -1,19 +1,22 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { AuthMethod } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
+
+const norm = (u: string): string => u.trim().replace(/\/+$/, '')
 
 export function Login({ onLoggedIn, onCancel }: { onLoggedIn: () => void; onCancel?: () => void }) {
   const [methods, setMethods] = useState<AuthMethod[]>([])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [instance, setInstance] = useState('https://studio.linto.ai')
+  const loaded = useRef(norm('https://studio.linto.ai'))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     let alive = true
     window.lintoLive.auth.methods().then((m) => alive && setMethods(m)).catch((e) => alive && setError(ipcErrorMessage(e)))
-    window.lintoLive.setup.load().then((d) => alive && setInstance(d.settings.instance)).catch(() => {}) // rejects (Unauthorized) while logged out: keep the default
+    window.lintoLive.setup.load().then((d) => { if (!alive) return; loaded.current = norm(d.settings.instance); setInstance(d.settings.instance) }).catch(() => {}) // rejects (Unauthorized) while logged out: keep the default
     return () => { alive = false }
   }, [])
 
@@ -23,8 +26,10 @@ export function Login({ onLoggedIn, onCancel }: { onLoggedIn: () => void; onCanc
     try { await fn(); onLoggedIn() } catch (e) { setError(ipcErrorMessage(e)) } finally { setBusy(false) }
   }
   const saveInstance = async (): Promise<void> => {
+    if (norm(instance) === loaded.current) return
     try {
-      await window.lintoLive.setup.save({ instance })
+      await window.lintoLive.setup.save({ instance: norm(instance) })
+      loaded.current = norm(instance)
       setMethods(await window.lintoLive.auth.methods())
     } catch (e) { setError(ipcErrorMessage(e)) }
   }
