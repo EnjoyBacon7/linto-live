@@ -2,6 +2,8 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
 import { obsEnv, type AppPaths } from '../paths'
 import { writeSeed } from './seed'
@@ -19,10 +21,12 @@ export interface ObsProcessOptions {
   maxRestarts?: number
   /** Resolves once OBS accepts a websocket connection. Defaults to a real obs-websocket-js connect. */
   probe?: (c: ObsConnection) => Promise<void>
+  readyTimeoutMs?: number
 }
 
 const READY_TIMEOUT_MS = 20_000
 const STOP_TIMEOUT_MS = 10_000
+const PROBE_TIMEOUT_MS = 2_000
 const STABLE_MS = 30_000
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -37,9 +41,35 @@ function freePort(): Promise<number> {
   })
 }
 
-async function wsProbe(c: ObsConnection): Promise<void> {
-  const ws = new OBSWebSocket()
-  await ws.connect(`ws://127.0.0.1:${c.port}`, c.password)
+export interface ProbeSocket {
+  on(ev: 'Hello', cb: (h: { authentication?: unknown }) => void): unknown
+  connect(url: string, password: string): Promise<unknown>
+  disconnect(): Promise<void>
+}
+
+/** Connects with the fresh password; rejects if the server never demanded authentication (port squatter). */
+export async function probeWebSocket(
+  c: ObsConnection,
+  create: () => ProbeSocket = () => new OBSWebSocket() as unknown as ProbeSocket
+): Promise<void> {
+  const ws = create()
+  let authRequired = false
+  ws.on('Hello', (h) => {
+    authRequired = h.authentication != null
+  })
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(new Error('websocket connect attempt timed out')), PROBE_TIMEOUT_MS)
+  })
+  try {
+    await Promise.race([ws.connect(`ws://127.0.0.1:${c.port}`, c.password), timeout])
+    if (!authRequired) throw new Error('websocket server does not require authentication')
+  } catch (e) {
+    await ws.disconnect().catch(() => {})
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
   await ws.disconnect()
 }
 
@@ -60,10 +90,13 @@ export class ObsProcess extends EventEmitter {
     super()
     this.spawnFn = o.spawn ?? nodeSpawn
     this.maxRestarts = o.maxRestarts ?? 5
-    this.probe = o.probe ?? wsProbe
+    this.probe = o.probe ?? ((c) => probeWebSocket(c))
   }
 
+  private launching: Promise<ObsConnection> | null = null
+
   async start(): Promise<ObsConnection> {
+    if (this.child || this.launching) throw new Error('OBS is already running')
     this.stopping = false
     this.attempts = 0
     return this.launch()
@@ -72,6 +105,12 @@ export class ObsProcess extends EventEmitter {
   async stop(): Promise<void> {
     this.stopping = true
     if (this.stableTimer) clearTimeout(this.stableTimer)
+    await this.killChild()
+    if (this.launching) await this.launching.catch(() => {})
+    await this.killChild()
+  }
+
+  private async killChild(): Promise<void> {
     const child = this.child
     if (!child) return
     const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
@@ -86,70 +125,92 @@ export class ObsProcess extends EventEmitter {
     }
   }
 
-  private async launch(): Promise<ObsConnection> {
+  private launch(): Promise<ObsConnection> {
+    const p = this.doLaunch()
+    this.launching = p
+    const clear = (): void => {
+      if (this.launching === p) this.launching = null
+    }
+    p.then(clear, clear)
+    return p
+  }
+
+  private async doLaunch(): Promise<ObsConnection> {
     await writeSeed(this.o.paths.obsConfigDir, { canvas: { width: 1920, height: 1080, fps: 30 } })
     const conn: ObsConnection = {
       port: await freePort(),
       password: randomBytes(32).toString('hex')
     }
+    if (this.stopping) throw new Error('OBS start cancelled by stop()')
     const args = [
       '--multi', '--minimize-to-tray', '--disable-updater', '--disable-missing-files-check',
-      '--collection', 'LinTO Live', '--profile', 'LinTO Live', '--scene', 'LinTO Live',
-      '--websocket_port', String(conn.port), '--websocket_password', conn.password
+      '--collection', 'LinTO Live', '--profile', 'LinTO Live', '--scene', 'LinTO Live'
     ]
+    // Port/password go through obs-websocket's config file, not argv (argv is visible in `ps`).
+    const wsCfg = join(this.o.paths.obsConfigDir, 'plugin_config', 'obs-websocket', 'config.json')
+    await mkdir(dirname(wsCfg), { recursive: true })
+    await writeFile(
+      wsCfg,
+      JSON.stringify(
+        {
+          first_load: false,
+          server_enabled: true,
+          server_port: conn.port,
+          auth_required: true,
+          server_password: conn.password,
+          alerts_enabled: false
+        },
+        null,
+        2
+      ),
+      { mode: 0o600 }
+    )
+    await chmod(wsCfg, 0o600)
+    if (this.stopping) throw new Error('OBS start cancelled by stop()')
     const env = obsEnv(this.o.paths, this.o.platform, process.env)
     delete env.ELECTRON_RUN_AS_NODE
     const child = this.spawnFn(this.o.exe, args, { env, stdio: 'ignore' })
     this.child = child
 
-    let exitedEarly: number | null | undefined
-    let onEarlyExit: (() => void) | undefined
+    // Per-launch state: `abandoned` means this launch failed and its exit must not trigger a restart;
+    // `ready` false + exited means the failure is reported through the launch promise instead.
+    let abandoned = false
+    let ready = false
+    let exited = false
     child.on('exit', (code: number | null) => {
+      exited = true
       if (this.child === child) this.child = null
       if (this.stableTimer) clearTimeout(this.stableTimer)
-      if (onEarlyExit) {
-        exitedEarly = code
-        onEarlyExit()
-        return
-      }
+      if (abandoned || !ready) return
       this.handleExit(code)
     })
-    child.on('error', () => {}) // spawn failure also surfaces as a failed readiness wait
+    child.on('error', () => {}) // spawn failure surfaces as exit / failed readiness wait
 
     try {
-      await this.waitReady(conn, () => exitedEarly !== undefined, (cb) => (onEarlyExit = cb))
-    } catch (e) {
-      if (this.child === child) {
-        child.kill('SIGKILL')
-        this.child = null
+      const deadline = Date.now() + (this.o.readyTimeoutMs ?? READY_TIMEOUT_MS)
+      for (;;) {
+        if (exited) throw new Error('OBS exited before its websocket was ready')
+        try {
+          await this.probe(conn)
+          break
+        } catch (e) {
+          if (Date.now() > deadline) throw new Error(`OBS websocket not ready after timeout: ${String(e)}`)
+          await sleep(250)
+        }
       }
+      if (exited) throw new Error('OBS exited before its websocket was ready')
+      if (this.stopping) throw new Error('OBS start cancelled by stop()')
+    } catch (e) {
+      abandoned = true
+      if (!exited) child.kill('SIGKILL')
+      if (this.child === child) this.child = null
       throw e
-    } finally {
-      onEarlyExit = undefined
     }
+    ready = true
     this.stableTimer = setTimeout(() => (this.attempts = 0), STABLE_MS)
     this.stableTimer.unref?.()
     this.emit('ready', conn)
     return conn
-  }
-
-  private async waitReady(
-    conn: ObsConnection,
-    hasExited: () => boolean,
-    setExitHook: (cb: () => void) => void
-  ): Promise<void> {
-    const deadline = Date.now() + READY_TIMEOUT_MS
-    setExitHook(() => {})
-    for (;;) {
-      if (hasExited()) throw new Error('OBS exited before its websocket was ready')
-      try {
-        await this.probe(conn)
-        return
-      } catch (e) {
-        if (Date.now() > deadline) throw new Error(`OBS websocket not ready after 20 s: ${String(e)}`)
-        await sleep(250)
-      }
-    }
   }
 
   private handleExit(code: number | null): void {

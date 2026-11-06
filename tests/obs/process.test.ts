@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { obsExecutable } from '../../src/main/obs/locate'
-import { ObsProcess } from '../../src/main/obs/process'
+import { ObsProcess, probeWebSocket } from '../../src/main/obs/process'
 import { appPaths } from '../../src/main/paths'
 
 class FakeChild extends EventEmitter {
@@ -22,7 +22,7 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(tmp, { recursive: true, force: true }))
 
-function setup(platform: NodeJS.Platform = 'darwin', maxRestarts?: number) {
+function setup(platform: NodeJS.Platform = 'darwin', maxRestarts?: number, probe: () => Promise<void> = async () => {}, readyTimeoutMs?: number) {
   const children: FakeChild[] = []
   const calls: { exe: string; args: string[]; opts: { env: NodeJS.ProcessEnv } }[] = []
   const spawn = ((exe: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
@@ -37,7 +37,8 @@ function setup(platform: NodeJS.Platform = 'darwin', maxRestarts?: number) {
     platform,
     spawn,
     maxRestarts,
-    probe: async () => {}
+    probe,
+    readyTimeoutMs
   })
   return { p, children, calls }
 }
@@ -65,8 +66,13 @@ describe('ObsProcess', () => {
     expect(arg(a, '--collection')).toBe('LinTO Live')
     expect(arg(a, '--profile')).toBe('LinTO Live')
     expect(arg(a, '--scene')).toBe('LinTO Live')
-    expect(arg(a, '--websocket_port')).toBe(String(conn.port))
-    expect(arg(a, '--websocket_password')).toBe(conn.password)
+    expect(a.some((x) => x.startsWith('--websocket'))).toBe(false)
+    expect(a).not.toContain(conn.password)
+    expect(a).not.toContain(String(conn.port))
+    const cfg = join(tmp, 'obs-home/Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json')
+    const j = JSON.parse(readFileSync(cfg, 'utf8'))
+    expect(j).toMatchObject({ server_enabled: true, auth_required: true, server_port: conn.port, server_password: conn.password })
+    expect(statSync(cfg).mode & 0o777).toBe(0o600)
     expect(conn.password).toMatch(/^[0-9a-f]{64}$/)
     expect(conn.port).toBeGreaterThan(0)
     await p.stop()
@@ -96,7 +102,9 @@ describe('ObsProcess', () => {
     expect(restarting).toHaveBeenCalledWith(1)
     expect(calls).toHaveLength(2)
     expect(second.password).not.toBe(first.password)
-    expect(arg(calls[1].args, '--websocket_password')).toBe(second.password)
+    expect(
+      JSON.parse(readFileSync(join(tmp, 'obs-home/Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json'), 'utf8')).server_password
+    ).toBe(second.password)
     await p.stop()
   })
 
@@ -133,5 +141,78 @@ describe('ObsProcess', () => {
     expect(b.password).toMatch(/^[0-9a-f]{64}$/)
     done = p.stop()
     await done
+  })
+
+  it('start() twice without stop() throws', async () => {
+    const { p } = setup()
+    await p.start()
+    await expect(p.start()).rejects.toThrow(/already running/)
+    await p.stop()
+  })
+
+  it('readiness timeout rejects start and does not restart', async () => {
+    const { p, calls, children } = setup('darwin', 5, async () => {
+      throw new Error('nope')
+    }, 300)
+    const restarting = vi.fn()
+    p.on('restarting', restarting)
+    await expect(p.start()).rejects.toThrow(/not ready/)
+    expect(children[0].killed).toEqual(['SIGKILL'])
+    await new Promise((r) => setTimeout(r, 100))
+    expect(calls).toHaveLength(1)
+    expect(restarting).not.toHaveBeenCalled()
+  })
+
+  it('probe rejects a server that does not require auth', async () => {
+    const mk = (auth: unknown) => {
+      let hello: (h: { authentication?: unknown }) => void = () => {}
+      let disconnected = 0
+      return {
+        ws: {
+          on: (_e: 'Hello', cb: typeof hello) => { hello = cb },
+          connect: async () => { hello({ authentication: auth }) },
+          disconnect: async () => { disconnected++ }
+        },
+        disconnected: () => disconnected
+      }
+    }
+    const open = mk(undefined)
+    await expect(probeWebSocket({ port: 1, password: 'x' }, () => open.ws)).rejects.toThrow(/authentication/)
+    expect(open.disconnected()).toBe(1)
+    const secured = mk({ challenge: 'c', salt: 's' })
+    await expect(probeWebSocket({ port: 1, password: 'x' }, () => secured.ws)).resolves.toBeUndefined()
+  })
+
+  it('a failed relaunch counts one attempt and keeps a single restart chain', async () => {
+    let n = 0
+    const { p, children, calls } = setup('darwin', 2, async () => {
+      if (++n > 1) throw new Error('fail') // first start ok; relaunches die before ready
+    })
+    await p.start()
+    const restarting: number[] = []
+    p.on('restarting', (a: number) => restarting.push(a))
+    const exit = new Promise<void>((r) => p.once('exit', () => r()))
+    children[0].emit('exit', 1, null) // crash
+    // relaunch child exits before ready
+    for (let i = 1; i <= 2; i++) {
+      while (children.length <= i) await new Promise((r) => setTimeout(r, 5))
+      children[i].emit('exit', 1, null)
+    }
+    await exit
+    await new Promise((r) => setTimeout(r, 100))
+    expect(restarting).toEqual([1, 2])
+    expect(calls).toHaveLength(3)
+  })
+
+  it('stop() during the restart gap spawns nothing and emits no ready', async () => {
+    const { p, children, calls } = setup()
+    await p.start()
+    const ready = vi.fn()
+    p.on('ready', ready)
+    children[0].emit('exit', 1, null) // crash; relaunch is awaiting seed/port
+    await p.stop()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(calls).toHaveLength(1)
+    expect(ready).not.toHaveBeenCalled()
   })
 })
