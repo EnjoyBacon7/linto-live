@@ -139,11 +139,8 @@ function main(): void {
       return { settings: s, organizations, profiles, ...devices }
     })
   )
-  ipcMain.handle(IPC.setupSave, async (_e, patch: Partial<Settings>) => {
-    const before = settings.get().instance
-    await live.saveSettings(patch)
-    if (patch.instance !== undefined && patch.instance !== before) settings.setToken(null) // token belongs to the old instance
-  })
+  // SettingsStore validates the instance URL and drops the token when the instance changes.
+  ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))
 
   ipcMain.handle(IPC.liveStart, async (_e, name: string) => {
     await ensureUrls()
@@ -157,19 +154,21 @@ function main(): void {
   // Closing the app = Arrêter: stop the show and quit OBS before exiting (15 s cap).
   let quitting = false
   app.on('before-quit', (e) => {
+    e.preventDefault() // always, while our shutdown is in progress; app.exit() below does not re-emit
     if (quitting) return
     quitting = true
-    e.preventDefault()
-    const cap = new Promise<void>((r) => setTimeout(r, SHUTDOWN_CAP_MS))
-    void Promise.race([live.shutdown().catch((err) => console.error('shutdown failed', err)), cap]).finally(() =>
+    let capped = false
+    const cap = new Promise<void>((r) => setTimeout(() => ((capped = true), r()), SHUTDOWN_CAP_MS))
+    void Promise.race([live.shutdown().catch((err) => console.error('shutdown failed', err)), cap]).finally(() => {
+      if (capped) obs.killNow() // never leave OBS running behind us
       app.exit(0)
-    )
+    })
   })
 
   win = createWindow()
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
   // OBS + overlay start before login so device lists are ready for the setup screen.
-  live.boot().catch((err) => console.error('OBS boot failed', err))
+  live.boot().catch((err) => console.error('OBS boot failed', err)) // state carries MSG_BOOT_FAILED
 }
 
 app.setName('LinTO Live')

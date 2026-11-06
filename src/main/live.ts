@@ -16,23 +16,40 @@ export const MSG_STREAM_RETRY = 'Envoi audio interrompu — nouvelle tentative�
 export const MSG_OBS_DOWN = "OBS s'est arrêté et n'a pas pu redémarrer."
 export const MSG_OBS_NOT_READY = "OBS n'est pas encore prêt, réessaie dans quelques secondes."
 export const MSG_AUTH = 'Session LinTO expirée — se reconnecter.'
+export const MSG_BOOT_FAILED = 'Impossible de démarrer le moteur vidéo (OBS).'
+export const MSG_OVERLAY_FAILED = 'Sous-titres non affichés dans OBS : '
+export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
 
 const PREVIEW_MS = 200
 const STOP_WAIT_MS = 10_000
+const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
+/** Delays between obs.start() attempts after an intentional restart: 5 attempts in total. */
+const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Structural slices of the real modules, so tests can inject fakes. */
-export type LiveObsProcess = Pick<ObsProcess, 'start' | 'stop' | 'on'>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Listener = (...args: any[]) => void
+export interface LiveObsProcess {
+  start: ObsProcess['start']
+  stop: ObsProcess['stop']
+  on(event: 'ready' | 'restarting' | 'exit', listener: Listener): unknown
+}
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$' | 'monitors'
-  | 'openProgramProjector' | 'showLive' | 'showPause' | 'disconnect'
+  | 'openProgramProjector' | 'showLive' | 'showPause' | 'resetProjectorState' | 'disconnect'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
-export type LiveCaptions = Pick<CaptionStream, 'open' | 'close' | 'on'>
+export interface LiveCaptions {
+  open: CaptionStream['open']
+  close: CaptionStream['close']
+  on(event: 'status' | 'partial' | 'final' | 'authError', listener: Listener): unknown
+}
 export type LiveOverlay = Pick<OverlayServer, 'start' | 'push' | 'stop'>
 export type LiveSettings = Pick<SettingsStore, 'get' | 'update' | 'setToken'>
 
@@ -77,6 +94,7 @@ export class LiveController extends EventEmitter {
   private previewBusy = false
   private intentionalObsStop = false
   private shuttingDown = false
+  private restartGen = 0
   private tail: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly d: LiveDeps) {
@@ -115,10 +133,15 @@ export class LiveController extends EventEmitter {
   }
 
   async boot(): Promise<void> {
-    this.overlayUrl = (await this.d.overlay.start()).url
-    await this.d.obs.start() // emits 'ready' → attach is queued
-    await this.settled()
-    if (!this.ctl) throw new Error(this.state.warning ?? 'OBS non connecté')
+    try {
+      this.overlayUrl = (await this.d.overlay.start()).url
+      await this.d.obs.start() // emits 'ready' → attach is queued
+      await this.settled()
+      if (!this.ctl) throw new Error(this.state.warning ?? 'OBS non connecté')
+    } catch (e) {
+      this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
+      throw e
+    }
   }
 
   start(sessionName: string): Promise<StartResult> {
@@ -156,8 +179,9 @@ export class LiveController extends EventEmitter {
   }
 
   async shutdown(): Promise<void> {
-    await this.stop().catch(() => {})
+    await this.enqueue(() => this.doStop(SHUTDOWN_STOP_WAIT_MS)).catch(() => {})
     this.shuttingDown = true
+    this.restartGen++
     this.clearRetry()
     this.stopPreview()
     await this.settled()
@@ -246,24 +270,36 @@ export class LiveController extends EventEmitter {
     const old = this.ctl
     this.dropController()
     await old?.disconnect().catch(() => {})
-    const c = await this.d.controllerFactory(conn)
-    await c.ensureScene(this.d.platform)
-    this.unsubs.push(c.audioLevel$((db) => this.emit('audio-level', db)))
-    this.unsubs.push(c.streamState$((s) => this.onStreamState(c, s)))
-    this.ctl = c
+    let c: LiveObsController | null = null
+    try {
+      c = await this.d.controllerFactory(conn)
+      c.resetProjectorState() // R4: a new OBS run has no projector open and new scene item ids
+      await c.ensureScene(this.d.platform)
+    } catch (e) {
+      await c?.disconnect().catch(() => {})
+      this.setState({ obs: 'down', warning: MSG_OBS_SETUP_FAILED + errMsg(e) })
+      return
+    }
+    const ready = c
+    this.unsubs.push(ready.audioLevel$((db) => this.emit('audio-level', db)))
+    this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
+    this.ctl = ready
     const s = this.d.settings.get()
-    if (s.videoDeviceId) await c.setVideoDevice(s.videoDeviceId).catch(() => {})
-    if (s.audioDeviceId) await c.setAudioDevice(s.audioDeviceId).catch(() => {})
-    if (this.overlayUrl) await c.setOverlayUrl(this.overlayUrl)
-    const wasWarningObs = this.state.warning === MSG_OBS_DOWN
-    this.setState({ obs: 'running', ...(wasWarningObs ? { warning: undefined } : {}) })
-    if (this.state.phase === 'live' && this.current) await this.applyShow(c, this.current)
+    let warning: string | undefined
+    if (s.videoDeviceId) await ready.setVideoDevice(s.videoDeviceId).catch(() => {})
+    if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
+    if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
+    const w0 = this.state.warning
+    const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)
+    this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
+    if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
 
+  /** Program scene, then output (which may decide to restart OBS), then — only if no restart — the stream. */
   private async applyShow(c: LiveObsController, cur: Current): Promise<void> {
-    if (cur.service) await this.startStreamSafe(c, cur.service)
     await c.showLive().catch(() => {})
-    await this.applyOutput()
+    if ((await this.applyOutput()) === 'restarting') return // the next 'ready' re-applies the whole show
+    if (cur.service) await this.startStreamSafe(c, cur.service)
   }
 
   private async startStreamSafe(c: LiveObsController, service: ObsStreamService): Promise<void> {
@@ -279,26 +315,34 @@ export class LiveController extends EventEmitter {
   }
 
   /** Opens the projector on the saved display; if one is already open elsewhere, restarts OBS (R12). */
-  private async applyOutput(): Promise<void> {
+  private async applyOutput(): Promise<'done' | 'restarting'> {
     const c = this.ctl
-    if (!c) return
+    if (!c) return 'done'
     const saved = this.d.settings.get().output
     const list = await c.monitors().catch(() => [] as MonitorInfo[])
     const m = saved ? matchDisplay(saved, list) : null
     if (!m) {
       this.setState({ output: 'display-missing' })
-      return
+      return 'done'
     }
     if (this.projectorIndex !== null && this.projectorIndex !== m.index) {
       await this.restartObs()
-      return
+      return 'restarting'
     }
-    await c.openProgramProjector(m.index)
-    this.projectorIndex = m.index
-    this.setState({ output: 'shown' })
+    try {
+      await c.openProgramProjector(m.index)
+      this.projectorIndex = m.index
+      this.setState({ output: 'shown' })
+    } catch (e) {
+      this.setState({ output: 'off', warning: `Sortie HDMI : ${errMsg(e)}` })
+    }
+    return 'done'
   }
 
-  /** No websocket request closes a projector: quit OBS and start it again; 'ready' re-applies the show. */
+  /**
+   * No websocket request closes a projector: quit OBS, then start it again in the background with
+   * backoff (the queued 'ready' → attach re-applies the show). Never throws.
+   */
   private async restartObs(): Promise<void> {
     const c = this.ctl
     this.dropController()
@@ -306,11 +350,28 @@ export class LiveController extends EventEmitter {
     this.intentionalObsStop = true
     try {
       await c?.disconnect().catch(() => {})
-      await this.d.obs.stop()
+      await this.d.obs.stop().catch(() => {})
     } finally {
       this.intentionalObsStop = false
     }
-    await this.d.obs.start()
+    void this.startObsWithRetry(++this.restartGen)
+  }
+
+  private async startObsWithRetry(gen: number): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      if (this.shuttingDown || gen !== this.restartGen) return
+      try {
+        await this.d.obs.start()
+        return
+      } catch {
+        if (attempt >= OBS_START_DELAYS_MS.length) break
+        await sleep(OBS_START_DELAYS_MS[attempt])
+      }
+    }
+    if (this.shuttingDown || gen !== this.restartGen) return
+    this.dropController()
+    this.stopPreview()
+    this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
   }
 
   private async doStart(rawName: string): Promise<StartResult> {
@@ -319,62 +380,66 @@ export class LiveController extends EventEmitter {
       return { ok: false, message: 'Choisis une organisation et un profil de transcription.' }
     }
     if (!this.ctl) return { ok: false, message: MSG_OBS_NOT_READY }
-    const prevPhase = this.state.phase
-    this.setState({ phase: 'starting' })
 
+    // Resolve first: a failure here must leave a running show (preview, stream supervision) untouched.
     let res: Awaited<ReturnType<typeof resolveSession>>
     try {
       res = await resolveSession(this.d.api, s.orgId, rawName, s.profileId)
     } catch (e) {
-      this.setState({ phase: prevPhase })
       if (e instanceof UnauthorizedError) {
-        if (prevPhase !== 'live') this.d.settings.setToken(null)
+        if (this.state.phase !== 'live') this.d.settings.setToken(null)
         this.emit('auth-required')
         return { ok: false, message: MSG_AUTH }
       }
       return { ok: false, message: errMsg(e) }
     }
-    if (res.kind === 'terminated') {
-      this.setState({ phase: prevPhase })
-      return { ok: false, message: msgTerminated(res.name) }
+    if (res.kind === 'terminated') return { ok: false, message: msgTerminated(res.name) }
+
+    try {
+      this.d.settings.update({ lastSessionName: res.session.name })
+      this.setState({ phase: 'starting' })
+
+      // Switching from a previous show: the old stream must be fully stopped before retargeting.
+      this.clearRetry()
+      this.stopPreview()
+      if (this.current) this.d.captions.close()
+      if (this.streamRunning) await this.stopStreamAndWait()
+
+      const service = toObsStreamService(res.channel.streamEndpoints ?? {})
+      const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
+      this.current = cur
+      this.buffer = new CaptionBuffer()
+      this.d.overlay.push({ lines: [], partial: false })
+      this.setState({
+        phase: 'live',
+        session: { name: res.session.name, status: res.session.status },
+        stream: cur.service ? 'starting' : 'unavailable',
+        warning: cur.service ? undefined : MSG_NO_STREAM,
+        output: 'off',
+        lastLine: undefined
+      })
+      this.d.captions.open(res.session.id, res.channel.id)
+
+      const c = this.ctl
+      if (c) await this.applyShow(c, cur)
+    } catch (e) {
+      if (this.state.phase !== 'live') {
+        this.setState({ phase: 'error', warning: errMsg(e) })
+        return { ok: false, message: errMsg(e) }
+      }
+      this.setState({ warning: errMsg(e) })
     }
-
-    this.d.settings.update({ lastSessionName: res.session.name })
-
-    // Switching from a previous show: the old stream must be fully stopped before retargeting.
-    this.clearRetry()
-    this.stopPreview()
-    if (this.current) this.d.captions.close()
-    if (this.streamRunning) await this.stopStreamAndWait()
-
-    const service = toObsStreamService(res.channel.streamEndpoints ?? {})
-    const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
-    this.current = cur
-    this.buffer = new CaptionBuffer()
-    this.d.overlay.push({ lines: [], partial: false })
-    this.setState({
-      phase: 'live',
-      session: { name: res.session.name, status: res.session.status },
-      stream: cur.service ? 'starting' : 'unavailable',
-      warning: cur.service ? undefined : MSG_NO_STREAM,
-      output: 'off',
-      lastLine: undefined
-    })
-    this.d.captions.open(res.session.id, res.channel.id)
-
-    const c = this.ctl
-    if (c) await this.applyShow(c, cur)
     this.startPreview()
     return { ok: true, reused: res.kind === 'reused', canStream: res.canStream }
   }
 
-  private async doStop(): Promise<void> {
+  private async doStop(streamWaitMs = STOP_WAIT_MS): Promise<void> {
     if (this.state.phase === 'idle' && !this.current) return
     this.setState({ phase: 'stopping' })
     this.clearRetry()
     this.stopPreview()
     this.d.captions.close()
-    await this.stopStreamAndWait()
+    await this.stopStreamAndWait(streamWaitMs)
     await this.ctl?.showPause().catch(() => {})
     this.current = null
     this.buffer = new CaptionBuffer()
@@ -391,7 +456,7 @@ export class LiveController extends EventEmitter {
   }
 
   /** Stops the OBS stream and waits for OBS to report it stopped (StopStream is asynchronous). */
-  private async stopStreamAndWait(): Promise<void> {
+  private async stopStreamAndWait(waitMs = STOP_WAIT_MS): Promise<void> {
     const c = this.ctl
     if (!c) return
     if (!this.streamRunning) {
@@ -402,7 +467,7 @@ export class LiveController extends EventEmitter {
     let timer: NodeJS.Timeout | undefined
     const stopped = new Promise<void>((resolve) => {
       this.stopWaiters.push(resolve)
-      timer = setTimeout(resolve, STOP_WAIT_MS)
+      timer = setTimeout(resolve, waitMs)
     })
     try {
       await c.stopStream()

@@ -8,6 +8,21 @@ export const DEFAULT_INSTANCE = 'https://studio.linto.ai'
 
 interface Stored extends Settings { tokenEnc?: string }
 
+const DEV_HOSTS = new Set(['localhost', '127.0.0.1'])
+
+/** LinTO instance must be https (http only for localhost dev servers). Returns it without trailing slashes. */
+export function checkInstance(raw: string): string {
+  let u: URL
+  try {
+    u = new URL(raw.trim())
+  } catch {
+    throw new Error(`Adresse d'instance invalide : ${raw}`)
+  }
+  const ok = u.protocol === 'https:' || (u.protocol === 'http:' && DEV_HOSTS.has(u.hostname))
+  if (!ok) throw new Error(`L'adresse de l'instance doit commencer par https:// (${raw})`)
+  return raw.trim().replace(/\/+$/, '')
+}
+
 export class SettingsStore {
   private data: Stored
 
@@ -36,10 +51,14 @@ export class SettingsStore {
     return { ...rest }
   }
 
+  /** Throws on an invalid instance URL; changing the instance drops the token in the same write. */
   update(patch: Partial<Settings>): void {
     const clean = { ...patch }
     if (clean.instance === undefined) delete clean.instance
-    this.data = { ...this.data, ...clean }
+    else clean.instance = checkInstance(clean.instance)
+    const next: Stored = { ...this.data, ...clean }
+    if (clean.instance !== undefined && clean.instance !== this.data.instance) delete next.tokenEnc
+    this.data = next
     this.save()
   }
 

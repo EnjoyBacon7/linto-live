@@ -110,6 +110,13 @@ export class ObsProcess extends EventEmitter {
     await this.killChild()
   }
 
+  /** Last-resort synchronous kill (app exiting after the shutdown cap): SIGKILL, no restart. */
+  killNow(): void {
+    this.stopping = true
+    if (this.stableTimer) clearTimeout(this.stableTimer)
+    this.child?.kill('SIGKILL')
+  }
+
   private async killChild(): Promise<void> {
     const child = this.child
     if (!child) return

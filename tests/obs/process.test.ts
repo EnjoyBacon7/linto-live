@@ -121,6 +121,20 @@ describe('ObsProcess', () => {
     expect(calls).toHaveLength(3)
   })
 
+  it('killNow() sends SIGKILL synchronously and does not restart', async () => {
+    const { p, children } = setup()
+    await p.start()
+    const restarting = vi.fn()
+    const exit = vi.fn()
+    p.on('restarting', restarting)
+    p.on('exit', exit)
+    p.killNow()
+    expect(children[0].killed).toEqual(['SIGKILL'])
+    await new Promise((r) => setTimeout(r, 0))
+    expect(restarting).not.toHaveBeenCalled()
+    expect(children).toHaveLength(1)
+  })
+
   it('stop() sends SIGTERM and does not restart', async () => {
     const { p, children, calls } = setup()
     await p.start()

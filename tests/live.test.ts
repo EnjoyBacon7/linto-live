@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { LiveController, MSG_NO_STREAM, MSG_STREAM_RETRY } from '../src/main/live'
+import {
+  LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_SETUP_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY,
+  type LiveDeps
+} from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
 import type { LiveState } from '../src/shared/ipc'
 import { UnauthorizedError, type MonitorInfo, type SavedDisplay, type Session, type Settings } from '../src/shared/types'
@@ -124,7 +127,8 @@ function setup(opts: { sessions?: Session[]; monitors?: MonitorInfo[]; output?: 
     setToken: vi.fn(),
     getToken: vi.fn(() => 'tok')
   }
-  const live = new LiveController({ obs, controllerFactory, api, captions, overlay, settings, platform: 'darwin' } as never)
+  const deps = { obs, controllerFactory, api, captions, overlay, settings, platform: 'darwin' as const } satisfies LiveDeps
+  const live = new LiveController(deps)
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
@@ -149,6 +153,7 @@ describe('LiveController', () => {
     expect(t.overlay.start).toHaveBeenCalled()
     expect(t.obs.start).toHaveBeenCalledTimes(1)
     expect(t.ctl().ensureScene).toHaveBeenCalledWith('darwin')
+    expect(t.ctl().resetProjectorState).toHaveBeenCalled()
     expect(t.ctl().setVideoDevice).toHaveBeenCalledWith('cam')
     expect(t.ctl().setAudioDevice).toHaveBeenCalledWith('mic')
     expect(t.ctl().setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
@@ -234,6 +239,7 @@ describe('LiveController', () => {
     const c = t.ctl()
     expect(c).not.toBe(first)
     expect(c.ensureScene).toHaveBeenCalledWith('darwin')
+    expect(c.resetProjectorState).toHaveBeenCalled()
     expect(c.setVideoDevice).toHaveBeenCalledWith('cam')
     expect(c.setAudioDevice).toHaveBeenCalledWith('mic')
     expect(c.setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
@@ -442,5 +448,141 @@ describe('LiveController', () => {
     expect(t.overlay.stop).toHaveBeenCalled()
     expect(t.api.terminateSession).not.toHaveBeenCalled()
     expect(t.log.indexOf('stopStream')).toBeLessThan(t.log.indexOf('obs.stop'))
+  })
+
+  describe('recovery paths', () => {
+    it('boot failure shows obs down with a warning', async () => {
+      const t = setup()
+      t.obs.start.mockRejectedValueOnce(new Error('spawn ENOENT'))
+      await expect(t.live.boot()).rejects.toThrow('spawn ENOENT')
+      expect(t.last()).toMatchObject({ obs: 'down', warning: MSG_BOOT_FAILED })
+      expect(MSG_BOOT_FAILED).toBe('Impossible de démarrer le moteur vidéo (OBS).')
+    })
+
+    it('obs restart retries a failing start with backoff then reapplies the show', async () => {
+      const t = setup({ monitors: [HDMI, HDMI2] })
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.obs.start.mockRejectedValueOnce(new Error('not ready'))
+      await expect(t.live.changeDisplay(asSaved(HDMI2))).resolves.toBeUndefined()
+      expect(t.obs.start).toHaveBeenCalledTimes(2)
+      expect(t.last().obs).toBe('restarting')
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(t.obs.start).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      await t.live.settled()
+      expect(t.obs.start).toHaveBeenCalledTimes(3)
+      expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(2)
+      expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
+    })
+
+    it('obs restart that never comes back ends in obs down and phase error, start still resolves', async () => {
+      const t = setup({ monitors: [HDMI, HDMI2] })
+      await t.live.boot()
+      await t.live.start('Conf')
+      await t.live.stop()
+      await t.live.changeDisplay(asSaved(HDMI2)) // not live: only saved
+      t.obs.start.mockRejectedValue(new Error('dead'))
+      const r = await t.live.start('Conf') // projector open on 1, wants 2 → restart
+      expect(r).toEqual({ ok: true, reused: true, canStream: true })
+      await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 10_000 + 30_000)
+      expect(t.obs.start).toHaveBeenCalledTimes(1 + 5)
+      expect(t.last()).toMatchObject({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(t.obs.start).toHaveBeenCalledTimes(6)
+    })
+
+    it('decides on obs restart before starting the stream', async () => {
+      const t = setup({ monitors: [HDMI, HDMI2] })
+      await t.live.boot()
+      await t.live.start('Conf')
+      const first = t.ctl()
+      await t.live.stop()
+      await t.live.changeDisplay(asSaved(HDMI2))
+      await t.live.start('Conf')
+      await t.live.settled()
+      expect(first.startStream).toHaveBeenCalledTimes(1) // only the first show, not the restarting one
+      expect(t.ctl()).not.toBe(first)
+      expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
+      expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(2)
+    })
+
+    it('overlay url failure still marks obs running and reapplies the show', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.controllerFactory.mockImplementationOnce(async () => {
+        const c = fakeController(t.log, [HDMI])
+        c.setOverlayUrl.mockRejectedValue(new Error('no browser source'))
+        t.ctls.push(c)
+        return c
+      })
+      t.obs.emit('restarting', 1)
+      t.obs.emit('ready', { port: 1, password: 'x' })
+      await t.live.settled()
+      expect(t.last()).toMatchObject({ obs: 'running', phase: 'live', output: 'shown' })
+      expect(t.last().warning).toBe(MSG_OVERLAY_FAILED + 'no browser source')
+      expect(t.ctl().startStream).toHaveBeenCalled()
+      expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(1)
+    })
+
+    it('ensureScene failure sets obs down with a warning', async () => {
+      const t = setup()
+      t.controllerFactory.mockImplementationOnce(async () => {
+        const c = fakeController(t.log, [HDMI])
+        c.ensureScene.mockRejectedValue(new Error('scene boom'))
+        t.ctls.push(c)
+        return c
+      })
+      await expect(t.live.boot()).rejects.toThrow()
+      expect(t.last().obs).toBe('down')
+      expect(t.ctl().disconnect).toHaveBeenCalled()
+      t.obs.emit('ready', { port: 2, password: 'y' })
+      await t.live.settled()
+      expect(t.last().obs).toBe('running')
+      expect(t.last().warning).toBeUndefined()
+      expect(MSG_OBS_SETUP_FAILED).toMatch(/OBS/)
+    })
+
+    it('failed session switch while live keeps preview and stream supervision', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      const c = t.ctl()
+      c.emitState('active')
+      t.api.searchSessions.mockImplementationOnce(
+        () => new Promise((_, rej) => setTimeout(() => rej(new Error('LinTO HTTP 500')), 1_000))
+      )
+      const previews: string[] = []
+      t.live.on('preview', (d: string) => previews.push(d))
+      const p = t.live.start('Autre')
+      await vi.advanceTimersByTimeAsync(400) // preview keeps running while the new name resolves
+      expect(previews.length).toBeGreaterThan(0)
+      c.emitState('stopped') // stream drops during resolution: still supervised
+      expect(t.last()).toMatchObject({ phase: 'live', stream: 'error', warning: MSG_STREAM_RETRY })
+      await vi.advanceTimersByTimeAsync(600)
+      expect(await p).toEqual({ ok: false, message: 'LinTO HTTP 500' })
+      expect(t.last()).toMatchObject({ phase: 'live', session: { name: 'Conf' } })
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(c.startStream).toHaveBeenCalledTimes(2)
+      const n = previews.length
+      await vi.advanceTimersByTimeAsync(200)
+      expect(previews.length).toBe(n + 1)
+    })
+
+    it('shutdown waits at most 3 s for the stream to stop', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.ctl().emitState('active')
+      t.ctl().autoStop = false
+      let done = false
+      const p = t.live.shutdown().then(() => (done = true))
+      await vi.advanceTimersByTimeAsync(2_999)
+      expect(done).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await p
+      expect(t.obs.stop).toHaveBeenCalled()
+    })
   })
 })
