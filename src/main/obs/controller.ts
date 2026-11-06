@@ -1,7 +1,7 @@
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
 import type { ObsStreamService } from './streamTarget'
-import type { DeviceItem } from '../../shared/types'
+import type { DeviceItem, MonitorInfo } from '../../shared/types'
 
 export type StreamState = 'starting' | 'active' | 'stopped' | 'error'
 
@@ -32,6 +32,7 @@ const videoProp = (p: NodeJS.Platform): string => (p === 'darwin' ? 'device' : '
 export class ObsController {
   private platform: NodeJS.Platform = process.platform
   private videoItemId: number | null = null
+  private projectorOpenOn: number | null = null
   private lastServer: string | null = null
   private stateListeners = new Set<(s: StreamState) => void>()
 
@@ -199,9 +200,49 @@ export class ObsController {
     }
   }
 
-  /** Called by LiveController after an OBS restart: forget cached scene item ids. */
+  async monitors(): Promise<MonitorInfo[]> {
+    const { monitors } = await this.client.call('GetMonitorList')
+    return (
+      monitors as {
+        monitorName: string
+        monitorIndex: number
+        monitorWidth: number
+        monitorHeight: number
+        monitorPositionX: number
+        monitorPositionY: number
+      }[]
+    ).map((m) => ({
+      index: m.monitorIndex,
+      name: m.monitorName,
+      x: m.monitorPositionX,
+      y: m.monitorPositionY,
+      width: m.monitorWidth,
+      height: m.monitorHeight
+    }))
+  }
+
+  /** Opens the program projector on a monitor, once per OBS run per index (no request can close it). */
+  async openProgramProjector(index: number): Promise<void> {
+    if (this.projectorOpenOn === index) return
+    await this.client.call('OpenVideoMixProjector', {
+      videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM',
+      monitorIndex: index
+    })
+    this.projectorOpenOn = index
+  }
+
+  async showLive(): Promise<void> {
+    await this.client.call('SetCurrentProgramScene', { sceneName: SCENE })
+  }
+
+  async showPause(): Promise<void> {
+    await this.client.call('SetCurrentProgramScene', { sceneName: SCENE_PAUSE })
+  }
+
+  /** Called by LiveController after an OBS restart: forget cached scene item ids and projector. */
   resetProjectorState(): void {
     this.videoItemId = null
+    this.projectorOpenOn = null
   }
 
   async disconnect(): Promise<void> {
