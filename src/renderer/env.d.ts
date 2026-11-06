@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type { LintoLiveApi } from '../shared/ipc'
 
 declare global {
