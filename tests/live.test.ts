@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
-  LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_SETUP_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY,
+  LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
+  MSG_OVERLAY_FAILED, MSG_STREAM_RETRY,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -51,8 +52,11 @@ function fakeController(log: string[], monitors: MonitorInfo[]) {
       }
     }),
     monitors: vi.fn(async () => monitors),
+    projectorOpenOn: null as number | null, // models ObsController's per-run projector cache
     openProgramProjector: vi.fn(async (i: number) => {
+      if (c.projectorOpenOn === i) return
       log.push(`projector:${i}`)
+      c.projectorOpenOn = i
     }),
     showLive: vi.fn(async () => {
       log.push('showLive')
@@ -60,7 +64,9 @@ function fakeController(log: string[], monitors: MonitorInfo[]) {
     showPause: vi.fn(async () => {
       log.push('showPause')
     }),
-    resetProjectorState: vi.fn(),
+    resetProjectorState: vi.fn(() => {
+      c.projectorOpenOn = null
+    }),
     disconnect: vi.fn(async () => {}),
     emitState: (s: StreamState) => stateCb?.(s)
   }
@@ -247,9 +253,9 @@ describe('LiveController', () => {
     expect(c.showLive).toHaveBeenCalled()
     expect(c.openProgramProjector).toHaveBeenCalledWith(1)
     expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
-    // old controller events are ignored
+    // old controller events are ignored (the only warning is the crash-restart notice, no stream retry)
     first.emitState('stopped')
-    expect(t.last().warning).toBeUndefined()
+    expect(t.last().warning).toBe(MSG_OBS_RESTARTED)
   })
 
   it('obs exit after giving up sets obs down and phase error', async () => {
@@ -451,10 +457,14 @@ describe('LiveController', () => {
   })
 
   describe('recovery paths', () => {
-    it('boot failure shows obs down with a warning', async () => {
+    it('boot failure (after every retry) shows obs down with a warning', async () => {
       const t = setup()
-      t.obs.start.mockRejectedValueOnce(new Error('spawn ENOENT'))
-      await expect(t.live.boot()).rejects.toThrow('spawn ENOENT')
+      t.obs.start.mockRejectedValue(new Error('spawn ENOENT'))
+      const p = t.live.boot()
+      const done = expect(p).rejects.toThrow()
+      await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 10_000 + 30_000)
+      await done
+      expect(t.obs.start).toHaveBeenCalledTimes(5)
       expect(t.last()).toMatchObject({ obs: 'down', warning: MSG_BOOT_FAILED })
       expect(MSG_BOOT_FAILED).toBe('Impossible de démarrer le moteur vidéo (OBS).')
     })
@@ -583,6 +593,237 @@ describe('LiveController', () => {
       await vi.advanceTimersByTimeAsync(1)
       await p
       expect(t.obs.stop).toHaveBeenCalled()
+    })
+  })
+})
+
+describe('LiveController final fixes', () => {
+  describe('C1 display hot-plug', () => {
+    it('projector closed by unplug → replug reopens it', async () => {
+      const monitors = [HDMI]
+      const t = setup({ monitors })
+      await t.live.boot()
+      await t.live.start('Conf')
+      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(1)
+      const c = t.ctl()
+      monitors.splice(0) // HDMI unplugged: OBS closes its projector
+      await t.live.displaysChanged()
+      expect(t.last()).toMatchObject({ phase: 'live', output: 'display-missing' })
+      expect(c.projectorOpenOn).toBeNull()
+      monitors.push(HDMI) // replugged
+      await t.live.displaysChanged()
+      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
+      expect(t.last()).toMatchObject({ phase: 'live', output: 'shown' })
+      expect(t.obs.stop).not.toHaveBeenCalled()
+      expect(t.ctl()).toBe(c)
+    })
+
+    it('unplug while idle forgets the projector so the next start reopens it', async () => {
+      const monitors = [HDMI]
+      const t = setup({ monitors })
+      await t.live.boot()
+      await t.live.start('Conf')
+      await t.live.stop()
+      monitors.splice(0)
+      await t.live.displaysChanged()
+      monitors.push(HDMI)
+      await t.live.displaysChanged()
+      expect(t.last().output).toBe('off')
+      await t.live.start('Conf')
+      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
+      expect(t.obs.stop).not.toHaveBeenCalled()
+    })
+
+    it('removing another display leaves the projector alone', async () => {
+      const monitors = [HDMI, HDMI2]
+      const t = setup({ monitors })
+      await t.live.boot()
+      await t.live.start('Conf')
+      monitors.splice(1)
+      await t.live.displaysChanged()
+      expect(t.last().output).toBe('shown')
+      expect(t.log.filter((l) => l.startsWith('projector:'))).toEqual(['projector:1'])
+      expect(t.ctl().resetProjectorState).toHaveBeenCalledTimes(1) // only the attach-time reset
+    })
+
+    it('same-index changeDisplay reopens projector', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      await t.live.changeDisplay(asSaved(HDMI))
+      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
+      expect(t.obs.stop).not.toHaveBeenCalled()
+      expect(t.last().output).toBe('shown')
+    })
+  })
+
+  describe('I2 OBS down is recoverable', () => {
+    it('boot retries obs start with backoff', async () => {
+      const t = setup()
+      t.obs.start.mockRejectedValueOnce(new Error('not yet'))
+      const p = t.live.boot()
+      await vi.advanceTimersByTimeAsync(2_000)
+      await p
+      expect(t.obs.start).toHaveBeenCalledTimes(2)
+      expect(t.last().obs).toBe('running')
+      expect(t.last().warning).toBeUndefined()
+    })
+
+    it('start when obs is down restarts obs first, then goes live', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.obs.emit('exit', null) // restarts exhausted
+      expect(t.last()).toMatchObject({ obs: 'down', phase: 'error' })
+      const r = await t.live.start('Conf')
+      await t.live.settled()
+      expect(r).toEqual({ ok: true, reused: true, canStream: true })
+      expect(t.obs.start).toHaveBeenCalledTimes(2)
+      expect(t.controllerFactory).toHaveBeenCalledTimes(2) // the queued 'ready' does not attach twice
+      expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
+      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
+      expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
+      expect(t.last().warning).toBeUndefined()
+    })
+
+    it('start after an attach failure restarts obs', async () => {
+      const t = setup()
+      t.controllerFactory.mockImplementationOnce(async () => {
+        const c = fakeController(t.log, [HDMI])
+        c.ensureScene.mockRejectedValue(new Error('scene boom'))
+        t.ctls.push(c)
+        return c
+      })
+      await expect(t.live.boot()).rejects.toThrow()
+      const r = await t.live.start('Conf')
+      expect(r.ok).toBe(true)
+      expect(t.obs.stop).toHaveBeenCalledTimes(1)
+      expect(t.obs.start).toHaveBeenCalledTimes(2)
+      expect(t.last()).toMatchObject({ phase: 'live', obs: 'running' })
+    })
+
+    it('start when obs cannot be restarted reports the failure', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.obs.emit('exit', null)
+      t.obs.start.mockRejectedValue(new Error('dead'))
+      const p = t.live.start('Conf')
+      await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 10_000 + 30_000)
+      expect(await p).toEqual({ ok: false, message: MSG_BOOT_FAILED })
+      expect(t.last()).toMatchObject({ obs: 'down', warning: MSG_BOOT_FAILED })
+      expect(t.captions.open).not.toHaveBeenCalled()
+    })
+
+    it('start while obs is restarting is refused', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.obs.emit('restarting', 1)
+      expect(await t.live.start('Conf')).toEqual({ ok: false, message: MSG_OBS_NOT_READY })
+    })
+
+    it('a crash restart shows a notice, cleared by the next start or stop', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.obs.emit('restarting', 1)
+      t.obs.emit('ready', { port: 4200, password: 'p' })
+      await t.live.settled()
+      expect(t.last().warning).toBe(MSG_OBS_RESTARTED)
+      expect(MSG_OBS_RESTARTED).toBe('OBS a redémarré automatiquement.')
+      await t.live.stop()
+      expect(t.last().warning).toBeUndefined()
+      t.obs.emit('restarting', 1)
+      t.obs.emit('ready', { port: 4201, password: 'p' })
+      await t.live.settled()
+      expect(t.last().warning).toBe(MSG_OBS_RESTARTED)
+      await t.live.start('Conf')
+      expect(t.last().warning).toBeUndefined()
+    })
+  })
+
+  describe('I4 captions offline while live', () => {
+    it('after 30 s offline probes the session; 401 asks for login and stops the captions', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      const authReq = vi.fn()
+      t.live.on('auth-required', authReq)
+      t.api.getSession.mockClear()
+      t.api.getSession.mockRejectedValue(new UnauthorizedError())
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(29_999)
+      expect(t.api.getSession).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(t.api.getSession).toHaveBeenCalledWith('org1', 's1')
+      expect(authReq).toHaveBeenCalledTimes(1)
+      expect(t.captions.close).toHaveBeenCalled()
+      expect(t.settings.setToken).not.toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'live', captions: 'offline' })
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(t.api.getSession).toHaveBeenCalledTimes(1)
+      expect(authReq).toHaveBeenCalledTimes(1)
+      t.live.resumeCaptions() // after re-login, supervision resumes
+      t.captions.emit('status', 'connecting')
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(t.api.getSession).toHaveBeenCalledTimes(2)
+    })
+
+    it('other probe errors keep waiting and probe again', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      const authReq = vi.fn()
+      t.live.on('auth-required', authReq)
+      t.api.getSession.mockClear()
+      t.api.getSession.mockRejectedValue(new Error('LinTO HTTP 502'))
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(t.api.getSession).toHaveBeenCalledTimes(1)
+      expect(authReq).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(t.api.getSession).toHaveBeenCalledTimes(2)
+      expect(t.captions.close).not.toHaveBeenCalled()
+    })
+
+    it('captions back live before 30 s cancels the probe', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.api.getSession.mockClear()
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(20_000)
+      t.captions.emit('status', 'live')
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(t.api.getSession).not.toHaveBeenCalled()
+    })
+
+    it('no probe once stopped', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.api.getSession.mockClear()
+      t.captions.emit('status', 'offline')
+      await t.live.stop()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(t.api.getSession).not.toHaveBeenCalled()
+    })
+
+    it('stale captions: hides the overlay box after 30 s offline, restores on next caption', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.captions.emit('status', 'live')
+      t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour'], partial: false })
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(29_000)
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour'], partial: false })
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: [], partial: false })
+      t.captions.emit('status', 'live')
+      t.captions.emit('partial', { segmentId: 2, text: 'à tous' })
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour à tous'], partial: true })
     })
   })
 })

@@ -19,6 +19,7 @@ export const MSG_AUTH = 'Session LinTO expirée — se reconnecter.'
 export const MSG_BOOT_FAILED = 'Impossible de démarrer le moteur vidéo (OBS).'
 export const MSG_OVERLAY_FAILED = 'Sous-titres non affichés dans OBS : '
 export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
+export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
 
@@ -28,6 +29,8 @@ const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
 /** Delays between obs.start() attempts after an intentional restart: 5 attempts in total. */
 const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
+/** Captions not live for this long during a show: hide the stale overlay box and probe the LinTO token. */
+const CAPTIONS_STALE_MS = 30_000
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Structural slices of the real modules, so tests can inject fakes. */
@@ -95,6 +98,10 @@ export class LiveController extends EventEmitter {
   private intentionalObsStop = false
   private shuttingDown = false
   private restartGen = 0
+  private attachedConn: ObsConnection | null = null
+  private crashRestart = false
+  private captionsTimer: NodeJS.Timeout | null = null
+  private captionsAuthLost = false
   private tail: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly d: LiveDeps) {
@@ -105,6 +112,7 @@ export class LiveController extends EventEmitter {
     })
     d.obs.on('restarting', () => {
       this.dropController()
+      this.crashRestart = true
       this.setState({ obs: 'restarting' })
     })
     d.obs.on('exit', () => {
@@ -113,7 +121,10 @@ export class LiveController extends EventEmitter {
       this.stopPreview()
       this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
     })
-    d.captions.on('status', (s: CaptionStatus) => this.setState({ captions: s }))
+    d.captions.on('status', (s: CaptionStatus) => {
+      this.setState({ captions: s })
+      this.superviseCaptions()
+    })
     d.captions.on('partial', (e: CaptionEvent) => this.showCaption(this.buffer.partial(e).lines, true))
     d.captions.on('final', (e: CaptionEvent) => this.showCaption(this.buffer.final(e).lines, false))
     d.captions.on('authError', () => this.reportUnauthorized())
@@ -135,7 +146,8 @@ export class LiveController extends EventEmitter {
   async boot(): Promise<void> {
     try {
       this.overlayUrl = (await this.d.overlay.start()).url
-      await this.d.obs.start() // emits 'ready' → attach is queued
+      // Each successful start emits 'ready' → attach is queued.
+      if (!(await this.startObsWithRetry(++this.restartGen))) throw new Error('OBS start failed')
       await this.settled()
       if (!this.ctl) throw new Error(this.state.warning ?? 'OBS non connecté')
     } catch (e) {
@@ -172,9 +184,37 @@ export class LiveController extends EventEmitter {
 
   changeDisplay(display: SavedDisplay): Promise<void> {
     return this.enqueue(async () => {
+      this.clearRestartedNotice()
       this.d.settings.update({ output: display })
-      if (this.state.phase !== 'live' || !this.ctl) return
+      const c = this.ctl
+      if (this.state.phase !== 'live' || !c) return
+      // Same display again: the user wants it re-shown (the projector may be gone) — bypass both caches;
+      // a duplicate projector on the same screen is harmless.
+      const m = matchDisplay(display, await c.monitors().catch(() => [] as MonitorInfo[]))
+      if (m && this.projectorIndex === m.index) this.forgetProjector(c)
       await this.applyOutput()
+    })
+  }
+
+  /**
+   * A display was added/removed/changed (Electron screen events). OBS closes a projector whose display
+   * disappears: forget it, and reopen it when the saved display comes back during a show.
+   */
+  displaysChanged(): Promise<void> {
+    return this.enqueue(async () => {
+      const c = this.ctl
+      if (!c) return
+      const saved = this.d.settings.get().output
+      const m = saved ? matchDisplay(saved, await c.monitors().catch(() => [] as MonitorInfo[])) : null
+      const live = this.state.phase === 'live'
+      if (!m) {
+        if (this.projectorIndex !== null) this.forgetProjector(c)
+        if (live) this.setState({ output: 'display-missing' })
+        return
+      }
+      // Same physical screen, renumbered by the change: the projector is still on it.
+      if (this.projectorIndex !== null) this.projectorIndex = m.index
+      if (live && (this.projectorIndex === null || this.state.output !== 'shown')) await this.applyOutput()
     })
   }
 
@@ -183,6 +223,7 @@ export class LiveController extends EventEmitter {
     this.shuttingDown = true
     this.restartGen++
     this.clearRetry()
+    this.clearCaptionsTimer()
     this.stopPreview()
     await this.settled()
     const c = this.ctl
@@ -197,6 +238,7 @@ export class LiveController extends EventEmitter {
   resumeCaptions(): void {
     const cur = this.current
     if (!cur || this.state.phase !== 'live') return
+    this.captionsAuthLost = false
     this.d.captions.open(cur.session.id, cur.channel.id)
   }
 
@@ -207,6 +249,8 @@ export class LiveController extends EventEmitter {
   reportUnauthorized(): void {
     const live = this.state.phase === 'live' || this.state.phase === 'starting'
     if (!live) this.d.settings.setToken(null)
+    this.captionsAuthLost = true // no token probing until resumeCaptions() / the next start
+    this.clearCaptionsTimer()
     this.setState({ captions: 'offline' })
     this.emit('auth-required')
   }
@@ -259,6 +303,7 @@ export class LiveController extends EventEmitter {
     this.unsubs.forEach((u) => u())
     this.unsubs = []
     this.ctl = null
+    this.attachedConn = null
     this.projectorIndex = null
     this.streamRunning = false
     this.clearRetry()
@@ -267,6 +312,7 @@ export class LiveController extends EventEmitter {
 
   /** (Re)connects to a freshly started OBS and re-applies devices, overlay and — if live — the show. */
   private async attach(conn: ObsConnection): Promise<void> {
+    if (this.ctl && this.attachedConn === conn) return // already attached directly by doStart
     const old = this.ctl
     this.dropController()
     await old?.disconnect().catch(() => {})
@@ -284,6 +330,7 @@ export class LiveController extends EventEmitter {
     this.unsubs.push(ready.audioLevel$((db) => this.emit('audio-level', db)))
     this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
     this.ctl = ready
+    this.attachedConn = conn
     const s = this.d.settings.get()
     let warning: string | undefined
     if (s.videoDeviceId) await ready.setVideoDevice(s.videoDeviceId).catch(() => {})
@@ -291,6 +338,8 @@ export class LiveController extends EventEmitter {
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
     const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)
+    if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
+    this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
@@ -354,24 +403,90 @@ export class LiveController extends EventEmitter {
     } finally {
       this.intentionalObsStop = false
     }
-    void this.startObsWithRetry(++this.restartGen)
+    const gen = ++this.restartGen
+    void this.startObsWithRetry(gen).then((conn) => {
+      if (conn || this.shuttingDown || gen !== this.restartGen) return
+      this.dropController()
+      this.stopPreview()
+      this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
+    })
   }
 
-  private async startObsWithRetry(gen: number): Promise<void> {
+  /** obs.start() with backoff (5 attempts). Null when every attempt failed or a newer start/shutdown superseded it. */
+  private async startObsWithRetry(gen: number): Promise<ObsConnection | null> {
     for (let attempt = 0; ; attempt++) {
-      if (this.shuttingDown || gen !== this.restartGen) return
+      if (this.shuttingDown || gen !== this.restartGen) return null
       try {
-        await this.d.obs.start()
-        return
+        return await this.d.obs.start()
       } catch {
-        if (attempt >= OBS_START_DELAYS_MS.length) break
+        if (attempt >= OBS_START_DELAYS_MS.length) return null
         await sleep(OBS_START_DELAYS_MS[attempt])
       }
     }
-    if (this.shuttingDown || gen !== this.restartGen) return
-    this.dropController()
-    this.stopPreview()
-    this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
+  }
+
+  /**
+   * Runs inside the queue: OBS is down (restarts exhausted, boot or attach failed) — quit whatever is left,
+   * start it again with backoff and attach right away (the queued 'ready' then finds it attached).
+   */
+  private async reviveObs(): Promise<boolean> {
+    this.intentionalObsStop = true
+    try {
+      await this.d.obs.stop().catch(() => {})
+    } finally {
+      this.intentionalObsStop = false
+    }
+    this.setState({ obs: 'restarting' })
+    const conn = await this.startObsWithRetry(++this.restartGen)
+    if (conn) await this.attach(conn)
+    if (this.ctl) return true
+    this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
+    return false
+  }
+
+  /** Forgets the open projector (both here and in the controller's per-run cache). */
+  private forgetProjector(c: LiveObsController): void {
+    this.projectorIndex = null
+    c.resetProjectorState()
+  }
+
+  private clearRestartedNotice(): void {
+    if (this.state.warning === MSG_OBS_RESTARTED) this.setState({ warning: undefined })
+  }
+
+  /** Arms/disarms the stale-captions timer from the current caption status. */
+  private superviseCaptions(): void {
+    if (this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost || !this.current) {
+      this.clearCaptionsTimer()
+      return
+    }
+    if (this.captionsTimer) return
+    this.captionsTimer = setTimeout(() => {
+      this.captionsTimer = null
+      void this.captionsStale()
+    }, CAPTIONS_STALE_MS)
+  }
+
+  private async captionsStale(): Promise<void> {
+    const cur = this.current
+    if (!cur || this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost) return
+    this.d.overlay.push({ lines: [], partial: false }) // hide the frozen box; the next caption restores it
+    try {
+      await this.d.api.getSession(cur.orgId, cur.session.id)
+    } catch (e) {
+      if (cur !== this.current) return
+      if (e instanceof UnauthorizedError) {
+        this.d.captions.close() // stop reconnecting with a dead token
+        this.reportUnauthorized()
+        return
+      }
+    }
+    if (cur === this.current) this.superviseCaptions() // still not live: probe again later
+  }
+
+  private clearCaptionsTimer(): void {
+    if (this.captionsTimer) clearTimeout(this.captionsTimer)
+    this.captionsTimer = null
   }
 
   private async doStart(rawName: string): Promise<StartResult> {
@@ -379,7 +494,10 @@ export class LiveController extends EventEmitter {
     if (!s.orgId || s.profileId === undefined) {
       return { ok: false, message: 'Choisis une organisation et un profil de transcription.' }
     }
-    if (!this.ctl) return { ok: false, message: MSG_OBS_NOT_READY }
+    if (!this.ctl) {
+      if (this.state.obs === 'restarting') return { ok: false, message: MSG_OBS_NOT_READY }
+      if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
+    }
 
     // Resolve first: a failure here must leave a running show (preview, stream supervision) untouched.
     let res: Awaited<ReturnType<typeof resolveSession>>
@@ -401,6 +519,8 @@ export class LiveController extends EventEmitter {
 
       // Switching from a previous show: the old stream must be fully stopped before retargeting.
       this.clearRetry()
+      this.clearCaptionsTimer()
+      this.captionsAuthLost = false
       this.stopPreview()
       if (this.current) this.d.captions.close()
       if (this.streamRunning) await this.stopStreamAndWait()
@@ -437,6 +557,7 @@ export class LiveController extends EventEmitter {
     if (this.state.phase === 'idle' && !this.current) return
     this.setState({ phase: 'stopping' })
     this.clearRetry()
+    this.clearCaptionsTimer()
     this.stopPreview()
     this.d.captions.close()
     await this.stopStreamAndWait(streamWaitMs)
