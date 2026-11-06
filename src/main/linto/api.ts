@@ -86,7 +86,7 @@ export class LintoApi {
         searchName: namePrefix,
         statusList: 'on_schedule,ready,active,paused,terminated',
         limit: String(SEARCH_PAGE_SIZE),
-        offset: String(page * SEARCH_PAGE_SIZE)
+        offset: String(out.length) // = page * limit, and still correct if the server caps the page size
       })
       // URLSearchParams encodes space as '+'; use %20 for strictness
       const r = await this.request(`${this.urls.api}/organizations/${orgId}/sessions?${q.toString().replace(/\+/g, '%20')}`)
