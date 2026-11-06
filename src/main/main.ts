@@ -12,6 +12,7 @@ import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
 import { ObsController } from './obs/controller'
 import { obsExecutable } from './obs/locate'
+import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { CaptionStream } from './linto/captions'
 import { loadInstance, type LintoUrls } from './linto/instance'
@@ -80,8 +81,20 @@ function main(): void {
   const api = new LintoApi(urls, token)
   const captions = new CaptionStream(urls, token)
   const overlay = new OverlayServer({ pageDir: join(app.getAppPath(), 'out/main/overlay-page') })
+  let obsExe = obsExecutable({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, platform, env: process.env })
+  if (app.isPackaged && platform === 'darwin') {
+    // OBS's CEF cannot start from inside LinTO Live.app: run an APFS clone under userData (see runtime.ts).
+    try {
+      obsExe = ensureObsRuntime({
+        bundledApp: join(process.resourcesPath, 'obs', 'OBS.app'),
+        runtimeDir: join(paths.userData, 'obs-runtime')
+      })
+    } catch (e) {
+      console.error('OBS runtime copy failed, using the embedded OBS.app', e)
+    }
+  }
   const obs = new ObsProcess({
-    exe: obsExecutable({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, platform, env: process.env }),
+    exe: obsExe,
     paths,
     platform
   })

@@ -1,0 +1,36 @@
+appId: ai.linto.live
+productName: LinTO Live
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - out/main/overlay-page/**
+extraResources:
+  - from: vendor/obs/macos
+    to: obs
+    filter:
+      - OBS.app/**
+      - COPYING
+  - from: resources/obs/SOURCE.md
+    to: obs/SOURCE.md
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+    - target: dir
+      arch: arm64
+  category: public.app-category.video
+  # Ad-hoc signature for the Electron app (arm64 refuses unsigned code); personal use, no notarization.
+  identity: '-'
+  hardenedRuntime: false
+  # Never re-sign the embedded official OBS.app: it keeps its Wizards of OBS LLC signature.
+  signIgnore:
+    - '/Contents/Resources/obs/'
+  extendInfo:
+    NSCameraUsageDescription: LinTO Live utilise la carte de capture ou la caméra pour afficher la vidéo de la salle.
+    NSMicrophoneUsageDescription: LinTO Live envoie le son du micro choisi à LinTO pour la transcription en direct.
+dmg:
+  artifactName: LinTO-Live-${version}-arm64.${ext}
