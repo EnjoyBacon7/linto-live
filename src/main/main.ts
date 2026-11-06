@@ -1,5 +1,9 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { existsSync, readdirSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type LiveState, type SetupData } from '../shared/ipc'
 import { UnauthorizedError, type SavedDisplay, type Settings } from '../shared/types'
 import { appPaths } from './paths'
@@ -152,10 +156,69 @@ function main(): void {
   ipcMain.handle(IPC.liveStop, () => live.stop())
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveChangeDisplay, (_e, d: SavedDisplay) => live.changeDisplay(d))
-  // IPC.appUninstall: registered by Task 15.
+  let quitting = false
+  ipcMain.handle(IPC.appUninstall, async () => {
+    const parent = win && !win.isDestroyed() ? win : undefined
+    const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
+      parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)
+    if (!app.isPackaged) {
+      await show({ type: 'info', message: 'Désinstallation indisponible en mode développement.', buttons: ['OK'] })
+      return
+    }
+    const home = homedir()
+    let plan: ReturnType<typeof uninstallTargets>
+    try {
+      const appsDir = join(home, '.local/share/applications')
+      const desktopFiles =
+        platform === 'linux' && existsSync(appsDir)
+          ? readdirSync(appsDir)
+              .filter((f) => f.includes('linto-live') && f.endsWith('.desktop'))
+              .map((f) => join(appsDir, f))
+          : []
+      plan = uninstallTargets({
+        platform,
+        home,
+        userData: app.getPath('userData'),
+        appId: 'ai.linto.live',
+        appName: 'LinTO Live',
+        exePath: app.getPath('exe'),
+        ...(process.env.APPIMAGE ? { appImage: process.env.APPIMAGE } : {}),
+        personalObsInstalled: existsSync('/Applications/OBS.app') || existsSync(join(home, 'Applications/OBS.app')),
+        desktopFiles
+      })
+    } catch (err) {
+      await show({ type: 'error', message: 'Désinstallation annulée par sécurité.', detail: String(err), buttons: ['OK'] })
+      return
+    }
+    const { response } = await show({
+      type: 'warning',
+      message: 'Supprimer LinTO Live et toutes ses données ?',
+      detail: 'Cette action est définitive.',
+      buttons: ['Annuler', 'Désinstaller'],
+      defaultId: 0,
+      cancelId: 0
+    })
+    if (response !== 1) return
+    quitting = true // shutdown is done explicitly below; ignore before-quit
+    await live.shutdown().catch((err) => console.error('shutdown failed', err))
+    try {
+      await runUninstall(plan, {
+        rm: (p) => rm(p, { recursive: true, force: true }),
+        trash: (p) => shell.trashItem(p)
+      })
+    } catch (err) {
+      const failed = err instanceof UninstallError ? err.failed : [String(err)]
+      await show({
+        type: 'error',
+        message: 'Certains éléments n’ont pas pu être supprimés.',
+        detail: failed.join('\n'),
+        buttons: ['OK']
+      })
+    }
+    app.exit(0)
+  })
 
   // Closing the app = Arrêter: stop the show and quit OBS before exiting (15 s cap).
-  let quitting = false
   app.on('before-quit', (e) => {
     e.preventDefault() // always, while our shutdown is in progress; app.exit() below does not re-emit
     if (quitting) return
