@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { CaptionBuffer, CaptionStream } from '../../src/main/linto/captions'
 import type { LintoUrls } from '../../src/main/linto/instance'
@@ -45,11 +45,11 @@ describe('CaptionBuffer', () => {
 
 class FakeSocket extends EventEmitter {
   emit_(ev: string, ...a: unknown[]) { return super.emit(ev, ...a) }
-  emitter?: () => void
   emitted: unknown[][] = []
   disconnected = false
   io = new EventEmitter()
-  auth?: (cb: (d: unknown) => void) => void
+  connects = 0
+  connect() { this.connects++; return this }
   emit(ev: string, ...a: unknown[]): boolean { this.emitted.push([ev, ...a]); return true }
   disconnect() { this.disconnected = true; return this }
 }
@@ -135,5 +135,59 @@ describe('CaptionStream', () => {
     expect(sock.emitted).toContainEqual(['leave_room', 's1/7'])
     expect(sock.disconnected).toBe(true)
     expect(statuses.at(-1)).toBe('offline')
+  })
+
+  describe('server-side disconnect', () => {
+    afterEach(() => vi.useRealTimers())
+    it('reconnects with doubling backoff, no tight loop', () => {
+      vi.useFakeTimers()
+      const { s, sock } = mk()
+      s.open('s1', 7)
+      sock.emit_('connect')
+      sock.emit_('disconnect', 'io server disconnect')
+      expect(sock.connects).toBe(0)
+      vi.advanceTimersByTime(999); expect(sock.connects).toBe(0)
+      vi.advanceTimersByTime(1); expect(sock.connects).toBe(1)
+      sock.emit_('connect')
+      sock.emit_('disconnect', 'io server disconnect')
+      vi.advanceTimersByTime(1999); expect(sock.connects).toBe(1)
+      vi.advanceTimersByTime(1); expect(sock.connects).toBe(2)
+    })
+    it('resets backoff after a stable connection', () => {
+      vi.useFakeTimers()
+      const { s, sock } = mk()
+      s.open('s1', 7)
+      sock.emit_('connect')
+      sock.emit_('disconnect', 'io server disconnect')
+      vi.advanceTimersByTime(1000)
+      sock.emit_('connect')
+      vi.advanceTimersByTime(10000)
+      sock.emit_('disconnect', 'io server disconnect')
+      vi.advanceTimersByTime(1000); expect(sock.connects).toBe(2)
+    })
+    it('does not reconnect on transport close, after authError, or after close()', () => {
+      vi.useFakeTimers()
+      const a = mk(); a.s.open('s1', 7)
+      a.sock.emit_('disconnect', 'transport close')
+      vi.advanceTimersByTime(60000); expect(a.sock.connects).toBe(0)
+      const b = mk(); b.s.open('s1', 7)
+      b.sock.emit_('disconnect', 'io server disconnect')
+      b.sock.emit_('unauthorized')
+      vi.advanceTimersByTime(60000); expect(b.sock.connects).toBe(0)
+      const c = mk(); c.s.open('s1', 7)
+      c.sock.emit_('disconnect', 'io server disconnect')
+      c.s.close()
+      vi.advanceTimersByTime(60000); expect(c.sock.connects).toBe(0)
+    })
+    it('dedupes consecutive identical statuses and ignores stale sockets', () => {
+      const { s, sock, statuses } = mk()
+      s.open('s1', 7)
+      sock.emit_('connect')
+      sock.emit_('connect')
+      expect(statuses).toEqual(['connecting', 'live'])
+      s.close()
+      sock.emit_('disconnect', 'io client disconnect')
+      expect(statuses).toEqual(['connecting', 'live', 'offline'])
+    })
   })
 })
