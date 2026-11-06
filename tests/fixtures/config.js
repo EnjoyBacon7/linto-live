@@ -1,0 +1,16 @@
+window.VUE_APP_CONFIG = {
+  "VUE_APP_PUBLIC_MEDIA": "/cm-api/media",
+  "VUE_APP_WEBSOCKET_SERVER": "wss://studio.linto.ai",
+  "VUE_APP_TURN_SIZE": "2000",
+  "VUE_APP_SESSION_WS_PATH": "/cm-api/socket.io",
+  "VUE_APP_CONVO_API": "https://studio.linto.ai/cm-api/api",
+  "VUE_APP_CONVO_AUTH": "https://studio.linto.ai/cm-api/auth",
+  "VUE_APP_ENABLE_SESSION": "true",
+  "VUE_APP_MAX_CARACTERS_PER_PAGE": "20000",
+  "VUE_APP_MODE": "cloud",
+  "VUE_APP_WEBSOCKET_PATH": "/ws/socket.io",
+  "VUE_APP_ENABLE_SPEAKER_IDENTIFICATION": "true",
+  "VUE_APP_ENABLE_MOBILE_APP": "true",
+  "VUE_APP_SESSION_WS": "https://studio.linto.ai",
+  "VUE_APP_ENABLE_WATERMARK": "true",
+};
