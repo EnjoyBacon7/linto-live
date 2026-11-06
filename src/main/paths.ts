@@ -22,10 +22,21 @@ export function obsEnv(
   base: NodeJS.ProcessEnv
 ): NodeJS.ProcessEnv {
   if (platform === 'darwin') return { ...base, CFFIXED_USER_HOME: p.obsHome }
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...base,
     XDG_CONFIG_HOME: posix.join(p.obsHome, 'config'),
     XDG_CACHE_HOME: posix.join(p.obsHome, 'cache'),
     QT_QPA_PLATFORM: 'xcb'
   }
+  // The AppImage's AppRun prepends $APPDIR/usr/lib to LD_LIBRARY_PATH for Electron; the bundled
+  // OBS carries its own libraries (resources/obs/lib) and must not pick up Electron's.
+  const appDir = base.APPDIR
+  if (appDir && env.LD_LIBRARY_PATH !== undefined) {
+    const kept = env.LD_LIBRARY_PATH.split(':').filter(
+      (d) => d !== '' && d !== appDir && !d.startsWith(appDir.endsWith('/') ? appDir : `${appDir}/`)
+    )
+    if (kept.length > 0) env.LD_LIBRARY_PATH = kept.join(':')
+    else delete env.LD_LIBRARY_PATH
+  }
+  return env
 }

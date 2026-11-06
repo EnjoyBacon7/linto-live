@@ -36,4 +36,21 @@ describe('obsEnv', () => {
     expect(env.FOO).toBe('bar')
     expect(base).toEqual({ FOO: 'bar' })
   })
+  it('linux inside an AppImage: drops AppRun lib dir from LD_LIBRARY_PATH, keeps the rest', () => {
+    const base = { APPDIR: '/tmp/.mount_LinTO', LD_LIBRARY_PATH: '/tmp/.mount_LinTO/usr/lib:/opt/x/lib' }
+    const env = obsEnv(appPaths(U, 'linux'), 'linux', base)
+    expect(env.LD_LIBRARY_PATH).toBe('/opt/x/lib')
+    expect(base.LD_LIBRARY_PATH).toBe('/tmp/.mount_LinTO/usr/lib:/opt/x/lib')
+  })
+  it('linux inside an AppImage: removes LD_LIBRARY_PATH when only AppRun entries remain', () => {
+    const env = obsEnv(appPaths(U, 'linux'), 'linux', {
+      APPDIR: '/tmp/.mount_LinTO',
+      LD_LIBRARY_PATH: '/tmp/.mount_LinTO/usr/lib'
+    })
+    expect('LD_LIBRARY_PATH' in env).toBe(false)
+  })
+  it('linux outside an AppImage: LD_LIBRARY_PATH untouched', () => {
+    const env = obsEnv(appPaths(U, 'linux'), 'linux', { LD_LIBRARY_PATH: '/a:/b' })
+    expect(env.LD_LIBRARY_PATH).toBe('/a:/b')
+  })
 })

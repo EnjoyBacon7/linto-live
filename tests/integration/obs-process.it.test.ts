@@ -6,17 +6,22 @@ import { obsExecutable } from '../../src/main/obs/locate'
 import { ObsProcess } from '../../src/main/obs/process'
 import { appPaths } from '../../src/main/paths'
 
-const run = process.env.LINTO_LIVE_IT === '1' && process.platform === 'darwin'
-const realObs = join(homedir(), 'Library', 'Application Support', 'obs-studio')
+const platform = process.platform
+const run = process.env.LINTO_LIVE_IT === '1' && (platform === 'darwin' || platform === 'linux')
+// The user's own OBS config, which LinTO Live must never touch.
+const realObs =
+  platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support', 'obs-studio')
+    : join(homedir(), '.config', 'obs-studio')
 const mtime = (): number | null => (existsSync(realObs) ? statSync(realObs).mtimeMs : null)
 
 describe.skipIf(!run)('ObsProcess (real OBS)', () => {
   const userData = mkdtempSync(join(tmpdir(), 'linto-live-it-'))
-  const paths = appPaths(userData, 'darwin')
+  const paths = appPaths(userData, platform)
   const obs = new ObsProcess({
-    exe: obsExecutable({ packaged: false, resourcesPath: '', platform: 'darwin', env: process.env }),
+    exe: obsExecutable({ packaged: false, resourcesPath: '', platform, env: process.env }),
     paths,
-    platform: 'darwin'
+    platform
   })
   afterAll(async () => {
     await obs.stop()

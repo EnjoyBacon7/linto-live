@@ -8,15 +8,18 @@ files:
   - package.json
 asarUnpack:
   - out/main/overlay-page/**
+# Shared by every platform; each platform adds its own OBS build below (merged by electron-builder),
+# so a package only ever ships the OBS for its own OS.
 extraResources:
-  - from: vendor/obs/macos
-    to: obs
-    filter:
-      - OBS.app/**
-      - COPYING
   - from: resources/obs/SOURCE.md
     to: obs/SOURCE.md
 mac:
+  extraResources:
+    - from: vendor/obs/macos
+      to: obs
+      filter:
+        - OBS.app/**
+        - COPYING
   target:
     - target: dmg
       arch: arm64
@@ -34,3 +37,15 @@ mac:
     NSMicrophoneUsageDescription: LinTO Live envoie le son du micro choisi à LinTO pour la transcription en direct.
 dmg:
   artifactName: LinTO-Live-${version}-arm64.${ext}
+linux:
+  target:
+    - target: AppImage
+      arch: x64
+  category: AudioVideo
+  synopsis: LinTO live captions over a hidden OBS
+  # OBS 32.1 built from source by scripts/build-obs-linux.sh: bin/obs, lib/, share/obs/, COPYING.
+  extraResources:
+    - from: vendor/obs/linux/obs
+      to: obs
+appImage:
+  artifactName: LinTO-Live-${version}-x86_64.${ext}
