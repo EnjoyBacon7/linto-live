@@ -6,6 +6,9 @@ import type { LintoUrls } from './instance'
 
 export { UnauthorizedError }
 
+const SEARCH_PAGE_SIZE = 50
+const SEARCH_MAX_PAGES = 20
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function toChannel(c: any): Channel {
   const ch: Channel = { id: c.id, name: c.name }
@@ -71,15 +74,30 @@ export class LintoApi {
     })
   }
 
+  /**
+   * Every session whose name starts with `namePrefix`, all pages (offset += limit until totalItems or an
+   * empty/short page). Missing an exact match on a later page would create a duplicate session, so hitting
+   * the page cap is an error rather than a partial answer.
+   */
   async searchSessions(orgId: string, namePrefix: string): Promise<Session[]> {
-    const q = new URLSearchParams({
-      searchName: namePrefix,
-      statusList: 'on_schedule,ready,active,paused,terminated',
-      limit: '50'
-    })
-    // URLSearchParams encodes space as '+'; use %20 for strictness
-    const r = await this.request(`${this.urls.api}/organizations/${orgId}/sessions?${q.toString().replace(/\+/g, '%20')}`)
-    return (r.sessions ?? []).map(toSession)
+    const out: Session[] = []
+    for (let page = 0; page < SEARCH_MAX_PAGES; page++) {
+      const q = new URLSearchParams({
+        searchName: namePrefix,
+        statusList: 'on_schedule,ready,active,paused,terminated',
+        limit: String(SEARCH_PAGE_SIZE),
+        offset: String(page * SEARCH_PAGE_SIZE)
+      })
+      // URLSearchParams encodes space as '+'; use %20 for strictness
+      const r = await this.request(`${this.urls.api}/organizations/${orgId}/sessions?${q.toString().replace(/\+/g, '%20')}`)
+      const items: any[] = r?.sessions ?? []
+      out.push(...items.map(toSession))
+      const total = typeof r?.totalItems === 'number' ? r.totalItems : null
+      // Trust totalItems when present (the server may cap `limit` below ours); otherwise a short page is the last.
+      const last = total !== null ? out.length >= total : items.length < SEARCH_PAGE_SIZE
+      if (items.length === 0 || last) return out
+    }
+    throw new Error('Trop de sessions correspondent à ce nom.')
   }
 
   async createSession(orgId: string, name: string, profileId: number): Promise<Session> {

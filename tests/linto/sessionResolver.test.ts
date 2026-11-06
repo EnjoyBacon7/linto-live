@@ -69,4 +69,10 @@ describe('resolveSession', () => {
     const f = fake([sess({ name: 'Conf', channels: [] })])
     await expect(resolveSession(f.api, 'o', 'Conf', 1)).rejects.toThrow("La session « Conf » n'a aucun canal.")
   })
+  it('search failure (too many matches) never creates a session', async () => {
+    const f = fake([])
+    f.searchSessions.mockRejectedValue(new Error('Trop de sessions correspondent à ce nom.'))
+    await expect(resolveSession(f.api, 'o', 'Conf', 1)).rejects.toThrow('Trop de sessions correspondent à ce nom.')
+    expect(f.createSession).not.toHaveBeenCalled()
+  })
 })

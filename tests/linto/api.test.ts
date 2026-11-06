@@ -53,6 +53,36 @@ describe('LintoApi', () => {
     expect(calls[0].url).toContain('limit=50')
     expect(r[0]).toEqual({ id: 's', name: 'Conf é&', status: 'active', owner: 'u', channels: [{ id: 7, name: 'c', streamEndpoints: { srt: 'srt://x' } }] })
   })
+  it('searchSessions pages through every result (exact match on page 3)', async () => {
+    const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${from + i}`, name: `Conf ${from + i}`, status: 'active', channels: [] }))
+    const { calls, api } = mk((c) => {
+      const off = Number(new URL(c.url).searchParams.get('offset'))
+      if (off === 0) return json({ sessions: page(0, 50), totalItems: 120 })
+      if (off === 50) return json({ sessions: page(50, 50), totalItems: 120 })
+      return json({ sessions: [...page(100, 19), { id: 'exact', name: 'Conf', status: 'active', channels: [] }], totalItems: 120 })
+    })
+    const r = await api.searchSessions('o1', 'Conf')
+    expect(calls.map((c) => new URL(c.url).searchParams.get('offset'))).toEqual(['0', '50', '100'])
+    expect(calls.every((c) => new URL(c.url).searchParams.get('limit') === '50')).toBe(true)
+    expect(r).toHaveLength(120)
+    expect(r.filter((x) => x.name === 'Conf').map((x) => x.id)).toEqual(['exact'])
+  })
+  it('searchSessions stops on an empty page when totalItems is missing', async () => {
+    const { calls, api } = mk((c) => {
+      const off = Number(new URL(c.url).searchParams.get('offset'))
+      return json({ sessions: off === 0 ? Array.from({ length: 50 }, (_, i) => ({ id: `s${i}`, name: 'Conf', status: 'active', channels: [] })) : [] })
+    })
+    expect(await api.searchSessions('o1', 'Conf')).toHaveLength(50)
+    expect(calls).toHaveLength(2)
+  })
+  it('searchSessions refuses when too many sessions match (page cap) instead of risking a duplicate', async () => {
+    const { calls, api } = mk((c) => {
+      const off = Number(new URL(c.url).searchParams.get('offset'))
+      return json({ sessions: Array.from({ length: 50 }, (_, i) => ({ id: `s${off + i}`, name: 'Conf x', status: 'active', channels: [] })), totalItems: 5000 })
+    })
+    await expect(api.searchSessions('o1', 'Conf')).rejects.toThrow('Trop de sessions correspondent à ce nom.')
+    expect(calls).toHaveLength(20)
+  })
   it('maps createdAt when present', async () => {
     const { api } = mk(() => json({ sessions: [{ id: 's', name: 'n', status: 'active', createdAt: '2026-01-02T00:00:00Z', channels: [] }] }))
     expect((await api.searchSessions('o1', 'n'))[0].createdAt).toBe('2026-01-02T00:00:00Z')
