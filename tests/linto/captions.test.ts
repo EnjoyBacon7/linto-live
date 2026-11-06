@@ -1,0 +1,139 @@
+import { describe, it, expect } from 'vitest'
+import { EventEmitter } from 'node:events'
+import { CaptionBuffer, CaptionStream } from '../../src/main/linto/captions'
+import type { LintoUrls } from '../../src/main/linto/instance'
+
+describe('CaptionBuffer', () => {
+  it('partials with same id replace each other', () => {
+    const b = new CaptionBuffer()
+    b.partial({ segmentId: 1, text: 'bon' })
+    expect(b.partial({ segmentId: 1, text: 'bonjour' })).toEqual({ lines: ['bonjour'], partial: true })
+  })
+  it('final then new partial keeps final before partial', () => {
+    const b = new CaptionBuffer()
+    expect(b.final({ segmentId: 1, text: 'Bonjour' })).toEqual({ lines: ['Bonjour'], partial: false })
+    expect(b.partial({ segmentId: 2, text: 'à tous' })).toEqual({ lines: ['Bonjour à tous'], partial: true })
+  })
+  it('final with new id closes a pending partial', () => {
+    const b = new CaptionBuffer()
+    b.partial({ segmentId: 1, text: 'abc' })
+    expect(b.final({ segmentId: 2, text: 'def' })).toEqual({ lines: ['def'], partial: false })
+  })
+  it('ignores empty events', () => {
+    const b = new CaptionBuffer()
+    b.final({ segmentId: 1, text: 'a' })
+    expect(b.partial({ segmentId: 2, text: '  ' })).toEqual({ lines: ['a'], partial: false })
+    expect(b.final({ segmentId: 3, text: '' })).toEqual({ lines: ['a'], partial: false })
+  })
+  it('wraps on word boundaries and returns only last 2 lines', () => {
+    const b = new CaptionBuffer(10, 2)
+    const v = b.final({ segmentId: 1, text: 'aaaa bbbb cccc dddd eeee ffff' })
+    expect(v.lines).toEqual(['cccc dddd', 'eeee ffff'])
+  })
+  it('splits words longer than a line', () => {
+    const b = new CaptionBuffer(4, 2)
+    expect(b.final({ segmentId: 1, text: 'abcdefghij' }).lines).toEqual(['efgh', 'ij'])
+  })
+  it('keeps memory bounded over 1000 finals with correct output', () => {
+    const b = new CaptionBuffer(10, 2)
+    let v
+    for (let i = 0; i < 1000; i++) v = b.final({ segmentId: i, text: `w${String(i).padStart(4, '0')}` })
+    expect(v!.lines).toEqual(['w0998', 'w0999'])
+    expect(b.size).toBeLessThan(100)
+  })
+})
+
+class FakeSocket extends EventEmitter {
+  emit_(ev: string, ...a: unknown[]) { return super.emit(ev, ...a) }
+  emitter?: () => void
+  emitted: unknown[][] = []
+  disconnected = false
+  io = new EventEmitter()
+  auth?: (cb: (d: unknown) => void) => void
+  emit(ev: string, ...a: unknown[]): boolean { this.emitted.push([ev, ...a]); return true }
+  disconnect() { this.disconnected = true; return this }
+}
+const urls: LintoUrls = { instance: 'https://s', api: 'a', auth: 'b', wsUrl: 'https://s', wsPath: '/io' }
+function mk(token: () => string | null = () => 'tok') {
+  const sock = new FakeSocket()
+  const calls: { url: string; opts: any }[] = []
+  const sock2 = sock
+  const factory = ((url: string, opts: any) => { calls.push({ url, opts }); return sock2 }) as any
+  const s = new CaptionStream(urls, token, factory)
+  const statuses: string[] = []
+  s.on('status', (x) => statuses.push(x))
+  return { s, sock: sock2, calls, statuses }
+}
+
+describe('CaptionStream', () => {
+  it('connects, joins room on connect and after reconnect', () => {
+    const { s, sock, calls, statuses } = mk()
+    s.open('s1', 7)
+    expect(calls[0].url).toBe('https://s')
+    expect(calls[0].opts.path).toBe('/io')
+    expect(calls[0].opts.transports).toEqual(['websocket'])
+    let got: unknown
+    calls[0].opts.auth((d: unknown) => (got = d))
+    expect(got).toEqual({ token: 'tok' })
+    sock.emit_('connect')
+    sock.emit_('disconnect')
+    sock.io.emit('reconnect_attempt')
+    sock.emit_('connect')
+    expect(sock.emitted.filter((e) => e[0] === 'join_room')).toEqual([['join_room', 's1/7'], ['join_room', 's1/7']])
+    expect(statuses).toEqual(['connecting', 'live', 'offline', 'connecting', 'live'])
+  })
+  it('re-reads token at each connect', () => {
+    let t = 'a'
+    const { s, calls } = mk(() => t)
+    s.open('s1', 7)
+    let got: any
+    calls[0].opts.auth((d: unknown) => (got = d)); expect(got.token).toBe('a')
+    t = 'b'
+    calls[0].opts.auth((d: unknown) => (got = d)); expect(got.token).toBe('b')
+  })
+  it('forwards partial and final events', () => {
+    const { s, sock } = mk()
+    const out: unknown[] = []
+    s.on('partial', (e) => out.push(['p', e]))
+    s.on('final', (e) => out.push(['f', e]))
+    s.open('s1', 7)
+    sock.emit_('partial', { segmentId: 1, text: 'a' })
+    sock.emit_('final', { segmentId: 1, text: 'ab' })
+    expect(out).toEqual([['p', { segmentId: 1, text: 'a' }], ['f', { segmentId: 1, text: 'ab' }]])
+  })
+  it('emits authError on connect_error with auth message and stops reconnecting', () => {
+    const { s, sock } = mk()
+    let n = 0
+    s.on('authError', () => n++)
+    s.open('s1', 7)
+    sock.emit_('connect_error', new Error('Authentication token is missing'))
+    expect(n).toBe(1)
+    expect(sock.disconnected).toBe(true)
+  })
+  it('emits authError on unauthorized event', () => {
+    const { s, sock } = mk()
+    let n = 0
+    s.on('authError', () => n++)
+    s.open('s1', 7)
+    sock.emit_('unauthorized')
+    expect(n).toBe(1)
+  })
+  it('does not emit authError on network connect_error', () => {
+    const { s, sock } = mk()
+    let n = 0
+    s.on('authError', () => n++)
+    s.open('s1', 7)
+    sock.emit_('connect_error', new Error('xhr poll error'))
+    expect(n).toBe(0)
+    expect(sock.disconnected).toBe(false)
+  })
+  it('close leaves room and disconnects', () => {
+    const { s, sock, statuses } = mk()
+    s.open('s1', 7)
+    sock.emit_('connect')
+    s.close()
+    expect(sock.emitted).toContainEqual(['leave_room', 's1/7'])
+    expect(sock.disconnected).toBe(true)
+    expect(statuses.at(-1)).toBe('offline')
+  })
+})
