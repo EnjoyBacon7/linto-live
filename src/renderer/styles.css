@@ -20,6 +20,8 @@ button.big { padding: 14px 20px; font-size: 17px; }
 button.link { background: none; border: none; color: var(--muted); text-decoration: underline; padding: 4px; }
 :focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
 .error { color: var(--bad); margin: 0; }
+.warn { color: var(--warn); margin: 0; }
+.switch { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
 .sso { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
 summary { cursor: pointer; color: var(--muted); }
 .vu { height: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }

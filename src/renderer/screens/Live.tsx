@@ -9,14 +9,17 @@ function Chip({ label, value, tone }: { label: string; value: string; tone: Tone
   return <li className={`chip chip-${tone}`}><span aria-hidden="true">{icon}</span> <strong>{label}</strong> {value}</li>
 }
 
-export function Live({ state, reused, authRequired = false, onStopped, onNeedLogin }: {
+export function Live({ state, reused, authRequired = false, onStopped, onNeedLogin, onSwitched }: {
   state: LiveState; reused: boolean; authRequired?: boolean; onStopped: () => void; onNeedLogin: () => void
+  onSwitched?: (reused: boolean) => void
 }) {
   const [preview, setPreview] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [displays, setDisplays] = useState<MonitorInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<'stop' | 'terminate' | null>(null)
+  const [busy, setBusy] = useState<'stop' | 'terminate' | 'switch' | null>(null)
+  const [switchOpen, setSwitchOpen] = useState(false)
+  const [newName, setNewName] = useState('')
   useEffect(() => {
     if (!confirming) return
     const h = (e: KeyboardEvent): void => { if (e.key === 'Escape') setConfirming(false) }
@@ -35,6 +38,17 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
     setBusy(kind)
     await guard(fn, onStopped)
     setBusy(null)
+  }
+  /** Changer de session: the controller stops the current stream and retargets OBS while staying live. */
+  const switchSession = async (): Promise<void> => {
+    const n = newName.trim()
+    if (busy || !n) return
+    setBusy('switch')
+    setError(null)
+    try {
+      const r = await window.lintoLive.live.start(n)
+      if (r.ok) { setSwitchOpen(false); setNewName(''); onSwitched?.(r.reused) } else setError(r.message)
+    } catch (e) { setError(ipcErrorMessage(e)) } finally { setBusy(null) }
   }
   const openDisplays = async (): Promise<void> => {
     await guard(async () => setDisplays((await window.lintoLive.setup.load()).displays))
@@ -71,8 +85,17 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
           <div className="actions">
             <button type="button" className="primary big" disabled={busy !== null} onClick={() => void act('stop', () => window.lintoLive.live.stop())}>{busy === 'stop' ? 'Arrêt…' : 'Arrêter'}</button>
             <button type="button" className="danger" disabled={busy !== null} onClick={() => setConfirming(true)}>{busy === 'terminate' ? 'Fin de session…' : 'Terminer la session'}</button>
+            <button type="button" disabled={busy !== null} onClick={() => setSwitchOpen((o) => !o)}>Changer de session</button>
             <button type="button" disabled={busy !== null} onClick={() => void openDisplays()}>Changer d'écran</button>
           </div>
+          {switchOpen && (
+            <form className="switch" onSubmit={(e) => { e.preventDefault(); void switchSession() }}>
+              <label>Nom de la nouvelle session
+                <input value={newName} autoFocus onChange={(e) => setNewName(e.target.value)} />
+              </label>
+              <button type="submit" className="primary" disabled={busy !== null || newName.trim() === ''}>{busy === 'switch' ? 'Bascule…' : 'Basculer'}</button>
+            </form>
+          )}
           {displays && (
             <label>Nouvel écran
               <select defaultValue="" onChange={(e) => {

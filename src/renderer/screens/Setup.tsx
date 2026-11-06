@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SetupData } from '../../shared/ipc'
-import type { Settings } from '../../shared/types'
+import type { MonitorInfo, Settings } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { ipcErrorMessage } from '../ipcError'
 
-export function Setup({ onStarted }: { onStarted: (reused: boolean) => void }) {
+export function Setup({ onStarted, warning: initialWarning }: { onStarted: (reused: boolean) => void; warning?: string }) {
   const [data, setData] = useState<SetupData | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // OBS problems (boot failure, automatic restart…) arrive through live-state, also before any show.
+  const [warning, setWarning] = useState<string | null>(initialWarning ?? null)
+  useEffect(() => window.lintoLive.on('live-state', (s) => setWarning(s.warning ?? null)), [])
 
   const load = useCallback(async () => {
     try {
@@ -21,7 +24,8 @@ export function Setup({ onStarted }: { onStarted: (reused: boolean) => void }) {
   }, [])
   useEffect(() => { void load() }, [load])
 
-  if (!data || !settings) return <div className="card">{error ? <p className="error" role="alert">{error}</p> : <p>Chargement…</p>}</div>
+  const banner = warning && <div className="banner banner-warn" role="alert">{warning}</div>
+  if (!data || !settings) return <div className="card">{banner}{error ? <p className="error" role="alert">{error}</p> : <p>Chargement…</p>}</div>
 
   const change = async (patch: Partial<Settings>, reload = false): Promise<void> => {
     setSettings({ ...settings, ...patch })
@@ -41,10 +45,14 @@ export function Setup({ onStarted }: { onStarted: (reused: boolean) => void }) {
     } catch (e) { setError(ipcErrorMessage(e)) } finally { setBusy(false) }
   }
   const displayIdx = data.displays.findIndex((d) => d.name === settings.output?.name && d.x === settings.output?.x && d.y === settings.output?.y)
+  // Same origin as the display showing this window (origins agree between Electron and OBS, sizes may be scaled).
+  const isAppDisplay = (d: MonitorInfo): boolean => !!data.appDisplay && d.x === data.appDisplay.x && d.y === data.appDisplay.y
+  const coversApp = displayIdx >= 0 && isAppDisplay(data.displays[displayIdx])
 
   return (
     <form className="card setup" onSubmit={(e) => { e.preventDefault(); if (ready && !busy) void start() }}>
       <h1>Préparer la session</h1>
+      {banner}
       {data.organizations.length > 1 && (
         <label>Organisation
           <select value={settings.orgId ?? ''} onChange={(e) => void change({ orgId: e.target.value }, true)}>
@@ -78,9 +86,10 @@ export function Setup({ onStarted }: { onStarted: (reused: boolean) => void }) {
           if (d) void change({ output: { name: d.name, x: d.x, y: d.y, width: d.width, height: d.height } })
         }}>
           <option value="" disabled>Choisir…</option>
-          {data.displays.map((d, i) => <option key={i} value={i}>{d.name} ({d.width}×{d.height})</option>)}
+          {data.displays.map((d, i) => <option key={i} value={i}>{d.name} ({d.width}×{d.height}){isAppDisplay(d) ? ' (écran de cette fenêtre)' : ''}</option>)}
         </select>
       </label>
+      {coversApp && <p className="warn">Attention : la sortie plein écran couvrira cette fenêtre. Choisis l'écran du projecteur ou de la TV.</p>}
       <label>Nom de la session
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => void change({ lastSessionName: name.trim() })} />
       </label>

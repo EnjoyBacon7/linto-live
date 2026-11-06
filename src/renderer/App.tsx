@@ -35,8 +35,8 @@ export function App() {
       <main>
         {screen === 'loading' && <p className="center">Chargement…</p>}
         {screen === 'login' && <Login onLoggedIn={() => { setAuthRequired(false); setScreen('setup') }} />}
-        {screen === 'setup' && <Setup onStarted={(r) => { setReused(r); setState(STARTING); setScreen('live') }} />}
-        {screen === 'live' && <Live state={state} reused={reused} authRequired={authRequired} onStopped={() => setScreen('setup')} onNeedLogin={() => setLoginModal(true)} />}
+        {screen === 'setup' && <Setup warning={state.warning} onStarted={(r) => { setReused(r); setState(STARTING); setScreen('live') }} />}
+        {screen === 'live' && <Live state={state} reused={reused} authRequired={authRequired} onStopped={() => setScreen('setup')} onNeedLogin={() => setLoginModal(true)} onSwitched={setReused} />}
       </main>
       {loginModal && (
         <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-label="Connexion">
