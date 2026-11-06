@@ -3,3 +3,4 @@ node_modules/
 vendor/
 dist/
 out/
+spikes/node_modules/

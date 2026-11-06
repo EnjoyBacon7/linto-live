@@ -1,0 +1,1 @@
+{"name":"linto-live-spikes","private":true,"type":"module","dependencies":{"obs-websocket-js":"^5.0.8","socket.io-client":"^4.8.4"}}
