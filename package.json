@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "LinTO Live - drives a hidden OBS and shows LinTO live captions",
+  "author": "LINAGORA",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -12,7 +13,7 @@
     "test:it": "vitest run --config vitest.it.config.ts --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "fetch:obs:mac": "bash scripts/fetch-obs-macos.sh",
-    "dist:mac": "npm run build && electron-builder --mac --arm64",
+    "dist:mac": "test -d vendor/obs/macos/OBS.app || (echo 'Lance npm run fetch:obs:mac' && exit 1) && npm run build && electron-builder --mac --arm64",
     "build:obs:linux": "bash scripts/build-obs-linux.sh",
     "dist:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never"
   },
