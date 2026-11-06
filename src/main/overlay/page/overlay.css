@@ -1,0 +1,24 @@
+html, body {
+  margin: 0;
+  width: 1920px;
+  height: 1080px;
+  background: transparent;
+  overflow: hidden;
+}
+#captions {
+  position: absolute;
+  left: 50%;
+  bottom: 80px;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  max-width: 1700px;
+  padding: 12px 28px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 56px;
+  line-height: 1.25;
+  text-align: center;
+}
+#captions[hidden] { display: none; }
+#captions .line.partial { opacity: 0.85; }
