@@ -44,10 +44,15 @@ function freePort(): Promise<number> {
 export interface ProbeSocket {
   on(ev: 'Hello', cb: (h: { authentication?: unknown }) => void): unknown
   connect(url: string, password: string): Promise<unknown>
+  call(req: 'GetVersion'): Promise<unknown>
   disconnect(): Promise<void>
 }
 
-/** Connects with the fresh password; rejects if the server never demanded authentication (port squatter). */
+/**
+ * Connects with the fresh password; rejects if the server never demanded authentication (port squatter)
+ * or if OBS is still loading (obs-websocket answers every request NotReady until the frontend finished
+ * loading — the server listens earlier, e.g. while the browser source starts CEF).
+ */
 export async function probeWebSocket(
   c: ObsConnection,
   create: () => ProbeSocket = () => new OBSWebSocket() as unknown as ProbeSocket
@@ -62,8 +67,12 @@ export async function probeWebSocket(
     timer = setTimeout(() => rej(new Error('websocket connect attempt timed out')), PROBE_TIMEOUT_MS)
   })
   try {
-    await Promise.race([ws.connect(`ws://127.0.0.1:${c.port}`, c.password), timeout])
-    if (!authRequired) throw new Error('websocket server does not require authentication')
+    const attempt = async (): Promise<void> => {
+      await ws.connect(`ws://127.0.0.1:${c.port}`, c.password)
+      if (!authRequired) throw new Error('websocket server does not require authentication')
+      await ws.call('GetVersion')
+    }
+    await Promise.race([attempt(), timeout])
   } catch (e) {
     await ws.disconnect().catch(() => {})
     throw e

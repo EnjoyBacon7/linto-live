@@ -178,13 +178,14 @@ describe('ObsProcess', () => {
   })
 
   it('probe rejects a server that does not require auth', async () => {
-    const mk = (auth: unknown) => {
+    const mk = (auth: unknown, call: () => Promise<unknown> = async () => ({})) => {
       let hello: (h: { authentication?: unknown }) => void = () => {}
       let disconnected = 0
       return {
         ws: {
           on: (_e: 'Hello', cb: typeof hello) => { hello = cb },
           connect: async () => { hello({ authentication: auth }) },
+          call,
           disconnect: async () => { disconnected++ }
         },
         disconnected: () => disconnected
@@ -195,6 +196,19 @@ describe('ObsProcess', () => {
     expect(open.disconnected()).toBe(1)
     const secured = mk({ challenge: 'c', salt: 's' })
     await expect(probeWebSocket({ port: 1, password: 'x' }, () => secured.ws)).resolves.toBeUndefined()
+  })
+
+  it('probe rejects while OBS is still loading (requests answer NotReady)', async () => {
+    let disconnected = 0
+    let hello: (h: { authentication?: unknown }) => void = () => {}
+    const loading = {
+      on: (_e: 'Hello', cb: typeof hello) => { hello = cb },
+      connect: async () => { hello({ authentication: { challenge: 'c', salt: 's' } }) },
+      call: async () => { throw new Error('OBS is not ready to perform the request.') },
+      disconnect: async () => { disconnected++ }
+    }
+    await expect(probeWebSocket({ port: 1, password: 'x' }, () => loading)).rejects.toThrow(/not ready/)
+    expect(disconnected).toBe(1)
   })
 
   it('a failed relaunch counts one attempt and keeps a single restart chain', async () => {
