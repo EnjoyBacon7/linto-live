@@ -1,13 +1,11 @@
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
 import type { ObsStreamService } from './streamTarget'
+import type { DeviceItem } from '../../shared/types'
 
 export type StreamState = 'starting' | 'active' | 'stopped' | 'error'
 
-export interface DeviceItem {
-  id: string
-  name: string
-}
+export type { DeviceItem }
 
 export const SCENE = 'LinTO Live'
 export const SCENE_PAUSE = 'LinTO Pause'

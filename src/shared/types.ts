@@ -29,3 +29,5 @@ export interface Settings {
   output?: SavedDisplay
   lastSessionName?: string
 }
+
+export interface DeviceItem { id: string; name: string }
