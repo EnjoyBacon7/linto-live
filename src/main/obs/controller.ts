@@ -1,5 +1,8 @@
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
+import type { ObsStreamService } from './streamTarget'
+
+export type StreamState = 'starting' | 'active' | 'stopped' | 'error'
 
 export interface DeviceItem {
   id: string
@@ -31,6 +34,8 @@ const videoProp = (p: NodeJS.Platform): string => (p === 'darwin' ? 'device' : '
 export class ObsController {
   private platform: NodeJS.Platform = process.platform
   private videoItemId: number | null = null
+  private lastServer: string | null = null
+  private stateListeners = new Set<(s: StreamState) => void>()
 
   constructor(private readonly client: ObsClient) {}
 
@@ -145,6 +150,55 @@ export class ObsController {
       imageCompressionQuality: 70
     })
     return r.imageData as string
+  }
+
+  private async streamActive(): Promise<boolean> {
+    const r = await this.client.call('GetStreamStatus')
+    return Boolean(r?.outputActive)
+  }
+
+  async startStream(s: ObsStreamService): Promise<void> {
+    const server = s.streamServiceSettings.server
+    const key = s.streamServiceSettings.key
+    const id = `${server}\n${key}`
+    try {
+      if (await this.streamActive()) {
+        if (this.lastServer === id) return
+        await this.client.call('StopStream')
+      }
+      await this.client.call('SetStreamServiceSettings', s as unknown as Record<string, unknown>)
+      await this.client.call('StartStream')
+      this.lastServer = id
+    } catch (e) {
+      this.stateListeners.forEach((cb) => cb('error'))
+      throw e
+    }
+  }
+
+  async stopStream(): Promise<void> {
+    if (await this.streamActive()) await this.client.call('StopStream')
+    this.lastServer = null
+  }
+
+  streamState$(cb: (s: StreamState) => void): () => void {
+    const handler = (d: { outputState?: string }): void => {
+      switch (d.outputState) {
+        case 'OBS_WEBSOCKET_OUTPUT_STARTING':
+        case 'OBS_WEBSOCKET_OUTPUT_RECONNECTING':
+          return cb('starting')
+        case 'OBS_WEBSOCKET_OUTPUT_STARTED':
+        case 'OBS_WEBSOCKET_OUTPUT_RECONNECTED':
+          return cb('active')
+        case 'OBS_WEBSOCKET_OUTPUT_STOPPED':
+          return cb('stopped')
+      }
+    }
+    this.client.on('StreamStateChanged', handler)
+    this.stateListeners.add(cb)
+    return () => {
+      this.client.off('StreamStateChanged', handler)
+      this.stateListeners.delete(cb)
+    }
   }
 
   /** Called by LiveController after an OBS restart: forget cached scene item ids. */

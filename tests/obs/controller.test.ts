@@ -3,7 +3,8 @@ import { ObsController, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_OVERLAY, SRC_VIDEO, t
 
 type Call = { req: string; data?: Record<string, unknown> }
 
-function fakeClient(opts: { items?: unknown[] } = {}) {
+function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
+  let active = false
   const calls: Call[] = []
   const scenes = new Set<string>()
   const inputs = new Set<string>()
@@ -30,6 +31,15 @@ function fakeClient(opts: { items?: unknown[] } = {}) {
           return { propertyItems: opts.items ?? [] }
         case 'GetSourceScreenshot':
           return { imageData: 'data:image/jpeg;base64,AAAA' }
+        case 'StartStream':
+          if (opts.failStart) throw new Error('boom')
+          active = true
+          return {}
+        case 'StopStream':
+          active = false
+          return {}
+        case 'GetStreamStatus':
+          return { outputActive: active }
         default:
           return {}
       }
@@ -161,5 +171,54 @@ describe('ObsController', () => {
     const url = await new ObsController(f.client).screenshot()
     expect(url).toBe('data:image/jpeg;base64,AAAA')
     expect(of(f.calls, 'GetSourceScreenshot')[0].data).toEqual({ sourceName: SCENE, imageFormat: 'jpg', imageWidth: 640, imageCompressionQuality: 70 })
+  })
+
+  describe('streaming', () => {
+    const svc = { streamServiceType: 'rtmp_custom' as const, streamServiceSettings: { server: 'srt://h:9000?streamid=a', key: '' } }
+
+    it('startStream sets service then starts; second identical call is a no-op', async () => {
+      const f = fakeClient()
+      const c = new ObsController(f.client)
+      await c.startStream(svc)
+      await c.startStream(svc)
+      expect(of(f.calls, 'StartStream')).toHaveLength(1)
+      expect(of(f.calls, 'SetStreamServiceSettings')[0].data).toEqual(svc)
+      const order = f.calls.map((x) => x.req)
+      expect(order.indexOf('SetStreamServiceSettings')).toBeLessThan(order.indexOf('StartStream'))
+    })
+
+    it('startStream with a different server while active restarts', async () => {
+      const f = fakeClient()
+      const c = new ObsController(f.client)
+      await c.startStream(svc)
+      await c.startStream({ ...svc, streamServiceSettings: { server: 'srt://other', key: '' } })
+      expect(of(f.calls, 'StopStream')).toHaveLength(1)
+      expect(of(f.calls, 'StartStream')).toHaveLength(2)
+    })
+
+    it('stopStream only stops when active', async () => {
+      const f = fakeClient()
+      const c = new ObsController(f.client)
+      await c.stopStream()
+      expect(of(f.calls, 'StopStream')).toHaveLength(0)
+      await c.startStream(svc)
+      await c.stopStream()
+      expect(of(f.calls, 'StopStream')).toHaveLength(1)
+    })
+
+    it('streamState$ maps events, reports error on failed start, unsubscribes', async () => {
+      const f = fakeClient({ failStart: true })
+      const c = new ObsController(f.client)
+      const got: string[] = []
+      const off = c.streamState$((s) => got.push(s))
+      for (const st of ['STARTING', 'STARTED', 'RECONNECTING', 'RECONNECTED', 'STOPPING', 'STOPPED'])
+        f.emit('StreamStateChanged', { outputActive: true, outputState: `OBS_WEBSOCKET_OUTPUT_${st}` })
+      expect(got).toEqual(['starting', 'active', 'starting', 'active', 'stopped'])
+      await expect(c.startStream(svc)).rejects.toThrow('boom')
+      expect(got.at(-1)).toBe('error')
+      off()
+      f.emit('StreamStateChanged', { outputState: 'OBS_WEBSOCKET_OUTPUT_STARTED' })
+      expect(got).toHaveLength(6)
+    })
   })
 })
