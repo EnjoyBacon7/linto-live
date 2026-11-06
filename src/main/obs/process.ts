@@ -1,7 +1,8 @@
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
@@ -22,12 +23,44 @@ export interface ObsProcessOptions {
   /** Resolves once OBS accepts a websocket connection. Defaults to a real obs-websocket-js connect. */
   probe?: (c: ObsConnection) => Promise<void>
   readyTimeoutMs?: number
+  /** Process inspection used to clean up an OBS orphaned by a crash of the app (fakes in tests). */
+  orphan?: OrphanOps
+}
+
+export interface OrphanOps {
+  isAlive(pid: number): boolean
+  /** Full command line of `pid`, or null if unreadable. */
+  command(pid: number): Promise<string | null>
+  kill(pid: number): void
+}
+
+const systemOrphanOps: OrphanOps = {
+  isAlive(pid) {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code === 'EPERM'
+    }
+  },
+  command: (pid) =>
+    new Promise((resolve) => {
+      execFile('ps', ['-ww', '-o', 'command=', '-p', String(pid)], (err, out) => resolve(err ? null : out.trim() || null))
+    }),
+  kill(pid) {
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      /* already gone */
+    }
+  }
 }
 
 const READY_TIMEOUT_MS = 20_000
 const STOP_TIMEOUT_MS = 10_000
 const PROBE_TIMEOUT_MS = 2_000
 const STABLE_MS = 30_000
+const ORPHAN_EXIT_WAIT_MS = 3_000
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 function freePort(): Promise<number> {
@@ -94,12 +127,42 @@ export class ObsProcess extends EventEmitter {
   private readonly spawnFn: typeof nodeSpawn
   private readonly maxRestarts: number
   private readonly probe: (c: ObsConnection) => Promise<void>
+  private readonly orphan: OrphanOps
+  private readonly pidFile: string
+  /** On OBS's command line so a leftover process can be recognised as ours (env vars are not visible in ps). */
+  private readonly homeMarker: string
 
   constructor(private readonly o: ObsProcessOptions) {
     super()
     this.spawnFn = o.spawn ?? nodeSpawn
     this.maxRestarts = o.maxRestarts ?? 5
     this.probe = o.probe ?? ((c) => probeWebSocket(c))
+    this.orphan = o.orphan ?? systemOrphanOps
+    this.pidFile = join(o.paths.obsHome, 'obs.pid')
+    this.homeMarker = `--linto-live-home=${o.paths.obsHome}`
+  }
+
+  /**
+   * An OBS left running by a crash of the app (pidfile still there) would hold the projector and the
+   * isolated profile: SIGKILL it — but only if its command line carries our obs-home marker, so the
+   * user's own OBS (or a recycled pid) is never touched.
+   */
+  private async killOrphan(): Promise<void> {
+    let pid: number
+    try {
+      pid = Number.parseInt(readFileSync(this.pidFile, 'utf8').trim(), 10)
+    } catch {
+      return
+    }
+    if (Number.isInteger(pid) && pid > 1 && pid !== process.pid && this.orphan.isAlive(pid)) {
+      const cmd = await this.orphan.command(pid)
+      if (cmd?.includes(this.homeMarker)) {
+        this.orphan.kill(pid)
+        const deadline = Date.now() + ORPHAN_EXIT_WAIT_MS
+        while (this.orphan.isAlive(pid) && Date.now() < deadline) await sleep(100)
+      }
+    }
+    rmSync(this.pidFile, { force: true })
   }
 
   private launching: Promise<ObsConnection> | null = null
@@ -152,6 +215,7 @@ export class ObsProcess extends EventEmitter {
   }
 
   private async doLaunch(): Promise<ObsConnection> {
+    await this.killOrphan()
     await writeSeed(this.o.paths.obsConfigDir, { canvas: { width: 1920, height: 1080, fps: 30 } })
     const conn: ObsConnection = {
       port: await freePort(),
@@ -160,7 +224,7 @@ export class ObsProcess extends EventEmitter {
     if (this.stopping) throw new Error('OBS start cancelled by stop()')
     const args = [
       '--multi', '--minimize-to-tray', '--disable-updater', '--disable-missing-files-check',
-      '--collection', 'LinTO Live', '--profile', 'LinTO Live', '--scene', 'LinTO Live'
+      '--collection', 'LinTO Live', '--profile', 'LinTO Live', '--scene', 'LinTO Live', this.homeMarker
     ]
     // Port/password go through obs-websocket's config file, not argv (argv is visible in `ps`).
     const wsCfg = join(this.o.paths.obsConfigDir, 'plugin_config', 'obs-websocket', 'config.json')
@@ -187,6 +251,15 @@ export class ObsProcess extends EventEmitter {
     delete env.ELECTRON_RUN_AS_NODE
     const child = this.spawnFn(this.o.exe, args, { env, stdio: 'ignore' })
     this.child = child
+    const pid = child.pid
+    if (pid) {
+      try {
+        mkdirSync(dirname(this.pidFile), { recursive: true })
+        writeFileSync(this.pidFile, String(pid))
+      } catch {
+        /* best effort: only used for orphan cleanup */
+      }
+    }
 
     // Per-launch state: `abandoned` means this launch failed and its exit must not trigger a restart;
     // `ready` false + exited means the failure is reported through the launch promise instead.
@@ -195,6 +268,7 @@ export class ObsProcess extends EventEmitter {
     let exited = false
     child.on('exit', (code: number | null) => {
       exited = true
+      if (pid) this.removePidFile(pid)
       if (this.child === child) this.child = null
       if (this.stableTimer) clearTimeout(this.stableTimer)
       if (abandoned || !ready) return
@@ -227,6 +301,14 @@ export class ObsProcess extends EventEmitter {
     this.stableTimer.unref?.()
     this.emit('ready', conn)
     return conn
+  }
+
+  private removePidFile(pid: number): void {
+    try {
+      if (readFileSync(this.pidFile, 'utf8').trim() === String(pid)) rmSync(this.pidFile, { force: true })
+    } catch {
+      /* already gone */
+    }
   }
 
   private handleExit(code: number | null): void {

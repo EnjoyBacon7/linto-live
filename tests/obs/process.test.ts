@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { obsExecutable } from '../../src/main/obs/locate'
-import { ObsProcess, probeWebSocket } from '../../src/main/obs/process'
+import { ObsProcess, probeWebSocket, type ObsProcessOptions } from '../../src/main/obs/process'
 import { appPaths } from '../../src/main/paths'
 
+let nextPid = 5000
 class FakeChild extends EventEmitter {
+  pid = nextPid++
   killed: string[] = []
   kill(sig: string): boolean {
     this.killed.push(sig)
@@ -22,7 +24,10 @@ beforeEach(() => {
 })
 afterEach(() => rmSync(tmp, { recursive: true, force: true }))
 
-function setup(platform: NodeJS.Platform = 'darwin', maxRestarts?: number, probe: () => Promise<void> = async () => {}, readyTimeoutMs?: number) {
+function setup(
+  platform: NodeJS.Platform = 'darwin', maxRestarts?: number, probe: () => Promise<void> = async () => {}, readyTimeoutMs?: number,
+  extra: Partial<ObsProcessOptions> = {}
+) {
   const children: FakeChild[] = []
   const calls: { exe: string; args: string[]; opts: { env: NodeJS.ProcessEnv } }[] = []
   const spawn = ((exe: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
@@ -38,7 +43,8 @@ function setup(platform: NodeJS.Platform = 'darwin', maxRestarts?: number, probe
     spawn,
     maxRestarts,
     probe,
-    readyTimeoutMs
+    readyTimeoutMs,
+    ...extra
   })
   return { p, children, calls }
 }
@@ -242,5 +248,94 @@ describe('ObsProcess', () => {
     await new Promise((r) => setTimeout(r, 100))
     expect(calls).toHaveLength(1)
     expect(ready).not.toHaveBeenCalled()
+  })
+})
+
+describe('ObsProcess orphan cleanup (pidfile)', () => {
+  const obsHome = (): string => join(tmp, 'obs-home')
+  const pidFile = (): string => join(obsHome(), 'obs.pid')
+  const writePid = (pid: number): void => {
+    mkdirSync(obsHome(), { recursive: true })
+    writeFileSync(pidFile(), String(pid))
+  }
+  function orphanFakes(cmd: string | null, alive = true) {
+    const order: string[] = []
+    const living = new Set<number>(alive ? [4242] : [])
+    const orphan = {
+      isAlive: vi.fn((pid: number) => living.has(pid)),
+      command: vi.fn(async () => cmd),
+      kill: vi.fn((pid: number) => {
+        order.push(`kill:${pid}`)
+        living.delete(pid)
+      })
+    }
+    return { orphan, order }
+  }
+
+  it('passes the isolated obs-home path on the command line (identifies our OBS in ps)', async () => {
+    const { p, calls } = setup()
+    await p.start()
+    expect(calls[0].args).toContain(`--linto-live-home=${obsHome()}`)
+    await p.stop()
+  })
+
+  it('writes the pidfile after spawn and removes it when OBS exits', async () => {
+    const { p, children } = setup()
+    await p.start()
+    expect(readFileSync(pidFile(), 'utf8')).toBe(String(children[0].pid))
+    await p.stop()
+    expect(existsSync(pidFile())).toBe(false)
+  })
+
+  it("SIGKILLs this app's orphan OBS left by a crash before launching", async () => {
+    writePid(4242)
+    const { orphan, order } = orphanFakes(`/x/OBS --multi --linto-live-home=${obsHome()}`)
+    const spawnOrder: string[] = order
+    const { p, children, calls } = setup('darwin', undefined, undefined, undefined, { orphan })
+    const orig = calls.push.bind(calls)
+    calls.push = (...a) => {
+      spawnOrder.push('spawn')
+      return orig(...a)
+    }
+    await p.start()
+    expect(orphan.command).toHaveBeenCalledWith(4242)
+    expect(order).toEqual(['kill:4242', 'spawn'])
+    expect(readFileSync(pidFile(), 'utf8')).toBe(String(children[0].pid))
+    await p.stop()
+  })
+
+  it("never kills a process whose command line lacks this app's obs-home (the user's own OBS)", async () => {
+    writePid(4242)
+    const { orphan } = orphanFakes('/Applications/OBS.app/Contents/MacOS/OBS --multi')
+    const { p, children } = setup('darwin', undefined, undefined, undefined, { orphan })
+    await p.start()
+    expect(orphan.kill).not.toHaveBeenCalled()
+    expect(readFileSync(pidFile(), 'utf8')).toBe(String(children[0].pid))
+    await p.stop()
+  })
+
+  it('ignores a stale pidfile whose process is gone', async () => {
+    writePid(4242)
+    const { orphan } = orphanFakes(`/x/OBS --linto-live-home=${obsHome()}`, false)
+    const { p } = setup('darwin', undefined, undefined, undefined, { orphan })
+    await p.start()
+    expect(orphan.command).not.toHaveBeenCalled()
+    expect(orphan.kill).not.toHaveBeenCalled()
+    await p.stop()
+  })
+
+  it('ignores a garbage pidfile and an unreadable command line', async () => {
+    mkdirSync(obsHome(), { recursive: true })
+    writeFileSync(pidFile(), 'not-a-pid')
+    const a = orphanFakes(null)
+    const { p } = setup('darwin', undefined, undefined, undefined, { orphan: a.orphan })
+    await p.start()
+    expect(a.orphan.kill).not.toHaveBeenCalled()
+    await p.stop()
+    writePid(4242)
+    const { p: p2 } = setup('darwin', undefined, undefined, undefined, { orphan: a.orphan })
+    await p2.start()
+    expect(a.orphan.kill).not.toHaveBeenCalled()
+    await p2.stop()
   })
 })
