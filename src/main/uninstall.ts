@@ -77,9 +77,28 @@ export function uninstallTargets(o: UninstallInput): UninstallPlan {
     }
   } else {
     remove = [o.userData, j('.cache', o.appName), ...o.desktopFiles]
-    if (o.appImage && posix.isAbsolute(o.appImage) && o.appImage.endsWith('.AppImage')) trash = o.appImage
+    if (
+      o.appImage &&
+      posix.isAbsolute(o.appImage) &&
+      posix.normalize(o.appImage) === o.appImage &&
+      !o.appImage.endsWith('/') &&
+      posix.basename(o.appImage).endsWith('.AppImage')
+    ) {
+      trash = o.appImage
+    }
   }
 
+  if (posix.basename(o.userData) !== o.appName) {
+    throw new Error(`Unsafe userData (basename must be "${o.appName}"): ${JSON.stringify(o.userData)}`)
+  }
+  if (o.platform !== 'darwin') {
+    const appsDir = posix.join(home, '.local/share/applications')
+    for (const f of o.desktopFiles) {
+      if (posix.dirname(f) !== appsDir || !f.endsWith('.desktop') || posix.basename(f) === '.desktop') {
+        throw new Error(`Unsafe desktop file path: ${JSON.stringify(f)}`)
+      }
+    }
+  }
   remove.forEach((p) => assertSafe(p, home, 'remove'))
   return { remove, trash }
 }

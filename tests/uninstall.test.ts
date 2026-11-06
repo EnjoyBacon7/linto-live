@@ -104,6 +104,26 @@ describe('safety guards', () => {
   })
 })
 
+describe('extra guards', () => {
+  const lin = { ...base, platform: 'linux' as const, userData: `${H}/.config/LinTO Live` }
+  it('rejects userData whose basename is not the app name', () => {
+    expect(() => uninstallTargets({ ...base, userData: `${H}/Documents` })).toThrow()
+    expect(() => uninstallTargets({ ...lin, userData: `${H}/.config/other` })).toThrow()
+  })
+  it('rejects desktop files not directly in applications dir or not .desktop', () => {
+    const d = `${H}/.local/share/applications`
+    expect(() => uninstallTargets({ ...lin, desktopFiles: [`${d}/sub/linto-live.desktop`] })).toThrow()
+    expect(() => uninstallTargets({ ...lin, desktopFiles: [`${d}/linto-live.txt`] })).toThrow()
+    expect(() => uninstallTargets({ ...lin, desktopFiles: [`${H}/Documents/linto-live.desktop`] })).toThrow()
+    expect(uninstallTargets({ ...lin, desktopFiles: [`${d}/linto-live.desktop`] }).remove).toContain(`${d}/linto-live.desktop`)
+  })
+  it('linux trash requires absolute normalized .AppImage', () => {
+    expect(uninstallTargets({ ...lin, appImage: 'rel/a.AppImage' }).trash).toBeNull()
+    expect(uninstallTargets({ ...lin, appImage: `${H}/x/../a.AppImage` }).trash).toBeNull()
+    expect(uninstallTargets({ ...lin, appImage: `${H}/a.AppImage/` }).trash).toBeNull()
+  })
+})
+
 describe('runUninstall', () => {
   it('removes all, trashes last', async () => {
     const calls: string[] = []
