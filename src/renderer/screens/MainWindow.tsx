@@ -248,6 +248,13 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     if (!commands) return
     commands.current = { run, sessionName: title, canStart }
   })
+  useEffect(() => () => { if (commands) commands.current = null }, [commands])
+  // The app menu and the tray enable their items from this.
+  useEffect(() => {
+    window.lintoLive.app
+      .reportShellState({ loggedIn: true, ...(title ? { sessionName: title } : {}), canStart })
+      .catch(() => {})
+  }, [title, canStart])
 
   // ---- Layout ----
   const banners = (

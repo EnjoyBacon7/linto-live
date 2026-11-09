@@ -57,9 +57,14 @@ export interface QuitGuardDeps {
   quit(): void
   /** The capped shutdown followed by app.exit(). */
   shutdown(): void
+  /** Hides the main window (the show keeps running; the tray/Dock brings it back). */
+  hide(): void
 }
 
-/** Closing the app = Arrêter; while a show is live the user confirms first (window close or Cmd+Q). */
+/**
+ * Closing the main window while a show is live or starting only hides it (the show continues).
+ * Quitting the app = Arrêter; while a show is live the user confirms first (Cmd+Q, menu, tray).
+ */
 export function createQuitGuard(d: QuitGuardDeps): {
   onWindowClose(e: Preventable): void
   onBeforeQuit(e: Preventable): void
@@ -84,9 +89,11 @@ export function createQuitGuard(d: QuitGuardDeps): {
   }
   return {
     onWindowClose(e) {
-      if (quitting || !mustAsk()) return
+      if (quitting || confirmed) return
+      const phase = d.phase()
+      if (phase !== 'live' && phase !== 'starting') return // nothing on air: v1 behaviour, the app quits
       e.preventDefault()
-      confirmThenQuit()
+      d.hide()
     },
     onBeforeQuit(e) {
       e.preventDefault() // always, while our shutdown is in progress; app.exit() does not re-emit

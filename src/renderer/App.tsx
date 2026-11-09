@@ -8,6 +8,8 @@ type Screen = 'loading' | 'login' | 'main'
 
 export function App({ commands }: { commands?: { current: MainWindowCommands | null } }) {
   const [screen, setScreen] = useState<Screen>('loading')
+  const ownCommands = useRef<MainWindowCommands | null>(null)
+  const cmds = commands ?? ownCommands
   const state = useLiveState()
   const onAir = isOnAir(state)
   const [authRequired, setAuthRequired] = useState(false)
@@ -19,6 +21,16 @@ export function App({ commands }: { commands?: { current: MainWindowCommands | n
       .catch(() => setScreen('login'))
   }, [])
   useEffect(() => window.lintoLive.on('auth-required', () => { authEvent.current = true; setAuthRequired(true) }), [])
+  // App menu / tray commands carried out by the main window (ignored while it is not shown).
+  useEffect(() => window.lintoLive.on('command', (c) => {
+    if (c === 'start' || c === 'stop' || c === 'new-session' || c === 'terminate' || c === 'logout' || c === 'show-output') {
+      cmds.current?.run(c)
+    }
+  }), [cmds])
+  // Outside the main window the menus only offer what needs no account (MainWindow reports the rest).
+  useEffect(() => {
+    if (screen === 'login') window.lintoLive.app.reportShellState({ loggedIn: false, canStart: false }).catch(() => {})
+  }, [screen])
   // Auth lost while not on air: back to Login. On air, MainWindow shows a banner and keeps the show running.
   useEffect(() => { if (authRequired && !onAir) setScreen('login') }, [authRequired, onAir])
 
@@ -30,7 +42,7 @@ export function App({ commands }: { commands?: { current: MainWindowCommands | n
       authRequired={authRequired}
       onReauthenticated={() => setAuthRequired(false)}
       onLoggedOut={() => setScreen('login')}
-      commands={commands}
+      commands={cmds}
     />
   )
 }

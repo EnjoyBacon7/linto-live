@@ -544,3 +544,63 @@ describe('Commands (menu/tray hooks)', () => {
     expect(screen.getByRole('dialog', { name: 'Nouvelle session' })).toBeTruthy()
   })
 })
+
+describe('Commands from the app menu / tray (evt:command)', () => {
+  it("command 'start' does what Démarrer does", async () => {
+    setup({}, setupData({ lastSessionName: 'Conférence' }))
+    await renderMain()
+    await waitFor(() => expect(startBtn().disabled).toBe(false))
+    await act(async () => emit('command', 'start'))
+    expect(api.live.start).toHaveBeenCalledWith('Conférence')
+    expect(api.live.start).toHaveBeenCalledTimes(1)
+  })
+
+  it("command 'start' is ignored when Démarrer is disabled", async () => {
+    setup()
+    await renderMain()
+    await act(async () => emit('command', 'start'))
+    expect(api.live.start).not.toHaveBeenCalled()
+  })
+
+  it("command 'new-session' opens the sheet", async () => {
+    setup()
+    await renderMain()
+    act(() => emit('command', 'new-session'))
+    expect(screen.getByRole('dialog', { name: 'Nouvelle session' })).toBeTruthy()
+  })
+
+  it("command 'terminate' asks for confirmation while live", async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    act(() => emit('command', 'terminate'))
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Terminer' })).toBeTruthy()
+  })
+
+  it("command 'logout' logs out and shows Login", async () => {
+    setup()
+    await renderMain()
+    await act(async () => emit('command', 'logout'))
+    expect(api.auth.logout).toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Connexion à LinTO' })).toBeTruthy()
+  })
+
+  it('reports the shell state (logged in, selected session, Démarrer possible) to main', async () => {
+    setup({}, setupData({ lastSessionName: 'Conférence' }))
+    await renderMain()
+    await waitFor(() =>
+      expect(api.app.reportShellState).toHaveBeenLastCalledWith({ loggedIn: true, sessionName: 'Conférence', canStart: true })
+    )
+    act(() => emit('live-state', live()))
+    await waitFor(() =>
+      expect(api.app.reportShellState).toHaveBeenLastCalledWith({ loggedIn: true, sessionName: 'Conférence', canStart: false })
+    )
+  })
+
+  it('reports logged out on the Login screen', async () => {
+    setup({ auth: { status: vi.fn().mockResolvedValue({ loggedIn: false }) } })
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Connexion à LinTO' })
+    await waitFor(() => expect(api.app.reportShellState).toHaveBeenLastCalledWith({ loggedIn: false, canStart: false }))
+  })
+})

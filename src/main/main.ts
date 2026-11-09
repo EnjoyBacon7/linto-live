@@ -1,11 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, screen, shell } from 'electron'
+import {
+  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, shell, Tray
+} from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
-import { IPC, type LiveState, type SetupData } from '../shared/ipc'
+import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
 import { UnauthorizedError, type Settings, type SessionSummary } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
@@ -23,10 +25,16 @@ import { loadSetupData, toSessionSummaries } from './setupData'
 import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
 } from './appLifecycle'
+import {
+  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, trayIconName, trayMenuTemplate, trayTooltip,
+  type NotificationText, type ShellState
+} from './nativeShell'
 
 const SHUTDOWN_CAP_MS = 15_000
 
 let win: BrowserWindow | null = null
+/** Module-level so the menu-bar icon is never garbage-collected. */
+let tray: Tray | null = null
 
 function createWindow(settings: SettingsStore): BrowserWindow {
   const bounds = restoreBounds(
@@ -138,10 +146,66 @@ function main(): void {
     platform
   })
 
-  live.on('state', (s: LiveState) => send(IPC.evtLiveState, s))
+  // ---- Native shell: app menu, menu-bar icon, notifications ----
+  let report: ShellReport = { loggedIn: false, canStart: false }
+  const shellState = (): ShellState => {
+    const s = live.getState()
+    const name = (s.phase !== 'idle' && s.phase !== 'error' ? s.session?.name : undefined) ?? report.sessionName
+    return { platform, loggedIn: report.loggedIn, phase: s.phase, canStart: report.canStart, ...(name ? { sessionName: name } : {}) }
+  }
+  const trayDir = app.isPackaged ? join(process.resourcesPath, 'tray') : join(app.getAppPath(), 'resources', 'tray')
+  const trayImage = (phase: LiveState['phase']): Electron.NativeImage => {
+    const file = join(trayDir, `${trayIconName(phase)}.png`)
+    const img = nativeImage.createFromPath(file) // @2x picked up automatically
+    if (img.isEmpty()) console.error('Tray icon missing:', file)
+    if (platform === 'darwin') img.setTemplateImage(true)
+    return img
+  }
+  const showWindow = (): void => focusWindow(win)
+  let shellKey = ''
+  const rebuildShell = (): void => {
+    const st = shellState()
+    const key = JSON.stringify(st)
+    if (key === shellKey) return
+    shellKey = key
+    Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate(st, runCommand)))
+    if (tray && !tray.isDestroyed()) {
+      tray.setImage(trayImage(st.phase))
+      tray.setToolTip(trayTooltip(st))
+      tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(st, runCommand)))
+    }
+  }
+  // Only when the user is looking elsewhere: the window shows the same information otherwise.
+  const notify = (n: NotificationText): void => {
+    if (!Notification.isSupported()) return
+    if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return
+    const note = new Notification({ title: n.title, body: n.body })
+    note.on('click', showWindow)
+    note.show()
+  }
+
+  let prevState = live.getState()
+  live.on('state', (s: LiveState) => {
+    send(IPC.evtLiveState, s)
+    const n = notificationFor(prevState, s)
+    prevState = s
+    if (n) notify(n)
+    rebuildShell()
+  })
   live.on('preview', (d: string) => send(IPC.evtPreview, d))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
-  live.on('auth-required', () => send(IPC.evtAuthRequired))
+  live.on('auth-required', () => {
+    send(IPC.evtAuthRequired)
+    notify(AUTH_NOTIFICATION)
+  })
+  ipcMain.handle(IPC.shellState, (_e, r: ShellReport) => {
+    report = {
+      loggedIn: r?.loggedIn === true,
+      canStart: r?.canStart === true,
+      ...(typeof r?.sessionName === 'string' && r.sessionName ? { sessionName: r.sessionName } : {})
+    }
+    rebuildShell()
+  })
 
   const loggedIn = (t: string): void => {
     settings.setToken(t)
@@ -204,6 +268,8 @@ function main(): void {
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
+    // The window may be hidden (closed during a show): bring it back so the dialog is seen.
+    if (win && !win.isDestroyed() && !win.isVisible()) showWindow()
     const parent = win && !win.isDestroyed() ? win : undefined
     return parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts)
   }
@@ -212,10 +278,17 @@ function main(): void {
     phase: () => live.getState().phase,
     ask: async () => (await show(QUIT_DIALOG)).response === 1,
     quit: () => app.quit(),
-    shutdown: () => void shutdownCapped().finally(() => app.exit(0))
+    shutdown: () => void shutdownCapped().finally(() => app.exit(0)),
+    // Closing the window during a show keeps it running; without a tray icon (some Linux desktops)
+    // the window is minimised instead, so it stays reachable.
+    hide: () => {
+      if (!win || win.isDestroyed()) return
+      if (tray || platform === 'darwin') win.hide()
+      else win.minimize()
+    }
   })
 
-  ipcMain.handle(IPC.appUninstall, async () => {
+  const uninstall = async (): Promise<void> => {
     if (uninstalling) return
     if (!app.isPackaged) {
       await show({ type: 'info', message: 'Désinstallation indisponible en mode développement.', buttons: ['OK'] })
@@ -276,13 +349,45 @@ function main(): void {
       })
     }
     app.exit(0)
-  })
+  }
+  ipcMain.handle(IPC.appUninstall, uninstall)
+
+  const failed = (what: string) => (err: unknown): void => {
+    console.error(what, err)
+    void show({ type: 'error', message: what, detail: err instanceof Error ? err.message : String(err), buttons: ['OK'] })
+  }
+  /** App menu / tray: main carries out what needs no window; the rest goes to the renderer like a button click. */
+  function runCommand(c: AppCommand): void {
+    switch (c) {
+      case 'stop': live.stop().catch(failed('Arrêt impossible.')); return
+      case 'show-output': live.showOutputWindow().catch(failed('Impossible d’afficher la fenêtre de sortie.')); return
+      case 'show-window': showWindow(); return
+      case 'uninstall': void uninstall(); return
+      case 'quit': app.quit(); return
+      default:
+        // Sheets (Nouvelle session, Terminer) and the login screen need the window in front.
+        if (c !== 'start') showWindow()
+        send(IPC.evtCommand, c)
+    }
+  }
 
   app.on('before-quit', (e) => quitGuard.onBeforeQuit(e))
 
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
+  app.on('activate', showWindow) // Dock click brings back a window hidden during a show
+
+  rebuildShell()
+  try {
+    tray = new Tray(trayImage(live.getState().phase))
+    shellKey = '' // fill the new icon's tooltip and menu
+    rebuildShell()
+  } catch (e) {
+    // Some Linux desktops have no tray: the window stays the entry point.
+    console.error('Tray icon unavailable', e)
+    tray = null
+  }
   // OBS + overlay start before login so device lists are ready for the setup screen.
   live.boot().catch((err) => console.error('OBS boot failed', err)) // state carries MSG_BOOT_FAILED
 }

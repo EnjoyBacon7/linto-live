@@ -50,7 +50,7 @@ describe('focusWindow', () => {
 describe('createQuitGuard', () => {
   function mk(phase: LiveState['phase'], answer: boolean) {
     let p = phase
-    const d = { phase: vi.fn(() => p), ask: vi.fn(async () => answer), quit: vi.fn(), shutdown: vi.fn() }
+    const d = { phase: vi.fn(() => p), ask: vi.fn(async () => answer), quit: vi.fn(), shutdown: vi.fn(), hide: vi.fn() }
     return { d, g: createQuitGuard(d), setPhase: (x: LiveState['phase']) => (p = x) }
   }
   it('dialog copy: Annuler is default and cancel', () => {
@@ -68,31 +68,59 @@ describe('createQuitGuard', () => {
     expect(d.ask).not.toHaveBeenCalled()
     expect(d.shutdown).toHaveBeenCalledTimes(1)
   })
-  it('live + Annuler: window stays, nothing stops', async () => {
+  it('live or starting: closing the window hides it and the show continues (no dialog)', async () => {
+    for (const phase of ['live', 'starting'] as const) {
+      const { d, g } = mk(phase, true)
+      const c = ev()
+      g.onWindowClose(c)
+      expect(c.preventDefault).toHaveBeenCalled()
+      expect(d.hide).toHaveBeenCalledTimes(1)
+      await flush()
+      expect(d.ask).not.toHaveBeenCalled()
+      expect(d.quit).not.toHaveBeenCalled()
+      expect(d.shutdown).not.toHaveBeenCalled()
+    }
+  })
+  it('stopping or error: closing the window closes it (v1 behaviour)', () => {
+    for (const phase of ['stopping', 'error'] as const) {
+      const { d, g } = mk(phase, true)
+      const c = ev()
+      g.onWindowClose(c)
+      expect(c.preventDefault).not.toHaveBeenCalled()
+      expect(d.hide).not.toHaveBeenCalled()
+    }
+  })
+  it('live + Cmd+Q + Annuler: nothing stops, a second Cmd+Q asks again', async () => {
     const { d, g } = mk('live', false)
-    const c = ev()
-    g.onWindowClose(c)
-    expect(c.preventDefault).toHaveBeenCalled()
-    await flush()
-    expect(d.ask).toHaveBeenCalledTimes(1)
-    expect(d.quit).not.toHaveBeenCalled()
     const q = ev()
     g.onBeforeQuit(q)
     expect(q.preventDefault).toHaveBeenCalled()
     await flush()
+    expect(d.ask).toHaveBeenCalledTimes(1)
+    expect(d.quit).not.toHaveBeenCalled()
+    g.onBeforeQuit(ev())
+    await flush()
     expect(d.ask).toHaveBeenCalledTimes(2)
     expect(d.shutdown).not.toHaveBeenCalled()
   })
-  it('live + Quitter on close: quits, then before-quit shuts down without asking again', async () => {
+  it('live + Cmd+Q while the dialog is open: one dialog only', async () => {
     const { d, g } = mk('live', true)
-    g.onWindowClose(ev())
-    g.onWindowClose(ev()) // second click while the dialog is open: one dialog only
+    g.onBeforeQuit(ev())
+    g.onBeforeQuit(ev())
     await flush()
     expect(d.ask).toHaveBeenCalledTimes(1)
     expect(d.quit).toHaveBeenCalledTimes(1)
+  })
+  it('after Quitter, closing windows during the shutdown is not prevented', async () => {
+    const { d, g } = mk('live', true)
     g.onBeforeQuit(ev())
-    expect(d.ask).toHaveBeenCalledTimes(1)
+    await flush()
+    g.onBeforeQuit(ev())
     expect(d.shutdown).toHaveBeenCalledTimes(1)
+    const c = ev()
+    g.onWindowClose(c)
+    expect(c.preventDefault).not.toHaveBeenCalled()
+    expect(d.hide).not.toHaveBeenCalled()
   })
   it('live + Cmd+Q: asks, then shuts down on Quitter', async () => {
     const { d, g } = mk('live', true)

@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf, vi } from 'vitest'
-import { IPC, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
+import { EVENT_CHANNELS, IPC, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
 
 describe('IPC constants', () => {
   it('values are unique', () => {
@@ -13,7 +13,7 @@ describe('IPC constants', () => {
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
         'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput',
-        'appUninstall', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired'
+        'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand'
       ].sort()
     )
   })
@@ -34,6 +34,10 @@ function fake() {
 }
 
 it('sessions channel', () => { expect(IPC.sessionsList).toBe('sessions:list') })
+it('command event channel', () => {
+  expect(IPC.evtCommand).toBe('evt:command')
+  expect(EVENT_CHANNELS.command).toBe('evt:command')
+})
 
 describe('createLintoLiveApi', () => {
   it('methods invoke the right channel with args', async () => {
@@ -51,6 +55,7 @@ describe('createLintoLiveApi', () => {
     await api.live.terminate()
     await api.live.showOutputWindow()
     await api.app.uninstall()
+    await api.app.reportShellState({ loggedIn: true, sessionName: 'S', canStart: true })
     expect(invoke.mock.calls).toEqual([
       [IPC.authMethods],
       [IPC.authLoginLocal, 'a@b', 'pw'],
@@ -64,7 +69,8 @@ describe('createLintoLiveApi', () => {
       [IPC.liveStop],
       [IPC.liveTerminate],
       ['live:show-output'],
-      [IPC.appUninstall]
+      [IPC.appUninstall],
+      ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }]
     ])
   })
   it('passes the platform through', () => {

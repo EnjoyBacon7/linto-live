@@ -13,6 +13,11 @@ asarUnpack:
 extraResources:
   - from: resources/obs/SOURCE.md
     to: obs/SOURCE.md
+  # Menu-bar / tray icons (scripts/make-tray-icons.mjs), loaded from process.resourcesPath/tray.
+  - from: resources/tray
+    to: tray
+    filter:
+      - '*.png'
 mac:
   extraResources:
     - from: vendor/obs/macos

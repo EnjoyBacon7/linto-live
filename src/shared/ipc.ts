@@ -29,6 +29,19 @@ export interface LiveState {
 
 export type { Session }
 
+/** Actions of the app menu and the tray icon. */
+export type AppCommand =
+  | 'new-session' | 'start' | 'stop' | 'terminate' | 'show-output' | 'show-window' | 'logout' | 'uninstall' | 'quit'
+
+/** What the renderer tells main so the menus enable the right items. */
+export interface ShellReport {
+  loggedIn: boolean
+  /** Selected (or on-air) session. */
+  sessionName?: string
+  /** Démarrer is currently possible (session, camera and micro chosen, nothing in progress). */
+  canStart: boolean
+}
+
 export interface LintoLiveApi {
   /** process.platform of the app ('darwin' | 'linux' …): the sandboxed renderer cannot read it. */
   platform: 'darwin' | 'linux' | (string & {})
@@ -48,11 +61,16 @@ export interface LintoLiveApi {
     /** Opens (another) OBS output window, even if one is already open. */
     showOutputWindow(): Promise<void>
   }
-  app: { uninstall(): Promise<void> }
+  app: {
+    uninstall(): Promise<void>
+    reportShellState(s: ShellReport): Promise<void>
+  }
   on(evt: 'live-state', cb: (s: LiveState) => void): () => void
   on(evt: 'preview', cb: (dataUrl: string) => void): () => void
   on(evt: 'audio-level', cb: (db: number) => void): () => void
   on(evt: 'auth-required', cb: () => void): () => void
+  /** An app menu / tray command the renderer carries out (new-session, start, terminate, logout). */
+  on(evt: 'command', cb: (c: AppCommand) => void): () => void
 }
 
 export const IPC = {
@@ -69,19 +87,22 @@ export const IPC = {
   liveTerminate: 'live:terminate',
   liveShowOutput: 'live:show-output',
   appUninstall: 'app:uninstall',
+  shellState: 'shell:state',
   evtLiveState: 'evt:live-state',
   evtPreview: 'evt:preview',
   evtAudioLevel: 'evt:audio-level',
-  evtAuthRequired: 'evt:auth-required'
+  evtAuthRequired: 'evt:auth-required',
+  evtCommand: 'evt:command'
 } as const
 
-export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required'
+export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command'
 
 export const EVENT_CHANNELS: Record<EventName, string> = {
   'live-state': IPC.evtLiveState,
   preview: IPC.evtPreview,
   'audio-level': IPC.evtAudioLevel,
-  'auth-required': IPC.evtAuthRequired
+  'auth-required': IPC.evtAuthRequired,
+  command: IPC.evtCommand
 }
 
 /** Minimal transport (ipcRenderer-shaped) so the bridge is testable without Electron. */
@@ -110,7 +131,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput)
     },
-    app: { uninstall: () => call(IPC.appUninstall) },
+    app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {
       const channel = EVENT_CHANNELS[evt]
       const wrapper = (_e: unknown, ...args: unknown[]): void => (cb as (...a: unknown[]) => void)(...args)
