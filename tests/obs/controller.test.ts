@@ -3,8 +3,15 @@ import { ObsController, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_OVERLAY, SRC_VIDEO, t
 
 type Call = { req: string; data?: Record<string, unknown> }
 
-function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
+class CodedError extends Error {
+  constructor(public code: number, message: string) {
+    super(message)
+  }
+}
+
+function fakeClient(opts: { items?: unknown[]; failStart?: boolean; stopError?: Error } = {}) {
   let active = false
+  let starting = false
   const calls: Call[] = []
   const scenes = new Set<string>()
   const inputs = new Set<string>()
@@ -36,7 +43,11 @@ function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
           active = true
           return {}
         case 'StopStream':
+          if (opts.stopError) throw opts.stopError
+          // Like obs-websocket: 501 OutputNotRunning when no stream output exists
+          if (!active && !starting) throw new CodedError(501, 'The output is not running.')
           active = false
+          starting = false
           return {}
         case 'GetStreamStatus':
           return { outputActive: active }
@@ -54,7 +65,10 @@ function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
     async disconnect() {}
   }
   const emit = (evt: string, d: unknown) => handlers.get(evt)?.forEach((h) => h(d))
-  return { client, calls, emit, handlers }
+  const setStarting = (v: boolean): void => {
+    starting = v
+  }
+  return { client, calls, emit, handlers, setStarting }
 }
 const of = (calls: Call[], req: string) => calls.filter((c) => c.req === req)
 
@@ -196,14 +210,27 @@ describe('ObsController', () => {
       expect(of(f.calls, 'StartStream')).toHaveLength(2)
     })
 
-    it('stopStream only stops when active', async () => {
+    it('stopStream reports whether a stop was sent; nothing running is not an error', async () => {
       const f = fakeClient()
       const c = new ObsController(f.client)
-      await c.stopStream()
-      expect(of(f.calls, 'StopStream')).toHaveLength(0)
+      expect(await c.stopStream()).toBe(false)
       await c.startStream(svc)
-      await c.stopStream()
+      expect(await c.stopStream()).toBe(true)
+      expect(of(f.calls, 'StopStream')).toHaveLength(2)
+    })
+
+    it('stopStream sends StopStream while the stream is still connecting (not yet active)', async () => {
+      const f = fakeClient()
+      const c = new ObsController(f.client)
+      f.setStarting(true) // GetStreamStatus says outputActive: false during the SRT connect
+      expect(await c.stopStream()).toBe(true)
       expect(of(f.calls, 'StopStream')).toHaveLength(1)
+    })
+
+    it('stopStream rethrows other errors', async () => {
+      const f = fakeClient({ stopError: new CodedError(207, 'Not ready') })
+      const c = new ObsController(f.client)
+      await expect(c.stopStream()).rejects.toThrow('Not ready')
     })
 
     it('streamState$ maps events, reports error on failed start, unsubscribes', async () => {

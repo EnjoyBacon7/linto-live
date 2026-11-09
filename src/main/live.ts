@@ -558,8 +558,9 @@ export class LiveController extends EventEmitter {
       timer = setTimeout(resolve, waitMs)
     })
     try {
-      await c.stopStream()
-      await stopped
+      // false: OBS had no running output (e.g. the SRT connect is still pending) — no 'stopped' will
+      // come; if the connect succeeds later, onStreamState stops the unwanted stream.
+      if (await c.stopStream()) await stopped
     } catch {
       /* OBS gone or already stopped */
     } finally {
@@ -578,13 +579,21 @@ export class LiveController extends EventEmitter {
   private onStreamState(c: LiveObsController, s: StreamState): void {
     if (c !== this.ctl) return
     const live = this.state.phase === 'live' && !!this.current?.service
+    // A stream (re)starting while no show wants one — e.g. an SRT connect that succeeded after Arrêter —
+    // must not keep sending the room audio to LinTO.
+    const unwanted = this.stopRequested || (this.state.phase !== 'live' && this.state.phase !== 'starting')
     switch (s) {
       case 'starting':
         this.streamRunning = true
-        if (live) this.setState({ stream: 'starting' })
+        if (unwanted) void c.stopStream().catch(() => {})
+        else if (live) this.setState({ stream: 'starting' })
         return
       case 'active':
         this.streamRunning = true
+        if (unwanted) {
+          void c.stopStream().catch(() => {})
+          return
+        }
         this.retryAttempt = 0
         this.clearRetry()
         if (live) {

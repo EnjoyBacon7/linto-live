@@ -26,6 +26,8 @@ function fakeController(log: string[]) {
   let stateCb: ((s: StreamState) => void) | null = null
   const c = {
     autoStop: true,
+    /** stopStream() result: false = OBS answered "output not running" (e.g. still connecting). */
+    stopSent: true,
     ensureScene: vi.fn(async () => {}),
     listVideoDevices: vi.fn(async () => [{ id: 'cam', name: 'Cam' }]),
     listAudioDevices: vi.fn(async () => [{ id: 'mic', name: 'Mic' }]),
@@ -37,9 +39,10 @@ function fakeController(log: string[]) {
     startStream: vi.fn(async (s: { streamServiceSettings: { server: string } }) => {
       log.push(`startStream:${s.streamServiceSettings.server}`)
     }),
-    stopStream: vi.fn(async () => {
+    stopStream: vi.fn(async (): Promise<boolean> => {
       log.push('stopStream')
-      if (c.autoStop) queueMicrotask(() => stateCb?.('stopped'))
+      if (c.stopSent && c.autoStop) queueMicrotask(() => stateCb?.('stopped'))
+      return c.stopSent
     }),
     streamState$: vi.fn((cb: (s: StreamState) => void) => {
       stateCb = cb
@@ -362,6 +365,38 @@ describe('LiveController', () => {
     expect(t.log.indexOf('stopStream')).toBeLessThan(t.log.lastIndexOf(`startStream:${SRT_B}`))
     expect(t.last().warning).toBeUndefined()
     expect(t.last().session?.name).toBe('Autre')
+  })
+
+  it('Arrêter during the SRT connect is prompt; a stream that connects afterwards is stopped', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('starting')
+    c.stopSent = false // OBS: output not running yet
+    let done = false
+    const p = t.live.stop().then(() => (done = true))
+    await flush()
+    expect(done).toBe(true) // no 10 s wait for a 'stopped' that will not come
+    await p
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+    c.stopStream.mockClear()
+    c.stopSent = true
+    c.emitState('active') // the connect succeeded after Arrêter
+    expect(c.stopStream).toHaveBeenCalledTimes(1)
+    await flush()
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it('a stream becoming active while idle is stopped', async () => {
+    const t = setup()
+    await t.live.boot()
+    const c = t.ctl()
+    c.emitState('starting')
+    c.emitState('active')
+    expect(c.stopStream).toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
   })
 
   it('serializes concurrent start and stop', async () => {
