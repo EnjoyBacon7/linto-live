@@ -39,7 +39,7 @@ describe('Login', () => {
     expect(btn.disabled).toBe(true)
     await userEvent.type(screen.getByLabelText('Email'), 'a@b.c')
     await userEvent.type(screen.getByLabelText('Mot de passe'), 'pw{Enter}')
-    expect(window.lintoLive.auth.loginLocal).toHaveBeenCalledWith('a@b.c', 'pw')
+    expect(window.lintoLive.auth.loginLocal).toHaveBeenCalledWith('a@b.c', 'pw', false)
     await waitFor(() => expect(onLoggedIn).toHaveBeenCalled())
   })
 
@@ -100,5 +100,88 @@ describe('Login', () => {
     render(<Login embedded onLoggedIn={() => {}} onCancel={() => {}} />)
     expect(screen.getByText('studio.linto.ai')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Modifier' })).toBeNull()
+  })
+
+  it('fields carry the attributes password managers look for', () => {
+    window.lintoLive = makeApi()
+    render(<Login onLoggedIn={() => {}} />)
+    const email = screen.getByLabelText('Email') as HTMLInputElement
+    const pw = screen.getByLabelText('Mot de passe') as HTMLInputElement
+    expect([email.name, email.id, email.type, email.autocomplete]).toEqual(['username', 'login-email', 'email', 'username'])
+    expect([pw.name, pw.id, pw.type, pw.autocomplete]).toEqual(['password', 'login-password', 'password', 'current-password'])
+    expect(email.closest('form')?.getAttribute('name')).toBe('login')
+  })
+
+  it('« Se souvenir de moi »: unticked by default; ticking it asks main to keep the password', async () => {
+    window.lintoLive = makeApi()
+    render(<Login onLoggedIn={() => {}} />)
+    const box = (await screen.findByRole('checkbox', { name: 'Se souvenir de moi' })) as HTMLInputElement
+    expect(box.checked).toBe(false)
+    await userEvent.click(box)
+    await userEvent.type(screen.getByLabelText('Email'), 'a@b.c')
+    await userEvent.type(screen.getByLabelText('Mot de passe'), 'pw{Enter}')
+    expect(window.lintoLive.auth.loginLocal).toHaveBeenCalledWith('a@b.c', 'pw', true)
+  })
+
+  it('a saved login fills the form and keeps the box ticked; one click logs in', async () => {
+    const onLoggedIn = vi.fn()
+    window.lintoLive = makeApi({
+      auth: { savedLogin: vi.fn().mockResolvedValue({ canRemember: true, login: { email: 'moi@linagora.com', password: 'S3cret' } }) }
+    })
+    render(<Login onLoggedIn={onLoggedIn} />)
+    await waitFor(() => expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('moi@linagora.com'))
+    expect((screen.getByLabelText('Mot de passe') as HTMLInputElement).value).toBe('S3cret')
+    expect((screen.getByRole('checkbox', { name: 'Se souvenir de moi' }) as HTMLInputElement).checked).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Se connecter' }))
+    expect(window.lintoLive.auth.loginLocal).toHaveBeenCalledWith('moi@linagora.com', 'S3cret', true)
+    await waitFor(() => expect(onLoggedIn).toHaveBeenCalled())
+  })
+
+  it('unticking the box of a saved login asks main to forget it', async () => {
+    window.lintoLive = makeApi({
+      auth: { savedLogin: vi.fn().mockResolvedValue({ canRemember: true, login: { email: 'a@b.c', password: 'pw' } }) }
+    })
+    render(<Login onLoggedIn={() => {}} />)
+    const box = (await screen.findByRole('checkbox', { name: 'Se souvenir de moi' })) as HTMLInputElement
+    await waitFor(() => expect(box.checked).toBe(true))
+    await userEvent.click(box)
+    await userEvent.click(screen.getByRole('button', { name: 'Se connecter' }))
+    expect(window.lintoLive.auth.loginLocal).toHaveBeenCalledWith('a@b.c', 'pw', false)
+  })
+
+  it('a late saved login never overwrites what the user already typed', async () => {
+    let resolve!: (v: unknown) => void
+    window.lintoLive = makeApi({ auth: { savedLogin: vi.fn().mockReturnValue(new Promise((r) => { resolve = r })) } })
+    render(<Login onLoggedIn={() => {}} />)
+    await userEvent.type(screen.getByLabelText('Email'), 'autre@x.fr')
+    resolve({ canRemember: true, login: { email: 'a@b.c', password: 'pw' } })
+    await screen.findByRole('checkbox', { name: 'Se souvenir de moi' })
+    expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('autre@x.fr')
+    expect((screen.getByLabelText('Mot de passe') as HTMLInputElement).value).toBe('')
+  })
+
+  it('no keychain (canRemember false): no checkbox, nothing is remembered', async () => {
+    window.lintoLive = makeApi({ auth: { savedLogin: vi.fn().mockResolvedValue({ canRemember: false, login: null }) } })
+    render(<Login onLoggedIn={() => {}} />)
+    await waitFor(() => expect(window.lintoLive.auth.savedLogin).toHaveBeenCalled())
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    await userEvent.type(screen.getByLabelText('Email'), 'a@b.c')
+    await userEvent.type(screen.getByLabelText('Mot de passe'), 'pw{Enter}')
+    expect(window.lintoLive.auth.loginLocal).toHaveBeenCalledWith('a@b.c', 'pw')
+  })
+
+  it('changing the instance drops a prefilled password (the saved login belonged to the old instance)', async () => {
+    window.lintoLive = makeApi({
+      auth: { savedLogin: vi.fn().mockResolvedValue({ canRemember: true, login: { email: 'a@b.c', password: 'pw' } }) }
+    })
+    render(<Login onLoggedIn={() => {}} />)
+    await waitFor(() => expect((screen.getByLabelText('Mot de passe') as HTMLInputElement).value).toBe('pw'))
+    await userEvent.click(screen.getByRole('button', { name: 'Modifier' }))
+    await userEvent.type(screen.getByLabelText('Instance LinTO'), 'x')
+    await userEvent.tab()
+    await waitFor(() => expect(window.lintoLive.setup.save).toHaveBeenCalled())
+    await waitFor(() => expect((screen.getByLabelText('Mot de passe') as HTMLInputElement).value).toBe(''))
+    expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('a@b.c')
+    expect((screen.getByRole('checkbox', { name: 'Se souvenir de moi' }) as HTMLInputElement).checked).toBe(false)
   })
 })

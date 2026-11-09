@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import { UnauthorizedError, type AuthMethod } from '../../shared/types'
+import { UnauthorizedError, type AuthMethod, type SavedLogin } from '../../shared/types'
 import type { LintoApi } from './api'
 import type { LintoUrls } from './instance'
 
@@ -32,6 +32,51 @@ export async function loginWithPassword(api: LintoApi, email: string, password: 
     if (e instanceof UnauthorizedError) throw new InvalidCredentialsError()
     throw e
   }
+}
+
+/**
+ * A password is only kept when the OS keychain protects it. On Linux without a secret service, Electron
+ * falls back to a hardcoded key ('basic_text'), which would amount to storing the password in clear.
+ */
+export function canRememberLogin(platform: string, encryptionAvailable: boolean, linuxBackend?: string): boolean {
+  if (!encryptionAvailable) return false
+  if (platform === 'linux') return linuxBackend !== undefined && linuxBackend !== 'basic_text' && linuxBackend !== 'unknown'
+  return true
+}
+
+/** After a successful password login: remember (ticked), forget (unticked), or leave as is (not asked). */
+export function applyRemember(
+  store: { setSavedLogin(l: SavedLogin | null): void },
+  canRemember: boolean,
+  email: string,
+  password: string,
+  remember: boolean | undefined
+): void {
+  if (!canRemember) store.setSavedLogin(null)
+  else if (remember === true) store.setSavedLogin({ email, password })
+  else if (remember === false) store.setSavedLogin(null)
+}
+
+const hostOf = (url: string): string => {
+  try { return new URL(url).host } catch { return '' }
+}
+
+/**
+ * Main window title. On the login screen it names the instance host: desktop password managers that
+ * fill other apps (1Password, Bitwarden, KeePassXC auto-type) match their entries on the window title.
+ */
+export function mainWindowTitle(loggedIn: boolean, instance: string): string {
+  if (loggedIn) return 'LinTO Live'
+  const h = hostOf(instance.trim().replace(/\/+$/, ''))
+  return h ? `Connexion à LinTO — ${h}` : 'Connexion à LinTO'
+}
+
+/** SSO window title: the page's title plus the host it comes from (the identity provider's, for matching). */
+export function ssoWindowTitle(pageTitle: string, url: string): string {
+  const h = hostOf(url)
+  const t = pageTitle.trim()
+  if (!h) return t
+  return t && t !== h ? `${t} — ${h}` : h
 }
 
 export type NavEvent = 'will-redirect' | 'will-navigate' | 'did-navigate' | 'did-redirect-navigation'
@@ -114,6 +159,10 @@ export async function ssoLogin(
       }
     }
     const wc = win.webContents
+    let pageTitle = ''
+    const retitle = (): void => { if (!win.isDestroyed()) win.setTitle(ssoWindowTitle(pageTitle, wc.getURL())) }
+    wc.on('page-title-updated', (e, t) => { e.preventDefault(); pageTitle = t; retitle() })
+    wc.on('did-navigate', retitle)
     wc.on('will-redirect', (e, url) => check('will-redirect', e, url))
     wc.on('will-navigate', (e, url) => check('will-navigate', e, url))
     wc.on('did-navigate', (_e, url) => check('did-navigate', null, url))

@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { classifyRedirect, createRedirectHandler, loginWithPassword, InvalidCredentialsError } from '../../src/main/linto/auth'
+import { describe, it, expect, vi } from 'vitest'
+import {
+  applyRemember, canRememberLogin, classifyRedirect, createRedirectHandler, loginWithPassword, mainWindowTitle,
+  ssoWindowTitle, InvalidCredentialsError
+} from '../../src/main/linto/auth'
 import { UnauthorizedError } from '../../src/shared/types'
 import type { LintoApi } from '../../src/main/linto/api'
 
@@ -43,5 +46,41 @@ describe('createRedirectHandler', () => {
   })
   it('ignores other urls', () => {
     expect(createRedirectHandler(I)('did-navigate', 'https://evil.test/login/oidc').action).toBe('ignore')
+  })
+})
+
+describe('saved login (« Se souvenir de moi »)', () => {
+  it('only offered when the OS keychain really protects it', () => {
+    expect(canRememberLogin('darwin', true)).toBe(true)
+    expect(canRememberLogin('darwin', false)).toBe(false)
+    expect(canRememberLogin('linux', true, 'gnome_libsecret')).toBe(true)
+    expect(canRememberLogin('linux', true, 'kwallet6')).toBe(true)
+    expect(canRememberLogin('linux', true, 'basic_text')).toBe(false)
+    expect(canRememberLogin('linux', true, 'unknown')).toBe(false)
+    expect(canRememberLogin('linux', false, 'gnome_libsecret')).toBe(false)
+  })
+  it('after a successful login: save when ticked, forget when unticked, untouched otherwise', () => {
+    const store = { setSavedLogin: vi.fn() }
+    applyRemember(store, true, 'a@b.c', 'pw', true)
+    expect(store.setSavedLogin).toHaveBeenLastCalledWith({ email: 'a@b.c', password: 'pw' })
+    applyRemember(store, true, 'a@b.c', 'pw', false)
+    expect(store.setSavedLogin).toHaveBeenLastCalledWith(null)
+    applyRemember(store, true, 'a@b.c', 'pw', undefined)
+    expect(store.setSavedLogin).toHaveBeenCalledTimes(2)
+    applyRemember(store, false, 'a@b.c', 'pw', true) // no keychain: never stored
+    expect(store.setSavedLogin).toHaveBeenLastCalledWith(null)
+  })
+})
+
+describe('window titles password managers match on', () => {
+  it('login screen names the instance host', () => {
+    expect(mainWindowTitle(false, 'https://studio.linto.ai')).toBe('Connexion à LinTO — studio.linto.ai')
+    expect(mainWindowTitle(false, 'http://localhost:8080/')).toBe('Connexion à LinTO — localhost:8080')
+    expect(mainWindowTitle(true, 'https://studio.linto.ai')).toBe('LinTO Live')
+  })
+  it('SSO window: page title plus the host of the page being shown', () => {
+    expect(ssoWindowTitle('Sign in - Google Accounts', 'https://accounts.google.com/v3/signin?x=1')).toBe('Sign in - Google Accounts — accounts.google.com')
+    expect(ssoWindowTitle('', 'https://idp.example.org/login')).toBe('idp.example.org')
+    expect(ssoWindowTitle('Connexion', 'about:blank')).toBe('Connexion')
   })
 })

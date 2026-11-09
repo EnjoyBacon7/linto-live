@@ -1,12 +1,12 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { AppPaths } from './paths'
-import type { Settings } from '../shared/types'
+import type { SavedLogin, Settings } from '../shared/types'
 
 export interface TokenCrypto { encrypt(s: string): Buffer; decrypt(b: Buffer): string }
 export const DEFAULT_INSTANCE = 'https://studio.linto.ai'
 
-interface Stored extends Settings { tokenEnc?: string }
+interface Stored extends Settings { tokenEnc?: string; savedLoginEnc?: string }
 
 const DEV_HOSTS = new Set(['localhost', '127.0.0.1'])
 
@@ -50,17 +50,20 @@ export class SettingsStore {
 
   get(): Settings {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { tokenEnc, ...rest } = this.data
+    const { tokenEnc, savedLoginEnc, ...rest } = this.data
     return { ...rest }
   }
 
-  /** Throws on an invalid instance URL; changing the instance drops the token in the same write. */
+  /** Throws on an invalid instance URL; changing the instance drops the token and the saved login in the same write. */
   update(patch: Partial<Settings>): void {
     const clean = { ...patch }
     if (clean.instance === undefined) delete clean.instance
     else clean.instance = checkInstance(clean.instance)
     const next: Stored = { ...this.data, ...clean }
-    if (clean.instance !== undefined && clean.instance !== this.data.instance) delete next.tokenEnc
+    if (clean.instance !== undefined && clean.instance !== this.data.instance) {
+      delete next.tokenEnc
+      delete next.savedLoginEnc
+    }
     this.data = next
     this.save()
   }
@@ -77,6 +80,22 @@ export class SettingsStore {
   setToken(t: string | null): void {
     if (t === null) delete this.data.tokenEnc
     else this.data.tokenEnc = this.crypto.encrypt(t).toString('base64')
+    this.save()
+  }
+
+  getSavedLogin(): SavedLogin | null {
+    if (!this.data.savedLoginEnc) return null
+    try {
+      const v = JSON.parse(this.crypto.decrypt(Buffer.from(this.data.savedLoginEnc, 'base64'))) as Partial<SavedLogin>
+      return typeof v?.email === 'string' && typeof v.password === 'string' ? { email: v.email, password: v.password } : null
+    } catch {
+      return null
+    }
+  }
+
+  setSavedLogin(l: SavedLogin | null): void {
+    if (l === null) delete this.data.savedLoginEnc
+    else this.data.savedLoginEnc = this.crypto.encrypt(JSON.stringify({ email: l.email, password: l.password })).toString('base64')
     this.save()
   }
 }

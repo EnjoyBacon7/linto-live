@@ -13,6 +13,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     platform: 'darwin',
     auth: {
       methods: vi.fn().mockResolvedValue([]), loginLocal: vi.fn().mockResolvedValue(undefined),
+      savedLogin: vi.fn().mockResolvedValue({ canRemember: true, login: null }),
       loginSso: vi.fn().mockResolvedValue(undefined), logout: vi.fn(), status: vi.fn().mockResolvedValue({ loggedIn: true }),
       ...over.auth
     },
