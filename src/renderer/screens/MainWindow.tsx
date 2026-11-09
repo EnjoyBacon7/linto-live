@@ -69,11 +69,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const liveName = onAir ? state.session?.name : undefined
 
   // ---- Data ----
-  const loadSetup = useCallback(async (): Promise<SetupData | null> => {
+  /** `keepSettings`: a background reload (OBS came up) refreshes the lists only, never an edit in progress. */
+  const loadSetup = useCallback(async (keepSettings = false): Promise<SetupData | null> => {
     try {
       const d = await window.lintoLive.setup.load()
       setData(d)
-      setSettings(d.settings)
+      setSettings((cur) => (keepSettings && cur ? cur : d.settings))
       setLoadError(null)
       return d
     } catch (e) {
@@ -103,6 +104,14 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     const t = setInterval(() => { if (!authRequiredRef.current) void refresh() }, REFRESH_MS)
     return () => { alive = false; clearInterval(t) }
   }, [loadSetup, refresh])
+
+  // OBS is still booting at launch (no devices listed yet): reload the lists once it is running.
+  const prevObs = useRef<LiveState['obs'] | null>(null)
+  useEffect(() => {
+    const prev = prevObs.current
+    prevObs.current = state.obs
+    if (prev !== null && prev !== 'running' && state.obs === 'running') void loadSetup(true)
+  }, [state.obs, loadSetup])
 
   // The selection follows the session on air (start/switch from here, the menu or the tray).
   useEffect(() => {

@@ -647,3 +647,21 @@ describe('Final review fixes', () => {
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })
 })
+
+describe('Devices at launch', () => {
+  it('reloads the setup data when OBS becomes running, so the saved camera shows its name', async () => {
+    const load = vi.fn()
+      .mockResolvedValueOnce(setupData({}, { videoDevices: [], audioDevices: [] }))
+      .mockResolvedValue(setupData())
+    setup({ live: { getState: vi.fn().mockResolvedValue({ ...IDLE, obs: 'down' }) } as never, setup: { load } as never })
+    await renderMain()
+    expect(load).toHaveBeenCalledTimes(1)
+    const cam = () => screen.getByLabelText('Caméra') as HTMLSelectElement
+    expect(cam().selectedOptions[0]?.textContent).toBe('Choisir…')
+    act(() => emit('live-state', IDLE))
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(cam().selectedOptions[0]?.textContent).toBe('Capture HDMI'))
+    act(() => emit('live-state', { ...IDLE, output: 'shown' }))
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+})
