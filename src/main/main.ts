@@ -276,6 +276,8 @@ function main(): void {
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   ipcMain.handle(IPC.liveGetState, () => live.getState())
+  ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
+  ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
@@ -387,6 +389,14 @@ function main(): void {
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
+  // A reloaded (or crashed) page re-subscribes when its preview mounts.
+  win.webContents.on('did-start-loading', () => live.setPreviewSubscribed(false))
+  win.webContents.on('render-process-gone', () => live.setPreviewSubscribed(false))
+  // No OBS screenshots nor audio levels for a window nobody sees.
+  win.on('hide', () => live.setWindowVisible(false))
+  win.on('minimize', () => live.setWindowVisible(false))
+  win.on('show', () => live.setWindowVisible(!win?.isMinimized()))
+  win.on('restore', () => live.setWindowVisible(true))
   app.on('activate', showWindow) // Dock click brings back a window hidden during a show
 
   rebuildShell()

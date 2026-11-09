@@ -9,6 +9,12 @@ export interface StageProps {
 export function Stage({ hasCamera, banners }: StageProps) {
   const [preview, setPreview] = useState<string | null>(null)
   useEffect(() => window.lintoLive.on('preview', setPreview), [])
+  // Main polls OBS for the preview only while it is displayed (a camera is chosen).
+  useEffect(() => {
+    if (!hasCamera) return
+    void window.lintoLive.preview.subscribe().catch(() => {})
+    return () => void window.lintoLive.preview.unsubscribe().catch(() => {})
+  }, [hasCamera])
 
   return (
     <section className="stage" aria-label="Aperçu">

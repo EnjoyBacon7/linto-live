@@ -25,6 +25,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       ...over.live
     },
     app: { uninstall: vi.fn().mockResolvedValue(undefined), reportShellState: vi.fn().mockResolvedValue(undefined), ...over.app },
+    preview: { subscribe: vi.fn().mockResolvedValue(undefined), unsubscribe: vi.fn().mockResolvedValue(undefined), ...over.preview },
     on: vi.fn().mockReturnValue(() => {})
   }
   return api as unknown as LintoLiveApi

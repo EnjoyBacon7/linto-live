@@ -67,7 +67,7 @@ function fakeController(log: string[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[] } = {}) {
+function setup(opts: { sessions?: Session[]; preview?: boolean } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
@@ -126,6 +126,7 @@ function setup(opts: { sessions?: Session[] } = {}) {
   }
   const deps = { obs, controllerFactory, api, captions, overlay, settings, platform: 'darwin' as const } satisfies LiveDeps
   const live = new LiveController(deps)
+  if (opts.preview !== false) live.setPreviewSubscribed(true) // the main window shows the preview
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
@@ -667,6 +668,54 @@ describe('LiveController final fixes', () => {
       const n = t.ctl().screenshot.mock.calls.length
       await vi.advanceTimersByTimeAsync(1000)
       expect(t.ctl().screenshot.mock.calls.length).toBe(n)
+    })
+  })
+
+  describe('preview and audio level only while someone looks at them', () => {
+    it('no screenshots until the renderer subscribes; none after it unsubscribes', async () => {
+      const t = setup({ preview: false })
+      await t.live.boot()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).not.toHaveBeenCalled()
+      t.live.setPreviewSubscribed(true)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+      t.live.setPreviewSubscribed(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('a subscription made before OBS is attached starts the preview on attach', async () => {
+      const t = setup({ preview: false })
+      t.live.setPreviewSubscribed(true)
+      await t.live.boot()
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('pauses while the window is hidden or minimised, resumes when shown', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.live.setWindowVisible(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).not.toHaveBeenCalled()
+      t.live.setWindowVisible(true)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('audio levels are not forwarded while the window is hidden', async () => {
+      const t = setup()
+      await t.live.boot()
+      const cb = (t.ctl().audioLevel$.mock.calls as unknown as [(db: number) => void][])[0][0]
+      const levels: number[] = []
+      t.live.on('audio-level', (db: number) => levels.push(db))
+      cb(-20)
+      t.live.setWindowVisible(false)
+      cb(-10)
+      t.live.setWindowVisible(true)
+      cb(-5)
+      expect(levels).toEqual([-20, -5])
     })
   })
 

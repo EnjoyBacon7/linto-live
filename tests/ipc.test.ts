@@ -13,7 +13,8 @@ describe('IPC constants', () => {
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
         'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState',
-        'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtCaptionLine'
+        'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtCaptionLine',
+        'previewSubscribe', 'previewUnsubscribe'
       ].sort()
     )
   })
@@ -58,6 +59,8 @@ describe('createLintoLiveApi', () => {
     await api.live.getState()
     await api.app.uninstall()
     await api.app.reportShellState({ loggedIn: true, sessionName: 'S', canStart: true })
+    await api.preview.subscribe()
+    await api.preview.unsubscribe()
     expect(invoke.mock.calls).toEqual([
       [IPC.authMethods],
       [IPC.authLoginLocal, 'a@b', 'pw'],
@@ -73,7 +76,9 @@ describe('createLintoLiveApi', () => {
       ['live:show-output'],
       ['live:get-state'],
       [IPC.appUninstall],
-      ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }]
+      ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }],
+      ['preview:subscribe'],
+      ['preview:unsubscribe']
     ])
   })
   it('passes the platform through', () => {

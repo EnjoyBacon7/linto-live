@@ -392,9 +392,20 @@ describe('Stage, inspector and status bar', () => {
     await renderMain()
     expect(screen.getByText('Choisis une caméra')).toBeTruthy()
     expect(screen.getByText('Sortie OBS — ce qui s\'affiche dans la fenêtre de sortie')).toBeTruthy()
+    expect(api.preview.subscribe).not.toHaveBeenCalled() // no camera: no preview polling
     await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
     act(() => emit('preview', 'data:image/jpeg;base64,AAA'))
     expect((screen.getByRole('img', { name: 'Aperçu de la sortie OBS' }) as HTMLImageElement).src).toBe('data:image/jpeg;base64,AAA')
+  })
+
+  it('the preview subscription is dropped when the main window unmounts', async () => {
+    setup()
+    await renderMain()
+    expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
+    expect(api.preview.unsubscribe).not.toHaveBeenCalled()
+    cleanup()
+    expect(api.preview.unsubscribe).toHaveBeenCalledTimes(1)
   })
 
   it('micro change is saved; the level meter follows audio-level', async () => {

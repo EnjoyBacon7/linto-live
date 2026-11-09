@@ -66,6 +66,11 @@ export interface LintoLiveApi {
     uninstall(): Promise<void>
     reportShellState(s: ShellReport): Promise<void>
   }
+  /** The 'preview' event only flows while subscribed (and the window is visible): OBS screenshots cost CPU. */
+  preview: {
+    subscribe(): Promise<void>
+    unsubscribe(): Promise<void>
+  }
   on(evt: 'live-state', cb: (s: LiveState) => void): () => void
   on(evt: 'preview', cb: (dataUrl: string) => void): () => void
   on(evt: 'audio-level', cb: (db: number) => void): () => void
@@ -92,6 +97,8 @@ export const IPC = {
   liveGetState: 'live:get-state',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
+  previewSubscribe: 'preview:subscribe',
+  previewUnsubscribe: 'preview:unsubscribe',
   evtLiveState: 'evt:live-state',
   evtPreview: 'evt:preview',
   evtAudioLevel: 'evt:audio-level',
@@ -139,6 +146,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       getState: () => call(IPC.liveGetState)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
+    preview: { subscribe: () => call(IPC.previewSubscribe), unsubscribe: () => call(IPC.previewUnsubscribe) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {
       const channel = EVENT_CHANNELS[evt]
       const wrapper = (_e: unknown, ...args: unknown[]): void => (cb as (...a: unknown[]) => void)(...args)

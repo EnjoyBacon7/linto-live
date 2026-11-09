@@ -81,7 +81,8 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
  * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'() 'caption-line'(text, '' = cleared).
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
- * The preview runs whenever OBS is attached. No request closes or lists projectors: the output window is
+ * The preview runs while OBS is attached, the renderer shows it (setPreviewSubscribed) and the window is
+ * visible (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists projectors: the output window is
  * opened once per OBS run by the first show (Arrêter leaves it open, black) and on demand by showOutputWindow.
  */
 export class LiveController extends EventEmitter {
@@ -100,6 +101,8 @@ export class LiveController extends EventEmitter {
   private retryAttempt = 0
   private previewTimer: NodeJS.Timeout | null = null
   private previewBusy = false
+  private previewSubscribed = false
+  private windowVisible = true
   private intentionalObsStop = false
   private shuttingDown = false
   private restartGen = 0
@@ -250,6 +253,18 @@ export class LiveController extends EventEmitter {
     this.setState({ obs: 'down' })
   }
 
+  /** The renderer shows (or stops showing) the preview. */
+  setPreviewSubscribed(on: boolean): void {
+    this.previewSubscribed = on
+    this.updatePreview()
+  }
+
+  /** The main window was shown/restored (true) or hidden/minimised (false). */
+  setWindowVisible(on: boolean): void {
+    this.windowVisible = on
+    this.updatePreview()
+  }
+
   /** After a successful re-login: re-open captions on the session being shown. */
   resumeCaptions(): void {
     this.authLost = false
@@ -359,7 +374,11 @@ export class LiveController extends EventEmitter {
       return
     }
     const ready = c
-    this.unsubs.push(ready.audioLevel$((db) => this.emit('audio-level', db)))
+    this.unsubs.push(
+      ready.audioLevel$((db) => {
+        if (this.windowVisible) this.emit('audio-level', db)
+      })
+    )
     this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
     this.ctl = ready
     this.attachedConn = conn
@@ -373,7 +392,7 @@ export class LiveController extends EventEmitter {
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
-    this.startPreview()
+    this.updatePreview()
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
 
@@ -676,6 +695,15 @@ export class LiveController extends EventEmitter {
   private clearRetry(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = null
+  }
+
+  /** Polls OBS screenshots only when someone can see them. */
+  private updatePreview(): void {
+    if (this.ctl && this.previewSubscribed && this.windowVisible) {
+      if (!this.previewTimer) this.startPreview()
+    } else {
+      this.stopPreview()
+    }
   }
 
   private startPreview(): void {
