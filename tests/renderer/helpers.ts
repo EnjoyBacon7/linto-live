@@ -7,8 +7,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     organizations: [{ id: 'o1', name: 'Org' }],
     profiles: [{ id: 1, name: 'Français' }],
     videoDevices: [{ id: 'v1', name: 'Capture HDMI' }],
-    audioDevices: [{ id: 'a1', name: 'Micro' }],
-    displays: [{ index: 0, name: 'HDMI-1', x: 0, y: 0, width: 1920, height: 1080 }]
+    audioDevices: [{ id: 'a1', name: 'Micro' }]
   }
   const api = {
     auth: {
@@ -19,7 +18,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     setup: { load: vi.fn().mockResolvedValue(setupData), save: vi.fn().mockResolvedValue(undefined), ...over.setup },
     live: {
       start: vi.fn().mockResolvedValue({ ok: true, reused: false, canStream: true }), stop: vi.fn().mockResolvedValue(undefined),
-      terminate: vi.fn().mockResolvedValue(undefined), changeDisplay: vi.fn().mockResolvedValue(undefined), ...over.live
+      terminate: vi.fn().mockResolvedValue(undefined), showOutputWindow: vi.fn().mockResolvedValue(undefined), ...over.live
     },
     app: { uninstall: vi.fn().mockResolvedValue(undefined), ...over.app },
     on: vi.fn().mockReturnValue(() => {})

@@ -1,6 +1,6 @@
 import type { LiveState } from '../shared/ipc'
 
-/** Electron-free helpers for main.ts (single instance, quit confirmation, display hot-plug). */
+/** Electron-free helpers for main.ts (single instance, quit confirmation). */
 
 interface LockApp {
   requestSingleInstanceLock(): boolean
@@ -98,33 +98,5 @@ export function createQuitGuard(d: QuitGuardDeps): {
     markQuitting() {
       quitting = true
     }
-  }
-}
-
-interface ScreenEvents {
-  on(event: 'display-added' | 'display-removed' | 'display-metrics-changed', listener: () => void): unknown
-  removeListener(event: 'display-added' | 'display-removed' | 'display-metrics-changed', listener: () => void): unknown
-}
-
-const DISPLAY_EVENTS = ['display-added', 'display-removed', 'display-metrics-changed'] as const
-
-/**
- * Calls `onChange` after display hot-plug, debounced (bursts of events), and once more a few seconds
- * later: OBS's monitor list can lag behind Electron's.
- */
-export function watchDisplays(screen: ScreenEvents, onChange: () => void, delaysMs: number[] = [1_000, 5_000]): () => void {
-  let timers: ReturnType<typeof setTimeout>[] = []
-  const clear = (): void => {
-    timers.forEach(clearTimeout)
-    timers = []
-  }
-  const handler = (): void => {
-    clear()
-    timers = delaysMs.map((ms) => setTimeout(onChange, ms))
-  }
-  for (const e of DISPLAY_EVENTS) screen.on(e, handler)
-  return () => {
-    clear()
-    for (const e of DISPLAY_EVENTS) screen.removeListener(e, handler)
   }
 }

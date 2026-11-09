@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type LiveState, type SetupData } from '../shared/ipc'
-import type { SavedDisplay, Settings } from '../shared/types'
+import type { Settings } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -20,7 +20,7 @@ import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { loadSetupData } from './setupData'
-import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow, watchDisplays } from './appLifecycle'
+import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow } from './appLifecycle'
 
 const SHUTDOWN_CAP_MS = 15_000
 
@@ -114,9 +114,6 @@ function main(): void {
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   live.on('auth-required', () => send(IPC.evtAuthRequired))
 
-  // HDMI unplug/replug: OBS closes the projector of a vanished display; the controller reopens it.
-  watchDisplays(screen, () => void live.displaysChanged().catch((e) => console.error('display change', e)))
-
   const loggedIn = (t: string): void => {
     settings.setToken(t)
     live.resumeCaptions()
@@ -143,9 +140,7 @@ function main(): void {
 
   ipcMain.handle(IPC.setupLoad, async (): Promise<SetupData> => {
     await ensureUrls()
-    // The display showing this window (else the primary): projecting there would cover the app.
-    const { x, y, width, height } = (win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay()).bounds
-    const data = await loadSetupData({
+    return loadSetupData({
       getSettings: () => settings.get(),
       hasToken: () => settings.getToken() !== null,
       organizations: () => api.organizations(),
@@ -155,7 +150,6 @@ function main(): void {
       // Clears a stale token (unless a show is live) and asks the UI to log in.
       onUnauthorized: () => live.reportUnauthorized()
     })
-    return { ...data, appDisplay: { x, y, width, height } }
   })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
   ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))
@@ -166,7 +160,7 @@ function main(): void {
   })
   ipcMain.handle(IPC.liveStop, () => live.stop())
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
-  ipcMain.handle(IPC.liveChangeDisplay, (_e, d: SavedDisplay) => live.changeDisplay(d))
+  ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {

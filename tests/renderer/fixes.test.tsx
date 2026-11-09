@@ -14,7 +14,7 @@ const fn = (x: unknown) => x as ReturnType<typeof vi.fn>
 
 describe('Login instance field', () => {
   it('does not save on blur when unchanged (trailing slash ignored)', async () => {
-    const api = makeApi({ setup: { load: vi.fn().mockResolvedValue({ settings: { instance: 'https://my.linto/' }, organizations: [], profiles: [], videoDevices: [], audioDevices: [], displays: [] }) } })
+    const api = makeApi({ setup: { load: vi.fn().mockResolvedValue({ settings: { instance: 'https://my.linto/' }, organizations: [], profiles: [], videoDevices: [], audioDevices: [] }) } })
     window.lintoLive = api
     render(<Login onLoggedIn={() => {}} />)
     await userEvent.click(screen.getByText('Avancé'))

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { SetupData } from '../../shared/ipc'
-import type { MonitorInfo, Settings } from '../../shared/types'
+import type { Settings } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { ipcErrorMessage } from '../ipcError'
 
@@ -44,10 +44,6 @@ export function Setup({ onStarted, warning: initialWarning }: { onStarted: (reus
       else setError(r.message)
     } catch (e) { setError(ipcErrorMessage(e)) } finally { setBusy(false) }
   }
-  const displayIdx = data.displays.findIndex((d) => d.name === settings.output?.name && d.x === settings.output?.x && d.y === settings.output?.y)
-  // Same origin as the display showing this window (origins agree between Electron and OBS, sizes may be scaled).
-  const isAppDisplay = (d: MonitorInfo): boolean => !!data.appDisplay && d.x === data.appDisplay.x && d.y === data.appDisplay.y
-  const coversApp = displayIdx >= 0 && isAppDisplay(data.displays[displayIdx])
 
   return (
     <form className="card setup" onSubmit={(e) => { e.preventDefault(); if (ready && !busy) void start() }}>
@@ -80,16 +76,6 @@ export function Setup({ onStarted, warning: initialWarning }: { onStarted: (reus
         </select>
       </label>
       <VuMeter />
-      <label>Écran de sortie
-        <select value={displayIdx >= 0 ? displayIdx : ''} onChange={(e) => {
-          const d = data.displays[Number(e.target.value)]
-          if (d) void change({ output: { name: d.name, x: d.x, y: d.y, width: d.width, height: d.height } })
-        }}>
-          <option value="" disabled>Choisir…</option>
-          {data.displays.map((d, i) => <option key={i} value={i}>{d.name} ({d.width}×{d.height}){isAppDisplay(d) ? ' (écran de cette fenêtre)' : ''}</option>)}
-        </select>
-      </label>
-      {coversApp && <p className="warn">Attention : la sortie plein écran couvrira cette fenêtre. Choisis l'écran du projecteur ou de la TV.</p>}
       <label>Nom de la session
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={() => void change({ lastSessionName: name.trim() })} />
       </label>

@@ -1,5 +1,5 @@
 import type {
-  AuthMethod, DeviceItem, MonitorInfo, Organization, SavedDisplay, Session, SessionStatus, Settings,
+  AuthMethod, DeviceItem, Organization, Session, SessionStatus, Settings,
   TranscriberProfile
 } from './types'
 
@@ -9,9 +9,6 @@ export interface SetupData {
   profiles: TranscriberProfile[]
   videoDevices: DeviceItem[]
   audioDevices: DeviceItem[]
-  displays: MonitorInfo[]
-  /** Bounds of the display showing the app window (projecting there would cover the app). */
-  appDisplay?: { x: number; y: number; width: number; height: number }
 }
 
 export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { ok: false; message: string }
@@ -22,7 +19,10 @@ export interface LiveState {
   stream: 'off' | 'starting' | 'active' | 'error' | 'unavailable'
   captions: 'connecting' | 'live' | 'offline'
   obs: 'running' | 'restarting' | 'down'
-  output: 'shown' | 'display-missing' | 'off'
+  /** 'shown': an output window was opened during the current OBS run (it stays open, black, after Arrêter). */
+  output: 'shown' | 'off'
+  /** ms epoch when the current session went live (absent when not live). */
+  startedAt?: number
   lastLine?: string
   warning?: string
 }
@@ -42,7 +42,8 @@ export interface LintoLiveApi {
     start(sessionName: string): Promise<StartResult>
     stop(): Promise<void>
     terminate(): Promise<void>
-    changeDisplay(d: SavedDisplay): Promise<void>
+    /** Opens (another) OBS output window, even if one is already open. */
+    showOutputWindow(): Promise<void>
   }
   app: { uninstall(): Promise<void> }
   on(evt: 'live-state', cb: (s: LiveState) => void): () => void
@@ -62,7 +63,7 @@ export const IPC = {
   liveStart: 'live:start',
   liveStop: 'live:stop',
   liveTerminate: 'live:terminate',
-  liveChangeDisplay: 'live:change-display',
+  liveShowOutput: 'live:show-output',
   appUninstall: 'app:uninstall',
   evtLiveState: 'evt:live-state',
   evtPreview: 'evt:preview',
@@ -101,7 +102,7 @@ export function createLintoLiveApi(t: Transport): LintoLiveApi {
       start: (name) => call(IPC.liveStart, name),
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),
-      changeDisplay: (d) => call(IPC.liveChangeDisplay, d)
+      showOutputWindow: () => call(IPC.liveShowOutput)
     },
     app: { uninstall: () => call(IPC.appUninstall) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {

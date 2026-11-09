@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { LiveState } from '../../shared/ipc'
-import type { MonitorInfo } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 
 type Tone = 'ok' | 'warn' | 'bad' | 'idle'
@@ -15,7 +14,6 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
 }) {
   const [preview, setPreview] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
-  const [displays, setDisplays] = useState<MonitorInfo[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<'stop' | 'terminate' | 'switch' | null>(null)
   const [switchOpen, setSwitchOpen] = useState(false)
@@ -50,14 +48,11 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
       if (r.ok) { setSwitchOpen(false); setNewName(''); onSwitched?.(r.reused) } else setError(r.message)
     } catch (e) { setError(ipcErrorMessage(e)) } finally { setBusy(null) }
   }
-  const openDisplays = async (): Promise<void> => {
-    await guard(async () => setDisplays((await window.lintoLive.setup.load()).displays))
-  }
   const name = state.session?.name ?? ''
   const obs = { running: ['En marche', 'ok'], restarting: ['Redémarrage…', 'warn'], down: ['Arrêté', 'bad'] } as const
   const audio = { off: ['Inactif', 'idle'], starting: ['Démarrage…', 'warn'], active: ['Envoyé', 'ok'], error: ['Erreur', 'bad'], unavailable: ['Indisponible', 'bad'] } as const
   const caps = { connecting: ['Connexion…', 'warn'], live: ['Actifs', 'ok'], offline: ['Hors ligne', 'bad'] } as const
-  const out = { shown: ['Affichée', 'ok'], 'display-missing': ['Écran introuvable', 'bad'], off: ['Noire', 'idle'] } as const
+  const out = { shown: ['Affichée', 'ok'], off: ['Noire', 'idle'] } as const
 
   return (
     <div className="live">
@@ -86,7 +81,7 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
             <button type="button" className="primary big" disabled={busy !== null} onClick={() => void act('stop', () => window.lintoLive.live.stop())}>{busy === 'stop' ? 'Arrêt…' : 'Arrêter'}</button>
             <button type="button" className="danger" disabled={busy !== null} onClick={() => setConfirming(true)}>{busy === 'terminate' ? 'Fin de session…' : 'Terminer la session'}</button>
             <button type="button" disabled={busy !== null} onClick={() => setSwitchOpen((o) => !o)}>Changer de session</button>
-            <button type="button" disabled={busy !== null} onClick={() => void openDisplays()}>Changer d'écran</button>
+            <button type="button" onClick={() => void guard(() => window.lintoLive.live.showOutputWindow())}>Afficher la fenêtre de sortie</button>
           </div>
           {switchOpen && (
             <form className="switch" onSubmit={(e) => { e.preventDefault(); void switchSession() }}>
@@ -95,17 +90,6 @@ export function Live({ state, reused, authRequired = false, onStopped, onNeedLog
               </label>
               <button type="submit" className="primary" disabled={busy !== null || newName.trim() === ''}>{busy === 'switch' ? 'Bascule…' : 'Basculer'}</button>
             </form>
-          )}
-          {displays && (
-            <label>Nouvel écran
-              <select defaultValue="" onChange={(e) => {
-                const d = displays[Number(e.target.value)]
-                if (d) void guard(() => window.lintoLive.live.changeDisplay({ name: d.name, x: d.x, y: d.y, width: d.width, height: d.height }), () => setDisplays(null))
-              }}>
-                <option value="" disabled>Choisir…</option>
-                {displays.map((d, i) => <option key={i} value={i}>{d.name} ({d.width}×{d.height})</option>)}
-              </select>
-            </label>
           )}
         </aside>
       </div>

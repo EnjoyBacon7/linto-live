@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
-        'setupLoad', 'setupSave', 'liveStart', 'liveStop', 'liveTerminate', 'liveChangeDisplay',
+        'setupLoad', 'setupSave', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput',
         'appUninstall', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired'
       ].sort()
     )
@@ -20,7 +20,8 @@ describe('IPC constants', () => {
   it('api shape (type-level)', () => {
     expectTypeOf<LintoLiveApi['auth']['methods']>().returns.resolves.toBeArray()
     expectTypeOf<LintoLiveApi['live']['start']>().parameter(0).toBeString()
-    expectTypeOf<LintoLiveApi['setup']['load']>().returns.resolves.toHaveProperty('displays')
+    expectTypeOf<LintoLiveApi['setup']['load']>().returns.resolves.not.toHaveProperty('displays')
+    expectTypeOf<LintoLiveApi['live']['showOutputWindow']>().returns.resolves.toBeVoid()
   })
 })
 
@@ -35,7 +36,6 @@ function fake() {
 describe('createLintoLiveApi', () => {
   it('methods invoke the right channel with args', async () => {
     const { api, invoke } = fake()
-    const disp = { name: 'x', x: 1, y: 2, width: 3, height: 4 }
     await api.auth.methods()
     await api.auth.loginLocal('a@b', 'pw')
     await api.auth.loginSso('/p', 'e')
@@ -46,7 +46,7 @@ describe('createLintoLiveApi', () => {
     await api.live.start('S')
     await api.live.stop()
     await api.live.terminate()
-    await api.live.changeDisplay(disp)
+    await api.live.showOutputWindow()
     await api.app.uninstall()
     expect(invoke.mock.calls).toEqual([
       [IPC.authMethods],
@@ -59,7 +59,7 @@ describe('createLintoLiveApi', () => {
       [IPC.liveStart, 'S'],
       [IPC.liveStop],
       [IPC.liveTerminate],
-      [IPC.liveChangeDisplay, disp],
+      ['live:show-output'],
       [IPC.appUninstall]
     ])
   })

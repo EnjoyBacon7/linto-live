@@ -1,10 +1,9 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
-import { UnauthorizedError, type Channel, type DeviceItem, type MonitorInfo, type SavedDisplay, type Session, type Settings } from '../shared/types'
+import { UnauthorizedError, type Channel, type DeviceItem, type Session, type Settings } from '../shared/types'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import type { ObsController, StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
-import { matchDisplay } from './obs/monitors'
 import type { LintoApi } from './linto/api'
 import { CaptionBuffer, type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
 import { resolveSession } from './linto/sessionResolver'
@@ -20,6 +19,7 @@ export const MSG_BOOT_FAILED = 'Impossible de démarrer le moteur vidéo (OBS).'
 export const MSG_OVERLAY_FAILED = 'Sous-titres non affichés dans OBS : '
 export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
+export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
 
@@ -44,8 +44,8 @@ export interface LiveObsProcess {
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
-  | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$' | 'monitors'
-  | 'openProgramProjector' | 'showLive' | 'showPause' | 'resetProjectorState' | 'disconnect'
+  | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
+  | 'openOutputWindow' | 'showLive' | 'showPause' | 'resetProjectorState' | 'disconnect'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
 export interface LiveCaptions {
@@ -78,7 +78,9 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
  * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'().
- * start/stop/terminate/changeDisplay and OBS (re)attachment run one at a time through a promise queue.
+ * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
+ * The preview runs whenever OBS is attached. No request closes or lists projectors: the output window is
+ * opened once per OBS run by the first show (Arrêter leaves it open, black) and on demand by showOutputWindow.
  */
 export class LiveController extends EventEmitter {
   private state: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off' }
@@ -87,7 +89,8 @@ export class LiveController extends EventEmitter {
   private overlayUrl: string | null = null
   private current: Current | null = null
   private buffer = new CaptionBuffer()
-  private projectorIndex: number | null = null
+  /** An output window was opened during the current OBS run. */
+  private outputOpened = false
   private streamRunning = false
   private stopRequested = false
   private stopWaiters: (() => void)[] = []
@@ -182,39 +185,12 @@ export class LiveController extends EventEmitter {
     })
   }
 
-  changeDisplay(display: SavedDisplay): Promise<void> {
+  /** The user asked for the output window (e.g. closed it by mistake): always open one if OBS is attached. */
+  showOutputWindow(): Promise<void> {
     return this.enqueue(async () => {
       this.clearRestartedNotice()
-      this.d.settings.update({ output: display })
       const c = this.ctl
-      if (this.state.phase !== 'live' || !c) return
-      // Same display again: the user wants it re-shown (the projector may be gone) — bypass both caches;
-      // a duplicate projector on the same screen is harmless.
-      const m = matchDisplay(display, await c.monitors().catch(() => [] as MonitorInfo[]))
-      if (m && this.projectorIndex === m.index) this.forgetProjector(c)
-      await this.applyOutput()
-    })
-  }
-
-  /**
-   * A display was added/removed/changed (Electron screen events). OBS closes a projector whose display
-   * disappears: forget it, and reopen it when the saved display comes back during a show.
-   */
-  displaysChanged(): Promise<void> {
-    return this.enqueue(async () => {
-      const c = this.ctl
-      if (!c) return
-      const saved = this.d.settings.get().output
-      const m = saved ? matchDisplay(saved, await c.monitors().catch(() => [] as MonitorInfo[])) : null
-      const live = this.state.phase === 'live'
-      if (!m) {
-        if (this.projectorIndex !== null) this.forgetProjector(c)
-        if (live) this.setState({ output: 'display-missing' })
-        return
-      }
-      // Same physical screen, renumbered by the change: the projector is still on it.
-      if (this.projectorIndex !== null) this.projectorIndex = m.index
-      if (live && (this.projectorIndex === null || this.state.output !== 'shown')) await this.applyOutput()
+      if (c) await this.openOutput(c)
     })
   }
 
@@ -255,16 +231,15 @@ export class LiveController extends EventEmitter {
     this.emit('auth-required')
   }
 
-  /** Device + monitor lists for the setup screen (empty while OBS is not connected). */
-  async listDevices(): Promise<{ videoDevices: DeviceItem[]; audioDevices: DeviceItem[]; displays: MonitorInfo[] }> {
+  /** Device lists for the setup screen (empty while OBS is not connected). */
+  async listDevices(): Promise<{ videoDevices: DeviceItem[]; audioDevices: DeviceItem[] }> {
     const c = this.ctl
-    if (!c) return { videoDevices: [], audioDevices: [], displays: [] }
-    const [videoDevices, audioDevices, displays] = await Promise.all([
+    if (!c) return { videoDevices: [], audioDevices: [] }
+    const [videoDevices, audioDevices] = await Promise.all([
       c.listVideoDevices().catch(() => []),
-      c.listAudioDevices().catch(() => []),
-      c.monitors().catch(() => [])
+      c.listAudioDevices().catch(() => [])
     ])
-    return { videoDevices, audioDevices, displays }
+    return { videoDevices, audioDevices }
   }
 
   /** Persists setup choices and applies device changes to OBS right away. */
@@ -304,10 +279,12 @@ export class LiveController extends EventEmitter {
     this.unsubs = []
     this.ctl = null
     this.attachedConn = null
-    this.projectorIndex = null
+    this.outputOpened = false // a new OBS run has no projector open
     this.streamRunning = false
     this.clearRetry()
+    this.stopPreview()
     this.flushStopWaiters()
+    if (this.state.output !== 'off') this.setState({ output: 'off' })
   }
 
   /** (Re)connects to a freshly started OBS and re-applies devices, overlay and — if live — the show. */
@@ -319,7 +296,7 @@ export class LiveController extends EventEmitter {
     let c: LiveObsController | null = null
     try {
       c = await this.d.controllerFactory(conn)
-      c.resetProjectorState() // R4: a new OBS run has no projector open and new scene item ids
+      c.resetProjectorState() // R4: a new OBS run has new scene item ids
       await c.ensureScene(this.d.platform)
     } catch (e) {
       await c?.disconnect().catch(() => {})
@@ -341,13 +318,14 @@ export class LiveController extends EventEmitter {
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
+    this.startPreview()
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
 
-  /** Program scene, then output (which may decide to restart OBS), then — only if no restart — the stream. */
+  /** Program scene, the output window if none was opened during this OBS run, then the stream. */
   private async applyShow(c: LiveObsController, cur: Current): Promise<void> {
     await c.showLive().catch(() => {})
-    if ((await this.applyOutput()) === 'restarting') return // the next 'ready' re-applies the whole show
+    if (!this.outputOpened) await this.openOutput(c)
     if (cur.service) await this.startStreamSafe(c, cur.service)
   }
 
@@ -363,53 +341,16 @@ export class LiveController extends EventEmitter {
     }
   }
 
-  /** Opens the projector on the saved display; if one is already open elsewhere, restarts OBS (R12). */
-  private async applyOutput(): Promise<'done' | 'restarting'> {
-    const c = this.ctl
-    if (!c) return 'done'
-    const saved = this.d.settings.get().output
-    const list = await c.monitors().catch(() => [] as MonitorInfo[])
-    const m = saved ? matchDisplay(saved, list) : null
-    if (!m) {
-      this.setState({ output: 'display-missing' })
-      return 'done'
-    }
-    if (this.projectorIndex !== null && this.projectorIndex !== m.index) {
-      await this.restartObs()
-      return 'restarting'
-    }
+  /** Opens an output window (never throws: a failure becomes a warning). */
+  private async openOutput(c: LiveObsController): Promise<void> {
     try {
-      await c.openProgramProjector(m.index)
-      this.projectorIndex = m.index
+      await c.openOutputWindow()
+      if (c !== this.ctl) return
+      this.outputOpened = true
       this.setState({ output: 'shown' })
     } catch (e) {
-      this.setState({ output: 'off', warning: `Sortie HDMI : ${errMsg(e)}` })
+      if (c === this.ctl) this.setState({ warning: MSG_OUTPUT_FAILED + errMsg(e) })
     }
-    return 'done'
-  }
-
-  /**
-   * No websocket request closes a projector: quit OBS, then start it again in the background with
-   * backoff (the queued 'ready' → attach re-applies the show). Never throws.
-   */
-  private async restartObs(): Promise<void> {
-    const c = this.ctl
-    this.dropController()
-    this.setState({ obs: 'restarting' })
-    this.intentionalObsStop = true
-    try {
-      await c?.disconnect().catch(() => {})
-      await this.d.obs.stop().catch(() => {})
-    } finally {
-      this.intentionalObsStop = false
-    }
-    const gen = ++this.restartGen
-    void this.startObsWithRetry(gen).then((conn) => {
-      if (conn || this.shuttingDown || gen !== this.restartGen) return
-      this.dropController()
-      this.stopPreview()
-      this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
-    })
   }
 
   /** obs.start() with backoff (5 attempts). Null when every attempt failed or a newer start/shutdown superseded it. */
@@ -442,12 +383,6 @@ export class LiveController extends EventEmitter {
     if (this.ctl) return true
     this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
     return false
-  }
-
-  /** Forgets the open projector (both here and in the controller's per-run cache). */
-  private forgetProjector(c: LiveObsController): void {
-    this.projectorIndex = null
-    c.resetProjectorState()
   }
 
   private clearRestartedNotice(): void {
@@ -521,7 +456,6 @@ export class LiveController extends EventEmitter {
       this.clearRetry()
       this.clearCaptionsTimer()
       this.captionsAuthLost = false
-      this.stopPreview()
       if (this.current) this.d.captions.close()
       if (this.streamRunning) await this.stopStreamAndWait()
 
@@ -535,7 +469,7 @@ export class LiveController extends EventEmitter {
         session: { name: res.session.name, status: res.session.status },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : MSG_NO_STREAM,
-        output: 'off',
+        startedAt: Date.now(),
         lastLine: undefined
       })
       this.d.captions.open(res.session.id, res.channel.id)
@@ -549,7 +483,6 @@ export class LiveController extends EventEmitter {
       }
       this.setState({ warning: errMsg(e) })
     }
-    this.startPreview()
     return { ok: true, reused: res.kind === 'reused', canStream: res.canStream }
   }
 
@@ -558,7 +491,6 @@ export class LiveController extends EventEmitter {
     this.setState({ phase: 'stopping' })
     this.clearRetry()
     this.clearCaptionsTimer()
-    this.stopPreview()
     this.d.captions.close()
     await this.stopStreamAndWait(streamWaitMs)
     await this.ctl?.showPause().catch(() => {})
@@ -570,7 +502,7 @@ export class LiveController extends EventEmitter {
       session: undefined,
       stream: 'off',
       captions: 'offline',
-      output: 'off',
+      startedAt: undefined,
       warning: undefined,
       lastLine: undefined
     })
@@ -659,13 +591,13 @@ export class LiveController extends EventEmitter {
   private startPreview(): void {
     this.stopPreview()
     this.previewTimer = setInterval(() => {
-      if (this.state.phase !== 'live') return this.stopPreview()
       const c = this.ctl
-      if (!c || this.previewBusy) return
+      if (!c) return this.stopPreview()
+      if (this.previewBusy) return
       this.previewBusy = true
       c.screenshot()
         .then((img) => {
-          if (this.state.phase === 'live') this.emit('preview', img)
+          if (c === this.ctl) this.emit('preview', img)
         })
         .catch(() => {})
         .finally(() => (this.previewBusy = false))

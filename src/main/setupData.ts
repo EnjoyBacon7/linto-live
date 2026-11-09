@@ -1,7 +1,7 @@
 import type { SetupData } from '../shared/ipc'
 import { UnauthorizedError, type Organization, type Settings, type TranscriberProfile } from '../shared/types'
 
-type Devices = Pick<SetupData, 'videoDevices' | 'audioDevices' | 'displays'>
+type Devices = Pick<SetupData, 'videoDevices' | 'audioDevices'>
 
 export interface SetupDeps {
   getSettings(): Settings

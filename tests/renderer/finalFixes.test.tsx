@@ -4,7 +4,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Setup } from '../../src/renderer/screens/Setup'
 import { Live } from '../../src/renderer/screens/Live'
-import type { LiveState, SetupData, StartResult } from '../../src/shared/ipc'
+import type { LiveState, StartResult } from '../../src/shared/ipc'
 import { makeApi } from './helpers'
 
 afterEach(() => { cleanup() })
@@ -20,20 +20,6 @@ function withListeners(api: ReturnType<typeof makeApi>) {
   return listeners
 }
 
-const setupData = (over: Partial<SetupData> = {}): SetupData => ({
-  settings: { instance: 'https://studio.linto.ai', videoDeviceId: 'v1', audioDeviceId: 'a1' },
-  organizations: [{ id: 'o1', name: 'Org' }],
-  profiles: [{ id: 1, name: 'Français' }],
-  videoDevices: [{ id: 'v1', name: 'Capture HDMI' }],
-  audioDevices: [{ id: 'a1', name: 'Micro' }],
-  displays: [
-    { index: 0, name: 'Écran intégré', x: 0, y: 0, width: 1512, height: 982 },
-    { index: 1, name: 'HDMI', x: 1512, y: 0, width: 1920, height: 1080 }
-  ],
-  appDisplay: { x: 0, y: 0, width: 1512, height: 982 },
-  ...over
-})
-
 describe('Setup final fixes', () => {
   it('shows the OBS warning carried by live-state', async () => {
     const api = makeApi()
@@ -46,18 +32,16 @@ describe('Setup final fixes', () => {
     act(() => listeners['live-state']({ phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }))
     expect(screen.queryByText('Impossible de démarrer le moteur vidéo (OBS).')).toBeNull()
   })
+})
 
-  it("marks the app window's display and warns when it is chosen as output", async () => {
-    window.lintoLive = makeApi({ setup: { load: vi.fn().mockResolvedValue(setupData()) } })
-    render(<Setup onStarted={() => {}} />)
-    const sel = await screen.findByLabelText('Écran de sortie')
-    expect(screen.getByRole('option', { name: 'Écran intégré (1512×982) (écran de cette fenêtre)' })).toBeTruthy()
-    expect(screen.getByRole('option', { name: 'HDMI (1920×1080)' })).toBeTruthy()
-    expect(screen.queryByText(/couvrira cette fenêtre/)).toBeNull()
-    await userEvent.selectOptions(sel, '0')
-    expect(screen.getByText(/couvrira cette fenêtre/)).toBeTruthy()
-    await userEvent.selectOptions(sel, '1')
-    expect(screen.queryByText(/couvrira cette fenêtre/)).toBeNull()
+describe('Live: output window', () => {
+  it('« Afficher la fenêtre de sortie » asks main to open one', async () => {
+    const showOutputWindow = vi.fn().mockResolvedValue(undefined)
+    window.lintoLive = makeApi({ live: { showOutputWindow } })
+    render(<Live state={live} reused={false} onStopped={() => {}} onNeedLogin={() => {}} />)
+    expect(screen.queryByRole('button', { name: "Changer d'écran" })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Afficher la fenêtre de sortie' }))
+    expect(showOutputWindow).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { defaultSelection, loadSetupData, type SetupDeps } from '../src/main/setupData'
 import { UnauthorizedError, type Settings } from '../src/shared/types'
 
-const dev = { videoDevices: [{ id: 'v', name: 'V' }], audioDevices: [], displays: [] }
+const dev = { videoDevices: [{ id: 'v', name: 'V' }], audioDevices: [] }
 function deps(over: Partial<SetupDeps> = {}, init: Settings = { instance: 'https://x' }): SetupDeps {
   let s = init
   return {

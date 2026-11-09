@@ -7,11 +7,7 @@ import {
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
 import type { LiveState } from '../src/shared/ipc'
-import { UnauthorizedError, type MonitorInfo, type SavedDisplay, type Session, type Settings } from '../src/shared/types'
-
-const HDMI: MonitorInfo = { index: 1, name: 'HDMI', x: 1920, y: 0, width: 1920, height: 1080 }
-const HDMI2: MonitorInfo = { index: 2, name: 'Projo', x: 3840, y: 0, width: 1280, height: 720 }
-const asSaved = (m: MonitorInfo): SavedDisplay => ({ name: m.name, x: m.x, y: m.y, width: m.width, height: m.height })
+import { UnauthorizedError, type Session, type Settings } from '../src/shared/types'
 
 const SRT_A = 'srt://linto:9000?streamid=a'
 const SRT_B = 'srt://linto:9000?streamid=b'
@@ -26,7 +22,7 @@ function session(over: Partial<Session> = {}, endpoint: string | null = SRT_A): 
   }
 }
 
-function fakeController(log: string[], monitors: MonitorInfo[]) {
+function fakeController(log: string[]) {
   let stateCb: ((s: StreamState) => void) | null = null
   const c = {
     autoStop: true,
@@ -51,12 +47,8 @@ function fakeController(log: string[], monitors: MonitorInfo[]) {
         if (stateCb === cb) stateCb = null
       }
     }),
-    monitors: vi.fn(async () => monitors),
-    projectorOpenOn: null as number | null, // models ObsController's per-run projector cache
-    openProgramProjector: vi.fn(async (i: number) => {
-      if (c.projectorOpenOn === i) return
-      log.push(`projector:${i}`)
-      c.projectorOpenOn = i
+    openOutputWindow: vi.fn(async () => {
+      log.push('output-window')
     }),
     showLive: vi.fn(async () => {
       log.push('showLive')
@@ -64,9 +56,7 @@ function fakeController(log: string[], monitors: MonitorInfo[]) {
     showPause: vi.fn(async () => {
       log.push('showPause')
     }),
-    resetProjectorState: vi.fn(() => {
-      c.projectorOpenOn = null
-    }),
+    resetProjectorState: vi.fn(),
     disconnect: vi.fn(async () => {}),
     emitState: (s: StreamState) => stateCb?.(s)
   }
@@ -74,9 +64,8 @@ function fakeController(log: string[], monitors: MonitorInfo[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[]; monitors?: MonitorInfo[]; output?: SavedDisplay } = {}) {
+function setup(opts: { sessions?: Session[] } = {}) {
   const log: string[] = []
-  const monitors = opts.monitors ?? [HDMI]
   const ctls: FakeCtl[] = []
   let port = 4000
   const obs = Object.assign(new EventEmitter(), {
@@ -91,7 +80,7 @@ function setup(opts: { sessions?: Session[]; monitors?: MonitorInfo[]; output?: 
     })
   })
   const controllerFactory = vi.fn(async () => {
-    const c = fakeController(log, monitors)
+    const c = fakeController(log)
     ctls.push(c)
     return c
   })
@@ -122,8 +111,7 @@ function setup(opts: { sessions?: Session[]; monitors?: MonitorInfo[]; output?: 
     orgId: 'org1',
     profileId: 3,
     videoDeviceId: 'cam',
-    audioDeviceId: 'mic',
-    output: opts.output ?? asSaved(HDMI)
+    audioDeviceId: 'mic'
   }
   const settings = {
     get: vi.fn(() => ({ ...data })),
@@ -179,7 +167,7 @@ describe('LiveController', () => {
       streamServiceSettings: { server: SRT_A, key: '' }
     })
     expect(t.ctl().showLive).toHaveBeenCalled()
-    expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(1)
+    expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     expect(t.settings.get().lastSessionName).toBe('Conf')
     expect(t.settings.get().orgId).toBe('org1')
     expect(t.last()).toMatchObject({ phase: 'live', output: 'shown', session: { name: 'Conf', status: 'active' } })
@@ -202,9 +190,9 @@ describe('LiveController', () => {
     t.overlay.push.mockClear()
     await t.live.stop()
     expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
-    const n = t.ctl().screenshot.mock.calls.length
+    const n = previews.length
     await vi.advanceTimersByTimeAsync(1000)
-    expect(t.ctl().screenshot.mock.calls.length).toBe(n)
+    expect(previews.length).toBeGreaterThan(n) // the preview keeps running while idle
   })
 
   it('terminated returns message and starts nothing', async () => {
@@ -217,7 +205,7 @@ describe('LiveController', () => {
     })
     expect(t.captions.open).not.toHaveBeenCalled()
     expect(t.ctl().startStream).not.toHaveBeenCalled()
-    expect(t.ctl().openProgramProjector).not.toHaveBeenCalled()
+    expect(t.ctl().openOutputWindow).not.toHaveBeenCalled()
     expect(t.ctl().showLive).not.toHaveBeenCalled()
     expect(t.last().phase).toBe('idle')
   })
@@ -229,7 +217,7 @@ describe('LiveController', () => {
     expect(r).toEqual({ ok: true, reused: true, canStream: false })
     expect(t.ctl().startStream).not.toHaveBeenCalled()
     expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
-    expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(1)
+    expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     expect(t.last()).toMatchObject({ phase: 'live', stream: 'unavailable', warning: MSG_NO_STREAM })
     expect(MSG_NO_STREAM).toBe("Impossible d'envoyer l'audio : tu n'es pas propriétaire de cette session.")
   })
@@ -254,7 +242,7 @@ describe('LiveController', () => {
     expect(c.setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
     expect(c.startStream).toHaveBeenCalledWith({ streamServiceType: 'rtmp_custom', streamServiceSettings: { server: SRT_A, key: '' } })
     expect(c.showLive).toHaveBeenCalled()
-    expect(c.openProgramProjector).toHaveBeenCalledWith(1)
+    expect(c.openOutputWindow).toHaveBeenCalledTimes(1)
     expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
     // old controller events are ignored (the only warning is the crash-restart notice, no stream retry)
     first.emitState('stopped')
@@ -266,7 +254,7 @@ describe('LiveController', () => {
     await t.live.boot()
     await t.live.start('Conf')
     t.obs.emit('exit', null)
-    expect(t.last()).toMatchObject({ obs: 'down', phase: 'error' })
+    expect(t.last()).toMatchObject({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
   })
 
   it('keeps obs running on auth error', async () => {
@@ -316,7 +304,7 @@ describe('LiveController', () => {
     expect(t.ctl().stopStream).toHaveBeenCalled()
     expect(t.ctl().showPause).toHaveBeenCalled()
     expect(t.captions.close).toHaveBeenCalled()
-    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off', output: 'off' })
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off', output: 'shown' }) // window kept open, black
     expect(t.last().warning).toBeUndefined()
   })
 
@@ -331,16 +319,6 @@ describe('LiveController', () => {
     expect(t.log.indexOf('terminateSession')).toBeLessThan(t.log.indexOf('stopStream'))
     expect(t.log).toContain('showPause')
     expect(t.last().phase).toBe('idle')
-  })
-
-  it('display missing sets output display-missing but still streams', async () => {
-    const t = setup({ output: asSaved(HDMI2) })
-    await t.live.boot()
-    const r = await t.live.start('Conf')
-    expect(r.ok).toBe(true)
-    expect(t.ctl().startStream).toHaveBeenCalled()
-    expect(t.ctl().openProgramProjector).not.toHaveBeenCalled()
-    expect(t.last()).toMatchObject({ phase: 'live', output: 'display-missing' })
   })
 
   it('waits for stopped before switching target', async () => {
@@ -409,44 +387,6 @@ describe('LiveController', () => {
     expect(c.startStream).toHaveBeenCalledTimes(5)
   })
 
-  it('changeDisplay restarts obs when projector open elsewhere', async () => {
-    const t = setup({ monitors: [HDMI, HDMI2] })
-    await t.live.boot()
-    await t.live.start('Conf')
-    expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(1)
-    const first = t.ctl()
-    await t.live.changeDisplay(asSaved(HDMI2))
-    await t.live.settled()
-    expect(t.settings.get().output).toEqual(asSaved(HDMI2))
-    expect(t.obs.stop).toHaveBeenCalledTimes(1)
-    expect(t.obs.start).toHaveBeenCalledTimes(2)
-    expect(t.ctl()).not.toBe(first)
-    expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(2)
-    expect(t.ctl().startStream).toHaveBeenCalled()
-    expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
-  })
-
-  it('changeDisplay when not live only saves the setting', async () => {
-    const t = setup({ monitors: [HDMI, HDMI2] })
-    await t.live.boot()
-    await t.live.changeDisplay(asSaved(HDMI2))
-    expect(t.settings.get().output).toEqual(asSaved(HDMI2))
-    expect(t.obs.stop).not.toHaveBeenCalled()
-    expect(t.ctl().openProgramProjector).not.toHaveBeenCalled()
-  })
-
-  it('changeDisplay with no projector open opens it without restart', async () => {
-    const gone: SavedDisplay = { name: 'Vieux', x: 9999, y: 0, width: 800, height: 600 }
-    const t = setup({ monitors: [HDMI, HDMI2], output: gone })
-    await t.live.boot()
-    await t.live.start('Conf')
-    expect(t.last().output).toBe('display-missing')
-    await t.live.changeDisplay(asSaved(HDMI2))
-    expect(t.obs.stop).not.toHaveBeenCalled()
-    expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(2)
-    expect(t.last().output).toBe('shown')
-  })
-
   it('shutdown stops then quits obs and overlay', async () => {
     const t = setup()
     await t.live.boot()
@@ -472,60 +412,12 @@ describe('LiveController', () => {
       expect(MSG_BOOT_FAILED).toBe('Impossible de démarrer le moteur vidéo (OBS).')
     })
 
-    it('obs restart retries a failing start with backoff then reapplies the show', async () => {
-      const t = setup({ monitors: [HDMI, HDMI2] })
-      await t.live.boot()
-      await t.live.start('Conf')
-      t.obs.start.mockRejectedValueOnce(new Error('not ready'))
-      await expect(t.live.changeDisplay(asSaved(HDMI2))).resolves.toBeUndefined()
-      expect(t.obs.start).toHaveBeenCalledTimes(2)
-      expect(t.last().obs).toBe('restarting')
-      await vi.advanceTimersByTimeAsync(1999)
-      expect(t.obs.start).toHaveBeenCalledTimes(2)
-      await vi.advanceTimersByTimeAsync(1)
-      await t.live.settled()
-      expect(t.obs.start).toHaveBeenCalledTimes(3)
-      expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(2)
-      expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
-    })
-
-    it('obs restart that never comes back ends in obs down and phase error, start still resolves', async () => {
-      const t = setup({ monitors: [HDMI, HDMI2] })
-      await t.live.boot()
-      await t.live.start('Conf')
-      await t.live.stop()
-      await t.live.changeDisplay(asSaved(HDMI2)) // not live: only saved
-      t.obs.start.mockRejectedValue(new Error('dead'))
-      const r = await t.live.start('Conf') // projector open on 1, wants 2 → restart
-      expect(r).toEqual({ ok: true, reused: true, canStream: true })
-      await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 10_000 + 30_000)
-      expect(t.obs.start).toHaveBeenCalledTimes(1 + 5)
-      expect(t.last()).toMatchObject({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
-      await vi.advanceTimersByTimeAsync(120_000)
-      expect(t.obs.start).toHaveBeenCalledTimes(6)
-    })
-
-    it('decides on obs restart before starting the stream', async () => {
-      const t = setup({ monitors: [HDMI, HDMI2] })
-      await t.live.boot()
-      await t.live.start('Conf')
-      const first = t.ctl()
-      await t.live.stop()
-      await t.live.changeDisplay(asSaved(HDMI2))
-      await t.live.start('Conf')
-      await t.live.settled()
-      expect(first.startStream).toHaveBeenCalledTimes(1) // only the first show, not the restarting one
-      expect(t.ctl()).not.toBe(first)
-      expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
-      expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(2)
-    })
-
     it('overlay url failure still marks obs running and reapplies the show', async () => {
       const t = setup()
       await t.live.boot()
       await t.live.start('Conf')
       t.controllerFactory.mockImplementationOnce(async () => {
-        const c = fakeController(t.log, [HDMI])
+        const c = fakeController(t.log)
         c.setOverlayUrl.mockRejectedValue(new Error('no browser source'))
         t.ctls.push(c)
         return c
@@ -536,13 +428,13 @@ describe('LiveController', () => {
       expect(t.last()).toMatchObject({ obs: 'running', phase: 'live', output: 'shown' })
       expect(t.last().warning).toBe(MSG_OVERLAY_FAILED + 'no browser source')
       expect(t.ctl().startStream).toHaveBeenCalled()
-      expect(t.ctl().openProgramProjector).toHaveBeenCalledWith(1)
+      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     })
 
     it('ensureScene failure sets obs down with a warning', async () => {
       const t = setup()
       t.controllerFactory.mockImplementationOnce(async () => {
-        const c = fakeController(t.log, [HDMI])
+        const c = fakeController(t.log)
         c.ensureScene.mockRejectedValue(new Error('scene boom'))
         t.ctls.push(c)
         return c
@@ -601,62 +493,100 @@ describe('LiveController', () => {
 })
 
 describe('LiveController final fixes', () => {
-  describe('C1 display hot-plug', () => {
-    it('projector closed by unplug → replug reopens it', async () => {
-      const monitors = [HDMI]
-      const t = setup({ monitors })
+  describe('output window', () => {
+    const opened = (t: ReturnType<typeof setup>): number => t.log.filter((l) => l === 'output-window').length
+
+    it('the first start opens the window once; stop then start does not open a second one', async () => {
+      const t = setup()
       await t.live.boot()
+      expect(opened(t)).toBe(0)
       await t.live.start('Conf')
-      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(1)
-      const c = t.ctl()
-      monitors.splice(0) // HDMI unplugged: OBS closes its projector
-      await t.live.displaysChanged()
-      expect(t.last()).toMatchObject({ phase: 'live', output: 'display-missing' })
-      expect(c.projectorOpenOn).toBeNull()
-      monitors.push(HDMI) // replugged
-      await t.live.displaysChanged()
-      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
+      expect(opened(t)).toBe(1)
+      expect(t.last().output).toBe('shown')
+      await t.live.stop()
+      expect(t.ctl().showPause).toHaveBeenCalled() // kept open, black
+      await t.live.start('Conf')
+      expect(opened(t)).toBe(1)
       expect(t.last()).toMatchObject({ phase: 'live', output: 'shown' })
       expect(t.obs.stop).not.toHaveBeenCalled()
-      expect(t.ctl()).toBe(c)
     })
 
-    it('unplug while idle forgets the projector so the next start reopens it', async () => {
-      const monitors = [HDMI]
-      const t = setup({ monitors })
-      await t.live.boot()
-      await t.live.start('Conf')
-      await t.live.stop()
-      monitors.splice(0)
-      await t.live.displaysChanged()
-      monitors.push(HDMI)
-      await t.live.displaysChanged()
-      expect(t.last().output).toBe('off')
-      await t.live.start('Conf')
-      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
-      expect(t.obs.stop).not.toHaveBeenCalled()
-    })
-
-    it('removing another display leaves the projector alone', async () => {
-      const monitors = [HDMI, HDMI2]
-      const t = setup({ monitors })
-      await t.live.boot()
-      await t.live.start('Conf')
-      monitors.splice(1)
-      await t.live.displaysChanged()
-      expect(t.last().output).toBe('shown')
-      expect(t.log.filter((l) => l.startsWith('projector:'))).toEqual(['projector:1'])
-      expect(t.ctl().resetProjectorState).toHaveBeenCalledTimes(1) // only the attach-time reset
-    })
-
-    it('same-index changeDisplay reopens projector', async () => {
+    it('showOutputWindow opens another window even if one is open', async () => {
       const t = setup()
       await t.live.boot()
       await t.live.start('Conf')
-      await t.live.changeDisplay(asSaved(HDMI))
-      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
-      expect(t.obs.stop).not.toHaveBeenCalled()
+      await t.live.showOutputWindow()
+      expect(opened(t)).toBe(2)
       expect(t.last().output).toBe('shown')
+      await t.live.stop()
+      await t.live.showOutputWindow() // idle but attached: still opens
+      expect(opened(t)).toBe(3)
+      expect(t.obs.stop).not.toHaveBeenCalled()
+    })
+
+    it('showOutputWindow without OBS attached does nothing', async () => {
+      const t = setup()
+      await expect(t.live.showOutputWindow()).resolves.toBeUndefined()
+      expect(opened(t)).toBe(0)
+      expect(t.last().output).toBe('off')
+    })
+
+    it('after an OBS restart the next live show opens the window again', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      await t.live.stop()
+      t.obs.emit('restarting', 1)
+      expect(t.last().output).toBe('off')
+      t.obs.emit('ready', { port: 4300, password: 'p' })
+      await t.live.settled()
+      expect(opened(t)).toBe(1) // idle: nothing reopened by the attach
+      await t.live.start('Conf')
+      expect(opened(t)).toBe(2)
+      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
+      expect(t.last().output).toBe('shown')
+    })
+
+    it('a failure to open the window is reported and retried on the next start', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.ctl().openOutputWindow.mockRejectedValueOnce(new Error('nope'))
+      const r = await t.live.start('Conf')
+      expect(r.ok).toBe(true)
+      expect(t.ctl().startStream).toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'live', output: 'off', warning: 'Fenêtre de sortie : nope' })
+      await t.live.stop()
+      await t.live.start('Conf')
+      expect(opened(t)).toBe(1)
+      expect(t.last().output).toBe('shown')
+    })
+
+    it('startedAt is set when the session goes live and cleared on stop', async () => {
+      const t = setup()
+      await t.live.boot()
+      expect(t.last().startedAt).toBeUndefined()
+      const before = Date.now()
+      await t.live.start('Conf')
+      const at = t.last().startedAt
+      expect(typeof at).toBe('number')
+      expect(at!).toBeGreaterThanOrEqual(before)
+      expect(at!).toBeLessThanOrEqual(Date.now())
+      await t.live.stop()
+      expect(t.last()).not.toHaveProperty('startedAt')
+    })
+
+    it('the preview runs while idle as soon as OBS is attached', async () => {
+      const t = setup()
+      const previews: string[] = []
+      t.live.on('preview', (d: string) => previews.push(d))
+      await t.live.boot()
+      expect(t.last().phase).toBe('idle')
+      await vi.advanceTimersByTimeAsync(200)
+      expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
+      t.obs.emit('exit', null) // OBS gone: no more screenshots
+      const n = t.ctl().screenshot.mock.calls.length
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot.mock.calls.length).toBe(n)
     })
   })
 
@@ -684,7 +614,7 @@ describe('LiveController final fixes', () => {
       expect(t.obs.start).toHaveBeenCalledTimes(2)
       expect(t.controllerFactory).toHaveBeenCalledTimes(2) // the queued 'ready' does not attach twice
       expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
-      expect(t.log.filter((l) => l === 'projector:1')).toHaveLength(2)
+      expect(t.log.filter((l) => l === 'output-window')).toHaveLength(2)
       expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
       expect(t.last().warning).toBeUndefined()
     })
@@ -692,7 +622,7 @@ describe('LiveController final fixes', () => {
     it('start after an attach failure restarts obs', async () => {
       const t = setup()
       t.controllerFactory.mockImplementationOnce(async () => {
-        const c = fakeController(t.log, [HDMI])
+        const c = fakeController(t.log)
         c.ensureScene.mockRejectedValue(new Error('scene boom'))
         t.ctls.push(c)
         return c

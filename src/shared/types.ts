@@ -17,16 +17,12 @@ export class UnauthorizedError extends Error {
   }
 }
 
-export interface SavedDisplay { name: string; x: number; y: number; width: number; height: number }
-export interface MonitorInfo extends SavedDisplay { index: number }
-
 export interface Settings {
   instance: string
   orgId?: string
   profileId?: number
   videoDeviceId?: string
   audioDeviceId?: string
-  output?: SavedDisplay
   lastSessionName?: string
 }
 

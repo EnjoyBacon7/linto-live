@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow, watchDisplays } from '../src/main/appLifecycle'
+import { describe, expect, it, vi } from 'vitest'
+import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow } from '../src/main/appLifecycle'
 import type { LiveState } from '../src/shared/ipc'
 
 const ev = () => ({ preventDefault: vi.fn() })
@@ -112,40 +112,5 @@ describe('createQuitGuard', () => {
     g.onBeforeQuit(ev())
     expect(d.ask).not.toHaveBeenCalled()
     expect(d.shutdown).not.toHaveBeenCalled()
-  })
-})
-
-describe('watchDisplays', () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
-  })
-  it('reports add/remove/metrics changes, debounced, with a late re-check', () => {
-    const screen = new EventEmitter()
-    const onChange = vi.fn()
-    watchDisplays(screen, onChange)
-    screen.emit('display-removed')
-    screen.emit('display-metrics-changed')
-    vi.advanceTimersByTime(999)
-    expect(onChange).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(1)
-    expect(onChange).toHaveBeenCalledTimes(1)
-    vi.advanceTimersByTime(4_000) // OBS may see the new monitor list later than Electron
-    expect(onChange).toHaveBeenCalledTimes(2)
-    screen.emit('display-added')
-    vi.advanceTimersByTime(10_000)
-    expect(onChange).toHaveBeenCalledTimes(4)
-  })
-  it('unsubscribes', () => {
-    const screen = new EventEmitter()
-    const onChange = vi.fn()
-    const stop = watchDisplays(screen, onChange)
-    stop()
-    screen.emit('display-added')
-    vi.advanceTimersByTime(10_000)
-    expect(onChange).not.toHaveBeenCalled()
-    expect(screen.listenerCount('display-added')).toBe(0)
   })
 })

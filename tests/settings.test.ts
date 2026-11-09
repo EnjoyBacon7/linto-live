@@ -38,6 +38,15 @@ describe('SettingsStore', () => {
     expect(s2.get()).toEqual({ instance: 'https://studio.linto.ai', orgId: 'o', profileId: 3 })
     expect(s2.getToken()).toBe('t')
   })
+  it('loads a v1 file with a legacy output display and drops the key', () => {
+    const p = appPaths(dir, 'linux')
+    writeFileSync(p.settingsFile, '{"instance":"https://x.linto.ai","orgId":"o","output":{"name":"HDMI","x":0,"y":0,"width":1920,"height":1080}}')
+    const s = new SettingsStore(p, crypto)
+    expect(s.get()).toEqual({ instance: 'https://x.linto.ai', orgId: 'o' })
+    expect(s.get()).not.toHaveProperty('output')
+    s.update({ profileId: 2 })
+    expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('HDMI')
+  })
   it('corrupt file or undecryptable token => defaults / null', () => {
     const p = appPaths(dir, 'linux')
     writeFileSync(p.settingsFile, '{bad')

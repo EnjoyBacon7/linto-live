@@ -38,8 +38,6 @@ function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
         case 'StopStream':
           active = false
           return {}
-        case 'GetMonitorList':
-          return { monitors: [{ monitorName: 'HDMI(1)', monitorIndex: 1, monitorWidth: 1920, monitorHeight: 1080, monitorPositionX: 1920, monitorPositionY: 0 }] }
         case 'GetStreamStatus':
           return { outputActive: active }
         default:
@@ -226,22 +224,14 @@ describe('ObsController', () => {
 })
 
 describe('ObsController output', () => {
-  it('maps GetMonitorList to MonitorInfo', async () => {
-    const f = fakeClient()
-    expect(await new ObsController(f.client).monitors()).toEqual([{ index: 1, name: 'HDMI(1)', x: 1920, y: 0, width: 1920, height: 1080 }])
-  })
-  it('opens the projector once per OBS run for the same index, again after reset', async () => {
+  it('openOutputWindow opens a windowed program projector (no monitor, no geometry), every call', async () => {
     const f = fakeClient()
     const c = new ObsController(f.client)
-    await c.openProgramProjector(1)
-    await c.openProgramProjector(1)
-    expect(of(f.calls, 'OpenVideoMixProjector')).toHaveLength(1)
-    expect(of(f.calls, 'OpenVideoMixProjector')[0].data).toMatchObject({ videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM', monitorIndex: 1 })
-    await c.openProgramProjector(2)
-    expect(of(f.calls, 'OpenVideoMixProjector')).toHaveLength(2)
-    c.resetProjectorState()
-    await c.openProgramProjector(2)
-    expect(of(f.calls, 'OpenVideoMixProjector')).toHaveLength(3)
+    await c.openOutputWindow()
+    await c.openOutputWindow()
+    const calls = of(f.calls, 'OpenVideoMixProjector')
+    expect(calls).toHaveLength(2)
+    expect(calls[0].data).toEqual({ videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM' })
   })
   it('showLive / showPause switch program scene', async () => {
     const f = fakeClient()

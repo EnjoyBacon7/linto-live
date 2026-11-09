@@ -32,8 +32,11 @@ export class SettingsStore {
 
   private load(): Stored {
     try {
-      const j = JSON.parse(readFileSync(this.p.settingsFile, 'utf8')) as Stored
-      if (j && typeof j === 'object') return { ...j, instance: j.instance || DEFAULT_INSTANCE }
+      const j = JSON.parse(readFileSync(this.p.settingsFile, 'utf8')) as Stored & { output?: unknown }
+      if (j && typeof j === 'object') {
+        delete j.output // v1 output display: the output window is now placed freely
+        return { ...j, instance: j.instance || DEFAULT_INSTANCE }
+      }
     } catch { /* missing or corrupt: defaults */ }
     return { instance: DEFAULT_INSTANCE }
   }
