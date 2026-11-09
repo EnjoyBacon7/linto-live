@@ -56,7 +56,6 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
           <PopUp label="Profil de transcription" value={profile === undefined ? '' : String(profile)} placeholder="Choisir…"
             options={p.profiles.map((x) => ({ value: String(x.id), label: x.name }))} onChange={(v) => setProfile(Number(v))} />
         </label>
-        <p className="sheet-detail">La session sera créée sur LinTO au démarrage. Si une session porte déjà ce nom, elle sera reprise.</p>
       </form>
     </Sheet>
   )

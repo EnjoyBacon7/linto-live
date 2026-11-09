@@ -72,7 +72,6 @@ export function Sidebar(p: SidebarProps) {
                   aria-selected="true"
                   tabIndex={0}
                   className="sidebar-row is-selected is-pending"
-                  title="Nouvelle session — créée sur LinTO au démarrage"
                 >
                   <PlusIcon size={12} className="sidebar-row-icon" />
                   <span className="sidebar-row-name">{p.pendingName}</span>

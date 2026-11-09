@@ -5,7 +5,7 @@ export interface StageProps {
   banners: ReactNode
 }
 
-/** Centre: banners on top, then the OBS program output preview (16:9, letterboxed) and its caption. */
+/** Centre: banners on top, then the OBS program output preview (16:9, letterboxed). */
 export function Stage({ hasCamera, banners }: StageProps) {
   const [preview, setPreview] = useState<string | null>(null)
   useEffect(() => window.lintoLive.on('preview', setPreview), [])
@@ -24,7 +24,6 @@ export function Stage({ hasCamera, banners }: StageProps) {
               <span className="stage-placeholder">Aperçu en attente…</span>
             )}
           </div>
-          <figcaption className="stage-caption">Sortie OBS — ce qui s'affiche dans la fenêtre de sortie</figcaption>
         </figure>
       </div>
     </section>

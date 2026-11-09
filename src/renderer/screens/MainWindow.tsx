@@ -346,7 +346,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       />
       <ConfirmSheet
         open={sheet?.kind === 'terminate'}
-        message={`Terminer définitivement la session « ${liveName ?? title ?? ''} » ? Elle ne pourra plus être reprise.`}
+        message={`Terminer définitivement « ${liveName ?? title ?? ''} » ?`}
         confirmLabel="Terminer"
         destructive
         onConfirm={() => void terminate()}
@@ -355,7 +355,6 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       <ConfirmSheet
         open={sheet?.kind === 'switch'}
         message={`Basculer le direct sur « ${sheet?.kind === 'switch' ? sheet.target.name : ''} » ?`}
-        detail="Le direct en cours s'arrête et reprend sur cette session ; la fenêtre de sortie reste ouverte."
         confirmLabel="Basculer"
         onConfirm={() => { if (sheet?.kind === 'switch') { const t = sheet.target; setSheet(null); void startSession(t) } }}
         onCancel={() => setSheet(null)}

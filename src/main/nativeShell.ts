@@ -164,10 +164,10 @@ export function notificationFor(
   prev: LiveState, next: LiveState, lastStable: LiveState['stream'] = prev.stream
 ): NotificationText | null {
   if ((prev.phase === 'live' || prev.phase === 'starting') && next.phase === 'error') {
-    return { title: "Le direct s'est arrêté", body: next.warning ?? 'Le direct a été interrompu. Ouvre LinTO Live pour le relancer.' }
+    return { title: "Le direct s'est arrêté", body: next.warning ?? 'Ouvre LinTO Live pour le relancer.' }
   }
   if (next.phase === 'live' && next.stream === 'error' && prev.stream !== 'error' && lastStable === 'active') {
-    return { title: "Le son n'arrive plus à LinTO", body: 'Les sous-titres ne suivent plus. Ouvre LinTO Live pour voir l’état du direct.' }
+    return { title: "Le son n'arrive plus à LinTO", body: 'Les sous-titres ne suivent plus.' }
   }
   if (next.phase === 'live' && prev.captions === 'live' && next.captions === 'offline') {
     return { title: 'Sous-titres interrompus', body: 'Les sous-titres ne s’affichent plus sur la sortie.' }
