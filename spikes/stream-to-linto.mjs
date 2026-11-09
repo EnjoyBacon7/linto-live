@@ -2,7 +2,8 @@
 // Env: LINTO_TOKEN  or  LINTO_EMAIL + LINTO_PASSWORD
 //      LINTO_INSTANCE (default https://studio.linto.ai), LINTO_ORG_ID (default first org),
 //      LINTO_PROFILE_ID (default first transcriber profile), SPIKE_PROTOCOL=srt|rtmp (default srt),
-//      SPIKE_AUDIO_DEVICE (CoreAudio device_id, optional), SPIKE_DURATION_S (default 60)
+//      SPIKE_AUDIO_DEVICE (CoreAudio device_id, optional), SPIKE_AUDIO_FILE (local file looped instead of the mic),
+//      SPIKE_DURATION_S (default 60)
 // Usage: node stream-to-linto.mjs
 import { io } from 'socket.io-client'
 import { startObs, sleep } from './obs-common.mjs'
@@ -48,7 +49,7 @@ const session = await api(`/organizations/${orgId}/sessions`, {
   method: 'POST',
   body: JSON.stringify({
     name: `linto-live spike ${new Date().toISOString()}`,
-    channels: [{ transcriberProfileId: profileId, name: 'spike', translations: [], diarization: false, keepAudio: true, compressAudio: true }],
+    channels: [{ transcriberProfileId: profileId, name: 'spike', translations: [], diarization: false, keepAudio: false, compressAudio: true }],
     meta: {}, scheduleOn: null, endOn: null, autoStart: true, autoEnd: false, visibility: 'organization'
   })
 })
@@ -73,10 +74,18 @@ sock.on('connect_error', (e) => console.error('socket error', e.message))
 
 const { obs, stop } = await startObs()
 try {
-  await obs.call('CreateInput', {
-    sceneName: 'LinTO Live', inputName: 'mic', inputKind: 'coreaudio_input_capture',
-    inputSettings: process.env.SPIKE_AUDIO_DEVICE ? { device_id: process.env.SPIKE_AUDIO_DEVICE } : {}
-  })
+  if (process.env.SPIKE_AUDIO_FILE) {
+    // Deterministic test audio: a local file played in a loop by OBS (no mic needed)
+    await obs.call('CreateInput', {
+      sceneName: 'LinTO Live', inputName: 'speech', inputKind: 'ffmpeg_source',
+      inputSettings: { local_file: process.env.SPIKE_AUDIO_FILE, looping: true, restart_on_activate: false }
+    })
+  } else {
+    await obs.call('CreateInput', {
+      sceneName: 'LinTO Live', inputName: 'mic', inputKind: 'coreaudio_input_capture',
+      inputSettings: process.env.SPIKE_AUDIO_DEVICE ? { device_id: process.env.SPIKE_AUDIO_DEVICE } : {}
+    })
+  }
   await obs.call('SetStreamServiceSettings', { streamServiceType: 'rtmp_custom', streamServiceSettings: service })
   await obs.call('StartStream')
   console.log(`streaming via ${protocol}; speak now (${duration}s)`)
