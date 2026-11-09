@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron'
 import { UnauthorizedError, type AuthMethod } from '../../shared/types'
 import type { LintoApi } from './api'
 import type { LintoUrls } from './instance'
+import { denyAllPermissions } from '../security'
 
 export type RedirectResult = { kind: 'token'; token: string } | { kind: 'exchange' } | { kind: 'none' }
 
@@ -63,6 +64,7 @@ export async function ssoLogin(
 ): Promise<string> {
   const { BrowserWindow: BW, session } = await import('electron')
   const ses = session.fromPartition(PARTITION)
+  denyAllPermissions(ses)
 
   let loginUrl = `${urls.auth}/${method.path}/login`
   if (method.path === 'oidc/organization') {

@@ -1,6 +1,6 @@
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, shell,
-  Tray
+  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
+  shell, Tray
 } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
@@ -23,7 +23,7 @@ import { loadInstance, type LintoUrls } from './linto/instance'
 import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
-import { RENDERER_SCHEME, rendererEntry, rendererFilePath } from './security'
+import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
@@ -80,7 +80,9 @@ function createWindow(settings: SettingsStore): BrowserWindow {
   w.on('move', saveSoon)
   w.on('close', saveBounds)
   // A packaged app ignores ELECTRON_RENDERER_URL: an environment variable must not choose its UI.
-  void w.loadURL(rendererEntry(app.isPackaged, process.env['ELECTRON_RENDERER_URL']))
+  const entry = rendererEntry(app.isPackaged, process.env['ELECTRON_RENDERER_URL'])
+  lockNavigation(w.webContents, entry)
+  void w.loadURL(entry)
   return w
 }
 
@@ -98,6 +100,7 @@ function serveRenderer(): void {
 }
 
 function main(): void {
+  denyAllPermissions(session.defaultSession)
   serveRenderer()
   const platform = process.platform
   const paths = appPaths(app.getPath('userData'), platform)

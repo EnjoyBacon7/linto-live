@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { RENDERER_URL, rendererEntry, rendererFilePath } from '../src/main/security'
+import { EventEmitter } from 'node:events'
+import { describe, expect, it, vi } from 'vitest'
+import { RENDERER_URL, denyAllPermissions, isOwnPage, lockNavigation, rendererEntry, rendererFilePath } from '../src/main/security'
 
 describe('rendererEntry', () => {
   it('honours ELECTRON_RENDERER_URL only in development', () => {
@@ -33,5 +34,50 @@ describe('rendererFilePath', () => {
     expect(rendererFilePath('file:///etc/passwd', root)).toBeNull()
     expect(rendererFilePath('app://linto-live/', root)).toBeNull()
     expect(rendererFilePath('not a url', root)).toBeNull()
+  })
+})
+
+describe('denyAllPermissions', () => {
+  it('refuses every permission request and check', () => {
+    let req: ((wc: unknown, p: string, cb: (ok: boolean) => void) => void) | null = null
+    let check: ((wc: unknown, p: string) => boolean) | null = null
+    denyAllPermissions({
+      setPermissionRequestHandler: (h) => (req = h as typeof req),
+      setPermissionCheckHandler: (h) => (check = h as typeof check)
+    })
+    for (const p of ['media', 'notifications', 'geolocation', 'clipboard-read', 'openExternal']) {
+      const cb = vi.fn()
+      req!(null, p, cb)
+      expect(cb).toHaveBeenCalledWith(false)
+      expect(check!(null, p)).toBe(false)
+    }
+  })
+})
+
+describe('isOwnPage', () => {
+  it('only the page the window was given (same scheme, host and port)', () => {
+    expect(isOwnPage('app://linto-live/index.html#x', RENDERER_URL)).toBe(true)
+    expect(isOwnPage('app://other/index.html', RENDERER_URL)).toBe(false)
+    expect(isOwnPage('https://evil.example/', RENDERER_URL)).toBe(false)
+    expect(isOwnPage('file:///etc/passwd', RENDERER_URL)).toBe(false)
+    expect(isOwnPage('http://localhost:5173/?a', 'http://localhost:5173')).toBe(true)
+    expect(isOwnPage('http://localhost:5174/', 'http://localhost:5173')).toBe(false)
+    expect(isOwnPage('garbage', RENDERER_URL)).toBe(false)
+  })
+})
+
+describe('lockNavigation', () => {
+  it('blocks navigation away from the app page and every new window', () => {
+    const wc = Object.assign(new EventEmitter(), { setWindowOpenHandler: vi.fn() })
+    lockNavigation(wc, RENDERER_URL)
+    const away = { preventDefault: vi.fn() }
+    wc.emit('will-navigate', away, 'https://evil.example/')
+    expect(away.preventDefault).toHaveBeenCalled()
+    const reload = { preventDefault: vi.fn() }
+    wc.emit('will-navigate', reload, 'app://linto-live/index.html')
+    expect(reload.preventDefault).not.toHaveBeenCalled()
+    const handler = wc.setWindowOpenHandler.mock.calls[0][0] as (d: { url: string }) => { action: string }
+    expect(handler({ url: 'https://evil.example/' })).toEqual({ action: 'deny' })
+    expect(handler({ url: RENDERER_URL })).toEqual({ action: 'deny' })
   })
 })
