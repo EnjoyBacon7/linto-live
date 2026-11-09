@@ -48,6 +48,9 @@ export class UnauthorizedError extends Error {
 /** Window rectangle in screen coordinates (DIP). */
 export interface Bounds { x: number; y: number; width: number; height: number }
 
+/** Email + password kept for « Se souvenir de moi » (stored encrypted with the OS keychain). */
+export interface SavedLogin { email: string; password: string }
+
 export interface Settings {
   instance: string
   orgId?: string

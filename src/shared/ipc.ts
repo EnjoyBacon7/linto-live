@@ -1,5 +1,5 @@
 import type {
-  AuthMethod, DeviceItem, Organization, Session, SessionStatus, SessionSummary, Settings,
+  AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionStatus, SessionSummary, Settings,
   TranscriberProfile, Watermark
 } from './types'
 
@@ -49,7 +49,10 @@ export interface LintoLiveApi {
   platform: 'darwin' | 'linux' | (string & {})
   auth: {
     methods(): Promise<AuthMethod[]>
-    loginLocal(email: string, pw: string): Promise<void>
+    /** remember: true saves email + password in the OS keychain after a successful login, false forgets them. */
+    loginLocal(email: string, pw: string, remember?: boolean): Promise<void>
+    /** canRemember is false when the OS has no keychain to protect a password (Linux without a secret service). */
+    savedLogin(): Promise<{ canRemember: boolean; login: SavedLogin | null }>
     loginSso(path: string, email?: string): Promise<void>
     logout(): Promise<void>
     status(): Promise<{ loggedIn: boolean }>
@@ -89,6 +92,7 @@ export const IPC = {
   authLoginSso: 'auth:login-sso',
   authLogout: 'auth:logout',
   authStatus: 'auth:status',
+  authSavedLogin: 'auth:saved-login',
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
   sessionsList: 'sessions:list',
@@ -131,7 +135,9 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
     platform,
     auth: {
       methods: () => call(IPC.authMethods),
-      loginLocal: (email, pw) => call(IPC.authLoginLocal, email, pw),
+      loginLocal: (email, pw, remember) =>
+        (remember === undefined ? call(IPC.authLoginLocal, email, pw) : call(IPC.authLoginLocal, email, pw, remember)),
+      savedLogin: () => call(IPC.authSavedLogin),
       loginSso: (path, email) => (email === undefined ? call(IPC.authLoginSso, path) : call(IPC.authLoginSso, path, email)),
       logout: () => call(IPC.authLogout),
       status: () => call(IPC.authStatus)
