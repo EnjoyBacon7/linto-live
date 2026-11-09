@@ -5,20 +5,23 @@ html, body {
   background: transparent;
   overflow: hidden;
 }
-#captions {
+#band {
   position: absolute;
-  left: 50%;
-  bottom: 80px;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 115.2px;
   box-sizing: border-box;
-  max-width: 1700px;
-  padding: 12px 28px;
-  background: rgba(0, 0, 0, 0.65);
+  padding: 0 100px;
+  background: #000;
   color: #fff;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 56px;
-  line-height: 1.25;
-  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 48px;
+  line-height: 57.6px;
 }
-#captions[hidden] { display: none; }
-#captions .line.partial { opacity: 0.85; }
+#band[hidden] { display: none; }
+#band .line {
+  height: 57.6px;
+  white-space: nowrap;
+  overflow: hidden;
+}

@@ -173,6 +173,7 @@ describe('LiveController', () => {
     const r = await t.live.start('  Conf ')
     expect(r).toEqual({ ok: true, reused: true, canStream: true })
     expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
+    expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
     expect(t.ctl().startStream).toHaveBeenCalledWith({
       streamServiceType: 'rtmp_custom',
       streamServiceSettings: { server: SRT_A, key: '' }
@@ -190,7 +191,7 @@ describe('LiveController', () => {
     expect(t.last().captions).toBe('live')
 
     t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous' })
-    expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour à tous'], partial: false })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour à tous' })
     expect(t.last().lastLine).toBe('Bonjour à tous')
 
     const previews: string[] = []
@@ -198,7 +199,9 @@ describe('LiveController', () => {
     await vi.advanceTimersByTimeAsync(200)
     expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
 
+    t.overlay.push.mockClear()
     await t.live.stop()
+    expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
     const n = t.ctl().screenshot.mock.calls.length
     await vi.advanceTimersByTimeAsync(1000)
     expect(t.ctl().screenshot.mock.calls.length).toBe(n)
@@ -815,15 +818,15 @@ describe('LiveController final fixes', () => {
       await t.live.start('Conf')
       t.captions.emit('status', 'live')
       t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
-      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour'], partial: false })
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour' })
       t.captions.emit('status', 'offline')
       await vi.advanceTimersByTimeAsync(29_000)
-      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour'], partial: false })
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour' })
       await vi.advanceTimersByTimeAsync(1_000)
-      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: [], partial: false })
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'reset' })
       t.captions.emit('status', 'live')
       t.captions.emit('partial', { segmentId: 2, text: 'à tous' })
-      expect(t.overlay.push).toHaveBeenLastCalledWith({ lines: ['Bonjour à tous'], partial: true })
+      expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'partial', text: 'à tous' })
     })
   })
 })

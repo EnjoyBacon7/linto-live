@@ -1,26 +1,33 @@
-(function () {
-  var box = document.getElementById('captions')
-  var key = new URLSearchParams(location.search).get('k') || ''
+import { SubtitleModel } from './layout.js'
 
-  function render(view) {
-    var lines = (view && view.lines) || []
-    box.textContent = ''
-    if (!lines.length) { box.hidden = true; return }
-    lines.forEach(function (text, i) {
-      var div = document.createElement('div')
-      div.className = 'line' + (view.partial && i === lines.length - 1 ? ' partial' : '')
-      div.textContent = text
-      box.appendChild(div)
-    })
-    box.hidden = false
-  }
+const key = new URLSearchParams(location.search).get('k') || ''
+const band = document.getElementById('band')
+const l1 = document.getElementById('l1')
+const l2 = document.getElementById('l2')
 
-  function connect() {
-    var ws = new WebSocket('ws://' + location.host + '/ws?k=' + encodeURIComponent(key))
-    ws.onmessage = function (e) {
-      try { render(JSON.parse(e.data)) } catch (_) { /* ignore malformed */ }
-    }
-    ws.onclose = function () { setTimeout(connect, 1000) }
+const ctx = document.createElement('canvas').getContext('2d')
+ctx.font = '48px Arial'
+const model = new SubtitleModel((line) => ctx.measureText(line).width <= 1920 - 200)
+
+function render() {
+  const [a, b] = model.lines()
+  l1.textContent = a
+  l2.textContent = b
+  band.hidden = !model.visible
+}
+
+function connect() {
+  const ws = new WebSocket('ws://' + location.host + '/ws?k=' + encodeURIComponent(key))
+  ws.onmessage = (e) => {
+    try {
+      const m = JSON.parse(e.data)
+      if (m.type === 'reset') model.reset()
+      else if (m.type === 'partial') model.partial(m.text)
+      else if (m.type === 'final') model.final(m.text)
+      else return
+      render()
+    } catch (_) { /* ignore malformed */ }
   }
-  connect()
-})()
+  ws.onclose = () => { setTimeout(connect, 1000) }
+}
+connect()

@@ -125,8 +125,8 @@ export class LiveController extends EventEmitter {
       this.setState({ captions: s })
       this.superviseCaptions()
     })
-    d.captions.on('partial', (e: CaptionEvent) => this.showCaption(this.buffer.partial(e).lines, true))
-    d.captions.on('final', (e: CaptionEvent) => this.showCaption(this.buffer.final(e).lines, false))
+    d.captions.on('partial', (e: CaptionEvent) => this.showCaption('partial', e.text, this.buffer.partial(e).lines))
+    d.captions.on('final', (e: CaptionEvent) => this.showCaption('final', e.text, this.buffer.final(e).lines))
     d.captions.on('authError', () => this.reportUnauthorized())
   }
 
@@ -293,8 +293,8 @@ export class LiveController extends EventEmitter {
     this.emit('state', this.getState())
   }
 
-  private showCaption(lines: string[], partial: boolean): void {
-    this.d.overlay.push({ lines, partial })
+  private showCaption(type: 'partial' | 'final', text: string, lines: string[]): void {
+    this.d.overlay.push({ type, text })
     const last = lines[lines.length - 1]
     if (last !== undefined && last !== this.state.lastLine) this.setState({ lastLine: last })
   }
@@ -470,7 +470,7 @@ export class LiveController extends EventEmitter {
   private async captionsStale(): Promise<void> {
     const cur = this.current
     if (!cur || this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost) return
-    this.d.overlay.push({ lines: [], partial: false }) // hide the frozen box; the next caption restores it
+    this.d.overlay.push({ type: 'reset' }) // hide the frozen box; the next caption restores it
     try {
       await this.d.api.getSession(cur.orgId, cur.session.id)
     } catch (e) {
@@ -529,7 +529,7 @@ export class LiveController extends EventEmitter {
       const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
       this.current = cur
       this.buffer = new CaptionBuffer()
-      this.d.overlay.push({ lines: [], partial: false })
+      this.d.overlay.push({ type: 'reset' })
       this.setState({
         phase: 'live',
         session: { name: res.session.name, status: res.session.status },
@@ -564,7 +564,7 @@ export class LiveController extends EventEmitter {
     await this.ctl?.showPause().catch(() => {})
     this.current = null
     this.buffer = new CaptionBuffer()
-    this.d.overlay.push({ lines: [], partial: false })
+    this.d.overlay.push({ type: 'reset' })
     this.setState({
       phase: 'idle',
       session: undefined,

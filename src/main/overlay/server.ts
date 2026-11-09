@@ -4,12 +4,14 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer, type WebSocket } from 'ws'
-import type { CaptionView } from '../linto/captions'
+
+export type OverlayMessage = { type: 'reset' } | { type: 'partial' | 'final'; text: string }
 
 const ASSETS: Record<string, { file: string; type: string }> = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/overlay.css': { file: 'overlay.css', type: 'text/css; charset=utf-8' },
-  '/overlay.js': { file: 'overlay.js', type: 'text/javascript; charset=utf-8' }
+  '/overlay.js': { file: 'overlay.js', type: 'text/javascript; charset=utf-8' },
+  '/layout.js': { file: 'layout.js', type: 'text/javascript; charset=utf-8' }
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -21,7 +23,9 @@ function safeEqual(a: string, b: string): boolean {
 export class OverlayServer {
   private server: Server | null = null
   private wss: WebSocketServer | null = null
-  private last: string | null = null
+  // Replay state (bounded): last final since the last reset, and last partial after that final.
+  private lastFinal: string | null = null
+  private lastPartial: string | null = null
   private token = ''
 
   constructor(private opts: { pageDir: string }) {}
@@ -50,7 +54,9 @@ export class OverlayServer {
       if (origin !== undefined && origin !== `http://127.0.0.1:${port}`) return reject()
       if (!safeEqual(url.searchParams.get('k') ?? '', this.token)) return reject()
       wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
-        if (this.last !== null) ws.send(this.last)
+        ws.send(JSON.stringify({ type: 'reset' }))
+        if (this.lastFinal !== null) ws.send(this.lastFinal)
+        if (this.lastPartial !== null) ws.send(this.lastPartial)
       })
     })
 
@@ -62,9 +68,12 @@ export class OverlayServer {
     return { url: `http://127.0.0.1:${port}/?k=${this.token}` }
   }
 
-  push(v: CaptionView): void {
-    this.last = JSON.stringify({ lines: v.lines, partial: v.partial })
-    for (const c of this.wss?.clients ?? []) if (c.readyState === 1) c.send(this.last)
+  push(msg: OverlayMessage): void {
+    const data = JSON.stringify(msg)
+    if (msg.type === 'reset') { this.lastFinal = null; this.lastPartial = null }
+    else if (msg.type === 'final') { this.lastFinal = data; this.lastPartial = null }
+    else this.lastPartial = data
+    for (const c of this.wss?.clients ?? []) if (c.readyState === 1) c.send(data)
   }
 
   async stop(): Promise<void> {
