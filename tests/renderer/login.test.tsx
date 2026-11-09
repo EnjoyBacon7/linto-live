@@ -94,4 +94,11 @@ describe('Login', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('embedded (re-login during a show): the instance is shown but cannot be changed', async () => {
+    window.lintoLive = makeApi()
+    render(<Login embedded onLoggedIn={() => {}} onCancel={() => {}} />)
+    expect(screen.getByText('studio.linto.ai')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Modifier' })).toBeNull()
+  })
 })

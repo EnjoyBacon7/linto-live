@@ -26,7 +26,7 @@ import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
 } from './appLifecycle'
 import {
-  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, trayIconName, trayMenuTemplate, trayTooltip,
+  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
   type NotificationText, type ShellState
 } from './nativeShell'
 
@@ -175,19 +175,28 @@ function main(): void {
       tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(st, runCommand)))
     }
   }
+  // Shown notifications are kept referenced until clicked or closed, or their 'click' may never fire (GC).
+  const notes = new Set<Notification>()
   // Only when the user is looking elsewhere: the window shows the same information otherwise.
   const notify = (n: NotificationText): void => {
     if (!Notification.isSupported()) return
     if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return
     const note = new Notification({ title: n.title, body: n.body })
-    note.on('click', showWindow)
+    notes.add(note)
+    note.on('click', () => {
+      notes.delete(note)
+      showWindow()
+    })
+    note.on('close', () => notes.delete(note))
     note.show()
   }
 
   let prevState = live.getState()
+  let lastStableStream = prevState.stream
   live.on('state', (s: LiveState) => {
     send(IPC.evtLiveState, s)
-    const n = notificationFor(prevState, s)
+    const n = notificationFor(prevState, s, lastStableStream)
+    lastStableStream = stableStream(lastStableStream, s)
     prevState = s
     if (n) notify(n)
     rebuildShell()
@@ -265,6 +274,7 @@ function main(): void {
   ipcMain.handle(IPC.liveStop, () => live.stop())
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
+  ipcMain.handle(IPC.liveGetState, () => live.getState())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {

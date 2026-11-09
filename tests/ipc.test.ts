@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
-        'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput',
+        'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState',
         'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand'
       ].sort()
     )
@@ -22,6 +22,7 @@ describe('IPC constants', () => {
     expectTypeOf<LintoLiveApi['live']['start']>().parameter(0).toBeString()
     expectTypeOf<LintoLiveApi['setup']['load']>().returns.resolves.not.toHaveProperty('displays')
     expectTypeOf<LintoLiveApi['live']['showOutputWindow']>().returns.resolves.toBeVoid()
+    expectTypeOf<LintoLiveApi['live']['getState']>().returns.resolves.toHaveProperty('phase')
   })
 })
 
@@ -54,6 +55,7 @@ describe('createLintoLiveApi', () => {
     await api.live.stop()
     await api.live.terminate()
     await api.live.showOutputWindow()
+    await api.live.getState()
     await api.app.uninstall()
     await api.app.reportShellState({ loggedIn: true, sessionName: 'S', canStart: true })
     expect(invoke.mock.calls).toEqual([
@@ -69,6 +71,7 @@ describe('createLintoLiveApi', () => {
       [IPC.liveStop],
       [IPC.liveTerminate],
       ['live:show-output'],
+      ['live:get-state'],
       [IPC.appUninstall],
       ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }]
     ])

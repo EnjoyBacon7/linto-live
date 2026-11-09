@@ -105,6 +105,8 @@ export class LiveController extends EventEmitter {
   private crashRestart = false
   private captionsTimer: NodeJS.Timeout | null = null
   private captionsAuthLost = false
+  /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
+  private authLost = false
   private tail: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly d: LiveDeps) {
@@ -130,7 +132,7 @@ export class LiveController extends EventEmitter {
     })
     d.captions.on('partial', (e: CaptionEvent) => this.showCaption('partial', e.text, this.buffer.partial(e).lines))
     d.captions.on('final', (e: CaptionEvent) => this.showCaption('final', e.text, this.buffer.final(e).lines))
-    d.captions.on('authError', () => this.reportUnauthorized())
+    d.captions.on('authError', () => this.reportUnauthorized('captions'))
   }
 
   getState(): LiveState {
@@ -212,6 +214,7 @@ export class LiveController extends EventEmitter {
 
   /** After a successful re-login: re-open captions on the session being shown. */
   resumeCaptions(): void {
+    this.authLost = false
     const cur = this.current
     if (!cur || this.state.phase !== 'live') return
     this.captionsAuthLost = false
@@ -220,14 +223,21 @@ export class LiveController extends EventEmitter {
 
   /**
    * A LinTO call was rejected with 401. During a live show nothing is torn down and the token is kept
-   * (OBS output and stream continue); otherwise the token is cleared. Either way the UI is asked to log in.
+   * (OBS output and stream continue); otherwise the token is cleared. The UI is asked to log in once per
+   * loss (until resumeCaptions(), stop or the next start). Only a caption-side failure ('captions': the
+   * socket, or the stale-captions probe) marks the captions offline and stops supervising them: a REST
+   * 401 (e.g. the sessions list) says nothing about a caption socket that may still be delivering.
    */
-  reportUnauthorized(): void {
+  reportUnauthorized(source: 'api' | 'captions' = 'api'): void {
+    if (source === 'captions') {
+      this.captionsAuthLost = true // no token probing until resumeCaptions() / the next start
+      this.clearCaptionsTimer()
+      this.setState({ captions: 'offline' })
+    }
+    if (this.authLost) return
+    this.authLost = true
     const live = this.state.phase === 'live' || this.state.phase === 'starting'
     if (!live) this.d.settings.setToken(null)
-    this.captionsAuthLost = true // no token probing until resumeCaptions() / the next start
-    this.clearCaptionsTimer()
-    this.setState({ captions: 'offline' })
     this.emit('auth-required')
   }
 
@@ -347,7 +357,8 @@ export class LiveController extends EventEmitter {
       await c.openOutputWindow()
       if (c !== this.ctl) return
       this.outputOpened = true
-      this.setState({ output: 'shown' })
+      const failed = this.state.warning?.startsWith(MSG_OUTPUT_FAILED)
+      this.setState({ output: 'shown', ...(failed ? { warning: undefined } : {}) })
     } catch (e) {
       if (c === this.ctl) this.setState({ warning: MSG_OUTPUT_FAILED + errMsg(e) })
     }
@@ -412,7 +423,7 @@ export class LiveController extends EventEmitter {
       if (cur !== this.current) return
       if (e instanceof UnauthorizedError) {
         this.d.captions.close() // stop reconnecting with a dead token
-        this.reportUnauthorized()
+        this.reportUnauthorized('captions')
         return
       }
     }
@@ -440,8 +451,7 @@ export class LiveController extends EventEmitter {
       res = await resolveSession(this.d.api, s.orgId, rawName, s.profileId)
     } catch (e) {
       if (e instanceof UnauthorizedError) {
-        if (this.state.phase !== 'live') this.d.settings.setToken(null)
-        this.emit('auth-required')
+        this.reportUnauthorized()
         return { ok: false, message: MSG_AUTH }
       }
       return { ok: false, message: errMsg(e) }
@@ -456,6 +466,7 @@ export class LiveController extends EventEmitter {
       this.clearRetry()
       this.clearCaptionsTimer()
       this.captionsAuthLost = false
+      this.authLost = false // resolveSession just succeeded: the token is valid
       if (this.current) this.d.captions.close()
       if (this.streamRunning) await this.stopStreamAndWait()
 
@@ -491,6 +502,7 @@ export class LiveController extends EventEmitter {
     this.setState({ phase: 'stopping' })
     this.clearRetry()
     this.clearCaptionsTimer()
+    this.authLost = false
     this.d.captions.close()
     await this.stopStreamAndWait(streamWaitMs)
     await this.ctl?.showPause().catch(() => {})

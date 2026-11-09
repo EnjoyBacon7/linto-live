@@ -60,6 +60,8 @@ export interface LintoLiveApi {
     terminate(): Promise<void>
     /** Opens (another) OBS output window, even if one is already open. */
     showOutputWindow(): Promise<void>
+    /** Current LiveState (the 'live-state' event only carries changes). */
+    getState(): Promise<LiveState>
   }
   app: {
     uninstall(): Promise<void>
@@ -86,6 +88,7 @@ export const IPC = {
   liveStop: 'live:stop',
   liveTerminate: 'live:terminate',
   liveShowOutput: 'live:show-output',
+  liveGetState: 'live:get-state',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   evtLiveState: 'evt:live-state',
@@ -129,7 +132,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       start: (name) => call(IPC.liveStart, name),
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),
-      showOutputWindow: () => call(IPC.liveShowOutput)
+      showOutputWindow: () => call(IPC.liveShowOutput),
+      getState: () => call(IPC.liveGetState)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {

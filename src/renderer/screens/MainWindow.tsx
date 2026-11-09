@@ -59,6 +59,11 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const setBusy = (b: Busy): void => { busyRef.current = b; setBusyState(b) }
   const [error, setError] = useState<string | null>(null)
   const [sheet, setSheet] = useState<SheetState>(null)
+  const sheetRef = useRef<SheetState>(null)
+  sheetRef.current = sheet
+  /** The token is known to be rejected: polling the list would only get 401 again until re-login. */
+  const authRequiredRef = useRef(authRequired)
+  authRequiredRef.current = authRequired
 
   const onAir = isOnAir(state)
   const liveName = onAir ? state.session?.name : undefined
@@ -95,7 +100,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       const last = d?.settings.lastSessionName
       if (alive && last && list?.some((s) => s.name === last)) setSel((cur) => cur ?? { name: last })
     })
-    const t = setInterval(() => void refresh(), REFRESH_MS)
+    const t = setInterval(() => { if (!authRequiredRef.current) void refresh() }, REFRESH_MS)
     return () => { alive = false; clearInterval(t) }
   }, [loadSetup, refresh])
 
@@ -163,7 +168,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       void refresh()
     }
   }
-  const askTerminate = (): void => { if (onAir && !busyRef.current) setSheet({ kind: 'terminate' }) }
+  // Buttons cannot reach a sheet's background, but menu/tray commands can: never replace an open sheet.
+  const askTerminate = (): void => { if (onAir && !busyRef.current && !sheetRef.current) setSheet({ kind: 'terminate' }) }
   const terminate = async (): Promise<void> => {
     setSheet(null)
     if (busyRef.current) return
@@ -183,7 +189,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const showOutput = (): void => {
     window.lintoLive.live.showOutputWindow().catch((e) => setError(ipcErrorMessage(e)))
   }
-  const openNew = (): void => { if (!busyRef.current) setSheet({ kind: 'new' }) }
+  const openNew = (): void => { if (!busyRef.current && !sheetRef.current) setSheet({ kind: 'new' }) }
   const logout = async (): Promise<void> => {
     if (onAir) return
     try {

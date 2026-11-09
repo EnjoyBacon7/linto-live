@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OVERLAY_FAILED, MSG_STREAM_RETRY,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -758,5 +758,72 @@ describe('LiveController final fixes', () => {
       t.captions.emit('partial', { segmentId: 2, text: 'à tous' })
       expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'partial', text: 'à tous' })
     })
+  })
+
+  describe('auth loss is a single transition', () => {
+    it('two consecutive REST 401 while live emit auth-required once; captions untouched', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.captions.emit('status', 'live')
+      const authReq = vi.fn()
+      t.live.on('auth-required', authReq)
+      t.live.reportUnauthorized()
+      t.live.reportUnauthorized()
+      expect(authReq).toHaveBeenCalledTimes(1)
+      expect(t.last()).toMatchObject({ phase: 'live', captions: 'live' })
+      expect(t.captions.close).not.toHaveBeenCalled()
+      expect(t.settings.setToken).not.toHaveBeenCalled()
+    })
+
+    it('a REST 401 does not disable caption supervision', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.live.reportUnauthorized()
+      t.api.getSession.mockClear()
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(t.api.getSession).toHaveBeenCalledTimes(1)
+    })
+
+    it('a caption socket auth failure after a REST 401 marks captions offline without a second emission', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.captions.emit('status', 'live')
+      const authReq = vi.fn()
+      t.live.on('auth-required', authReq)
+      t.live.reportUnauthorized()
+      t.captions.emit('authError')
+      expect(authReq).toHaveBeenCalledTimes(1)
+      expect(t.last().captions).toBe('offline')
+    })
+
+    it('re-login (resumeCaptions) and stop re-arm the notification', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      const authReq = vi.fn()
+      t.live.on('auth-required', authReq)
+      t.live.reportUnauthorized()
+      t.live.resumeCaptions()
+      t.live.reportUnauthorized()
+      expect(authReq).toHaveBeenCalledTimes(2)
+      await t.live.stop()
+      t.live.reportUnauthorized()
+      expect(authReq).toHaveBeenCalledTimes(3)
+    })
+  })
+
+  it('a later successful output window clears the output failure warning', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.ctl().openOutputWindow.mockRejectedValueOnce(new Error('boom'))
+    await t.live.start('Conf')
+    expect(t.last().warning).toBe(MSG_OUTPUT_FAILED + 'boom')
+    await t.live.showOutputWindow()
+    expect(t.last().warning).toBeUndefined()
+    expect(t.last().output).toBe('shown')
   })
 })

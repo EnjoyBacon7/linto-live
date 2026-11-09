@@ -20,7 +20,9 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     sessions: { list: vi.fn().mockResolvedValue([]), ...over.sessions },
     live: {
       start: vi.fn().mockResolvedValue({ ok: true, reused: false, canStream: true }), stop: vi.fn().mockResolvedValue(undefined),
-      terminate: vi.fn().mockResolvedValue(undefined), showOutputWindow: vi.fn().mockResolvedValue(undefined), ...over.live
+      terminate: vi.fn().mockResolvedValue(undefined), showOutputWindow: vi.fn().mockResolvedValue(undefined),
+      getState: vi.fn().mockResolvedValue({ phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }),
+      ...over.live
     },
     app: { uninstall: vi.fn().mockResolvedValue(undefined), reportShellState: vi.fn().mockResolvedValue(undefined), ...over.app },
     on: vi.fn().mockReturnValue(() => {})

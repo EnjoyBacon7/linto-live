@@ -80,8 +80,13 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
         ) : (
           <p className="secondary">
             <span className="selectable">{host(instance)}</span>
-            {' — '}
-            <button type="button" className="login-link" onClick={() => setEditingInstance(true)}>Modifier</button>
+            {/* Re-login during a show: the instance stays the one the show runs on. */}
+            {!embedded && (
+              <>
+                {' — '}
+                <button type="button" className="login-link" onClick={() => setEditingInstance(true)}>Modifier</button>
+              </>
+            )}
           </p>
         )}
       </div>

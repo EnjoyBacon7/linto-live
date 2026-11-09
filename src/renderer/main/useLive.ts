@@ -3,10 +3,21 @@ import type { LiveState } from '../../shared/ipc'
 
 export const IDLE_STATE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }
 
-/** Latest LiveState pushed by main (main also re-sends it on every page load). */
+/**
+ * Latest LiveState: fetched on mount (main's push on page load may arrive before React subscribes),
+ * then pushed by main on every change. A pushed state is newer than the fetched one.
+ */
 export function useLiveState(): LiveState {
   const [state, setState] = useState<LiveState>(IDLE_STATE)
-  useEffect(() => window.lintoLive.on('live-state', setState), [])
+  useEffect(() => {
+    let pushed = false
+    let alive = true
+    const off = window.lintoLive.on('live-state', (s) => { pushed = true; setState(s) })
+    window.lintoLive.live.getState()
+      .then((s) => { if (alive && !pushed) setState(s) })
+      .catch(() => {})
+    return () => { alive = false; off() }
+  }, [])
   return state
 }
 

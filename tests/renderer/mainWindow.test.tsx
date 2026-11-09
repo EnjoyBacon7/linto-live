@@ -604,3 +604,46 @@ describe('Commands from the app menu / tray (evt:command)', () => {
     await waitFor(() => expect(api.app.reportShellState).toHaveBeenLastCalledWith({ loggedIn: false, canStart: false }))
   })
 })
+
+describe('Final review fixes', () => {
+  it('does not poll the session list while LinTO asks to log in again', async () => {
+    vi.useFakeTimers()
+    setup()
+    render(<App />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    act(() => emit('live-state', live()))
+    act(() => emit('auth-required'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    const calls = fn(api.sessions.list).mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_000) })
+    expect(fn(api.sessions.list).mock.calls.length).toBe(calls)
+  })
+
+  it('takes the current LiveState from main on mount (the first push may be missed)', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live()) } })
+    await renderMain()
+    expect(await screen.findByRole('button', { name: 'Arrêter' })).toBeTruthy()
+  })
+
+  it('a pushed LiveState wins over a late getState result', async () => {
+    let resolve!: (s: LiveState) => void
+    setup({ live: { getState: vi.fn(() => new Promise<LiveState>((r) => { resolve = r })) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await act(async () => { resolve(IDLE) })
+    expect(screen.getByRole('button', { name: 'Arrêter' })).toBeTruthy()
+  })
+
+  it('a menu command does not replace an open sheet', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Atelier'))
+    expect(screen.getByText('Basculer le direct sur « Atelier » ?')).toBeTruthy()
+    act(() => emit('command', 'new-session'))
+    act(() => emit('command', 'terminate'))
+    expect(screen.getByText('Basculer le direct sur « Atelier » ?')).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Nouvelle session' })).toBeNull()
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+  })
+})

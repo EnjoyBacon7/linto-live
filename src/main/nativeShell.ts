@@ -95,7 +95,7 @@ export function appMenuTemplate(s: ShellState, run: Run): Item[] {
   const helpMenu: Item = { label: 'Aide', submenu: [{ label: `À propos de ${APP_NAME}`, role: 'about' }] }
 
   return mac
-    ? [appMenu, editMenu, sessionMenu, windowMenu, accountMenu]
+    ? [appMenu, editMenu, sessionMenu, windowMenu, accountMenu, helpMenu]
     : [fileMenu, editMenu, sessionMenu, windowMenu, accountMenu, helpMenu]
 }
 
@@ -147,11 +147,26 @@ export const AUTH_NOTIFICATION: NotificationText = {
 }
 
 /**
- * System notification for a LiveState change, or null. Only real failures during the show notify:
- * a normal Arrêter (phase leaves 'live' first) never does.
+ * Stream state to remember between LiveState changes for notificationFor: the last one that is not the
+ * transient 'starting' (OBS reconnecting, or a retry in progress).
  */
-export function notificationFor(prev: LiveState, next: LiveState): NotificationText | null {
-  if (next.phase === 'live' && prev.stream === 'active' && next.stream === 'error') {
+export function stableStream(last: LiveState['stream'], next: LiveState): LiveState['stream'] {
+  return next.stream === 'starting' ? last : next.stream
+}
+
+/**
+ * System notification for a LiveState change, or null. Only real failures during the show notify:
+ * a normal Arrêter (phase leaves 'live' first) never does. `lastStable` is the last non-'starting'
+ * stream state before `next` (see stableStream): the stream failing after having been active notifies,
+ * even through OBS's reconnecting ('starting') state, but a retry loop (error → starting → error) does not.
+ */
+export function notificationFor(
+  prev: LiveState, next: LiveState, lastStable: LiveState['stream'] = prev.stream
+): NotificationText | null {
+  if ((prev.phase === 'live' || prev.phase === 'starting') && next.phase === 'error') {
+    return { title: "Le direct s'est arrêté", body: next.warning ?? 'Le direct a été interrompu. Ouvre LinTO Live pour le relancer.' }
+  }
+  if (next.phase === 'live' && next.stream === 'error' && prev.stream !== 'error' && lastStable === 'active') {
     return { title: "Le son n'arrive plus à LinTO", body: 'Les sous-titres ne suivent plus. Ouvre LinTO Live pour voir l’état du direct.' }
   }
   if (next.phase === 'live' && prev.captions === 'live' && next.captions === 'offline') {
