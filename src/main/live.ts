@@ -27,6 +27,8 @@ export const PREVIEW_MS = 50 // 20 fps: a 640 px JPEG screenshot costs ~3 ms in 
 const STOP_WAIT_MS = 10_000
 const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
+/** From this stream retry on, ask LinTO whether the session was terminated elsewhere before retrying. */
+const RETRY_PROBE_FROM = 3
 /** Delays between obs.start() attempts after an intentional restart: 5 attempts in total. */
 const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
 /** Captions not live for this long during a show: hide the stale overlay box and probe the LinTO token. */
@@ -441,7 +443,12 @@ export class LiveController extends EventEmitter {
     if (!cur || this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost) return
     this.d.overlay.push({ type: 'reset' }) // hide the frozen box; the next caption restores it
     try {
-      await this.d.api.getSession(cur.orgId, cur.session.id)
+      const { status } = await this.d.api.getSession(cur.orgId, cur.session.id)
+      if (cur !== this.current) return
+      if (status === 'terminated') {
+        void this.enqueue(() => this.stopTerminated(cur)).catch(() => {})
+        return
+      }
     } catch (e) {
       if (cur !== this.current) return
       if (e instanceof UnauthorizedError) {
@@ -451,6 +458,21 @@ export class LiveController extends EventEmitter {
       }
     }
     if (cur === this.current) this.superviseCaptions() // still not live: probe again later
+  }
+
+  /** True when LinTO says the session was terminated (elsewhere: web UI, another device); errors → false. */
+  private async sessionTerminated(cur: Current): Promise<boolean> {
+    try {
+      return (await this.d.api.getSession(cur.orgId, cur.session.id)).status === 'terminated'
+    } catch {
+      return false
+    }
+  }
+
+  /** Runs inside the queue: the shown session was terminated elsewhere — end the show and say why. */
+  private async stopTerminated(cur: Current): Promise<void> {
+    if (cur !== this.current) return
+    await this.doStop(STOP_WAIT_MS, { phase: 'error', warning: msgTerminated(cur.session.name) })
   }
 
   private clearCaptionsTimer(): void {
@@ -520,7 +542,8 @@ export class LiveController extends EventEmitter {
     return { ok: true, reused: res.kind === 'reused', canStream: res.canStream }
   }
 
-  private async doStop(streamWaitMs = STOP_WAIT_MS): Promise<void> {
+  /** `end` overrides the final (idle, no warning) state, e.g. to end in error with a message. */
+  private async doStop(streamWaitMs = STOP_WAIT_MS, end: Partial<LiveState> = {}): Promise<void> {
     if (this.state.phase === 'idle' && !this.current) return
     this.setState({ phase: 'stopping' })
     this.clearRetry()
@@ -539,7 +562,8 @@ export class LiveController extends EventEmitter {
       captions: 'offline',
       startedAt: undefined,
       warning: undefined,
-      lastLine: undefined
+      lastLine: undefined,
+      ...end
     })
   }
 
@@ -622,6 +646,8 @@ export class LiveController extends EventEmitter {
         const c = this.ctl
         const cur = this.current
         if (!c || !cur?.service || this.state.phase !== 'live') return
+        if (this.retryAttempt >= RETRY_PROBE_FROM && (await this.sessionTerminated(cur))) return this.stopTerminated(cur)
+        if (c !== this.ctl || cur !== this.current || this.state.phase !== 'live') return
         await this.startStreamSafe(c, cur.service)
       })
     }, delay)

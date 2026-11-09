@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -796,6 +796,41 @@ describe('LiveController final fixes', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       expect(t.api.getSession).toHaveBeenCalledTimes(2)
       expect(t.captions.close).not.toHaveBeenCalled()
+    })
+
+    it('a session terminated elsewhere is detected by the probe: the show stops with a message', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.ctl().emitState('active')
+      t.api.getSession.mockResolvedValue(session({ status: 'terminated' }))
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await t.live.settled()
+      expect(t.ctl().stopStream).toHaveBeenCalled()
+      expect(t.captions.close).toHaveBeenCalled()
+      expect(t.ctl().showPause).toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'error', stream: 'off', warning: msgTerminated('Conf') })
+      expect(t.last()).not.toHaveProperty('session')
+      expect(t.api.terminateSession).not.toHaveBeenCalled()
+    })
+
+    it('a session terminated elsewhere is detected after failed stream retries', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      const c = t.ctl()
+      t.captions.emit('status', 'live')
+      c.emitState('active')
+      t.api.getSession.mockResolvedValue(session({ status: 'terminated' }))
+      c.startStream.mockRejectedValue(new Error('SRT refused'))
+      c.emitState('stopped')
+      await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 10_000 + 30_000)
+      await t.live.settled()
+      expect(t.last()).toMatchObject({ phase: 'error', stream: 'off', warning: msgTerminated('Conf') })
+      const n = c.startStream.mock.calls.length
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(c.startStream.mock.calls.length).toBe(n) // no more retries
     })
 
     it('captions back live before 30 s cancels the probe', async () => {

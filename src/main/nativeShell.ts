@@ -163,7 +163,7 @@ export function stableStream(last: LiveState['stream'], next: LiveState): LiveSt
 export function notificationFor(
   prev: LiveState, next: LiveState, lastStable: LiveState['stream'] = prev.stream
 ): NotificationText | null {
-  if ((prev.phase === 'live' || prev.phase === 'starting') && next.phase === 'error') {
+  if ((prev.phase === 'live' || prev.phase === 'starting' || prev.phase === 'stopping') && next.phase === 'error') {
     return { title: "Le direct s'est arrêté", body: next.warning ?? 'Le direct a été interrompu. Ouvre LinTO Live pour le relancer.' }
   }
   if (next.phase === 'live' && next.stream === 'error' && prev.stream !== 'error' && lastStable === 'active') {
