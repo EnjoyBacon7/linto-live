@@ -5,6 +5,9 @@ export interface SeedOptions {
   canvas: { width: 1920; height: 1080; fps: 30 }
 }
 
+/** INI content we own: section → ordered [key, value] pairs. Other keys/sections belong to OBS or the user. */
+type IniSpec = [section: string, keys: [string, string][]][]
+
 const GENERAL: [string, string][] = [
   ['FirstRun', 'true'],
   ['LastVersion', '536936448'],
@@ -15,39 +18,40 @@ const GENERAL: [string, string][] = [
   ['Pre31Migrated', 'true']
 ]
 
-const generalSection = (): string => `[General]\n${GENERAL.map(([k, v]) => `${k}=${v}`).join('\n')}\n`
-
-export function seedFiles(o: SeedOptions): Record<string, string> {
+function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
   const { width, height, fps } = o.canvas
   return {
-    'global.ini': generalSection(),
-    'user.ini': `[General]
-FirstRun=true
-ConfirmOnExit=false
+    'global.ini': [['General', GENERAL]],
+    'user.ini': [
+      ['General', [['FirstRun', 'true'], ['ConfirmOnExit', 'false']]],
+      ['BasicWindow', [['SysTrayEnabled', 'true'], ['SysTrayWhenStarted', 'true'], ['SaveProjectors', 'false']]]
+    ],
+    'basic/profiles/LinTO Live/basic.ini': [
+      ['General', [['Name', 'LinTO Live']]],
+      [
+        'Video',
+        [
+          ['BaseCX', String(width)],
+          ['BaseCY', String(height)],
+          ['OutputCX', String(width)],
+          ['OutputCY', String(height)],
+          ['FPSType', '0'],
+          ['FPSCommon', String(fps)]
+        ]
+      ],
+      ['Output', [['Mode', 'Simple']]],
+      ['SimpleOutput', [['VBitrate', '800'], ['ABitrate', '128']]]
+    ]
+  }
+}
 
-[BasicWindow]
-SysTrayEnabled=true
-SysTrayWhenStarted=true
-SaveProjectors=false
-`,
-    'basic/profiles/LinTO Live/basic.ini': `[General]
-Name=LinTO Live
+const renderSection = ([name, keys]: IniSpec[number]): string => `[${name}]\n${keys.map(([k, v]) => `${k}=${v}`).join('\n')}\n`
+const renderIni = (spec: IniSpec): string => spec.map(renderSection).join('\n')
 
-[Video]
-BaseCX=${width}
-BaseCY=${height}
-OutputCX=${width}
-OutputCY=${height}
-FPSType=0
-FPSCommon=${fps}
-
-[Output]
-Mode=Simple
-
-[SimpleOutput]
-VBitrate=800
-ABitrate=128
-`,
+export function seedFiles(o: SeedOptions): Record<string, string> {
+  const ini = Object.fromEntries(Object.entries(iniSpecs(o)).map(([rel, spec]) => [rel, renderIni(spec)]))
+  return {
+    ...ini,
     'basic/scenes/LinTO Live.json': JSON.stringify(
       {
         name: 'LinTO Live',
@@ -72,46 +76,68 @@ ABitrate=128
   }
 }
 
-// Replace the [General] section of an existing global.ini, keeping every other section/key.
-function mergeGlobalIni(existing: string): string {
-  const lines = existing.split(/\r?\n/)
+/**
+ * Re-applies our keys to an existing INI file: in each section we own, our keys are rewritten (at the
+ * end of the section); every other key and section (written by OBS or the user) is kept as is.
+ * Missing sections are appended.
+ */
+export function mergeIni(existing: string, spec: IniSpec): string {
+  const owned = new Map(spec.map(([name, keys]) => [name, keys]))
+  const managed = (section: string | null, line: string): boolean => {
+    const keys = section === null ? undefined : owned.get(section)
+    if (!keys || !line.includes('=')) return false
+    const k = line.split('=')[0].trim()
+    return keys.some(([key]) => key === k)
+  }
   const out: string[] = []
-  const managed = new Set(GENERAL.map(([k]) => k))
-  let inGeneral = false
-  let sawGeneral = false
-  for (const line of lines) {
+  const seen = new Set<string>()
+  let section: string | null = null
+  const closeSection = (): void => {
+    const keys = section === null ? undefined : owned.get(section)
+    if (!keys) return
+    let blank = 0
+    while (out.length && out[out.length - 1].trim() === '') {
+      out.pop()
+      blank++
+    }
+    out.push(...keys.map(([k, v]) => `${k}=${v}`))
+    for (let i = 0; i < blank; i++) out.push('')
+  }
+  for (const line of existing.split(/\r?\n/)) {
     const header = /^\s*\[(.+)\]\s*$/.exec(line)
     if (header) {
-      if (inGeneral) out.push(...GENERAL.map(([k, v]) => `${k}=${v}`))
-      inGeneral = header[1] === 'General'
-      sawGeneral ||= inGeneral
+      closeSection()
+      section = header[1]
+      seen.add(section)
       out.push(line)
       continue
     }
-    if (inGeneral && managed.has(line.split('=')[0].trim())) continue
+    if (managed(section, line)) continue
     out.push(line)
   }
-  if (inGeneral) {
-    while (out.length && out[out.length - 1] === '') out.pop()
-    out.push(...GENERAL.map(([k, v]) => `${k}=${v}`), '')
-  }
+  closeSection()
+  while (out.length && out[out.length - 1].trim() === '') out.pop()
+  const missing = spec.filter(([name]) => !seen.has(name))
   let res = out.join('\n')
-  if (!sawGeneral) res = generalSection() + '\n' + res
+  if (missing.length) res = (res ? res + '\n\n' : '') + renderIni(missing)
   return res.endsWith('\n') ? res : res + '\n'
 }
 
 export async function writeSeed(obsConfigDir: string, o: SeedOptions): Promise<void> {
+  const specs = iniSpecs(o)
   for (const [rel, content] of Object.entries(seedFiles(o))) {
     const p = join(obsConfigDir, rel)
     await mkdir(dirname(p), { recursive: true })
-    if (rel === 'global.ini') {
+    const spec = specs[rel]
+    if (spec) {
+      // INI files: our keys are re-applied on every launch (so updates reach existing installs).
       let existing: string | null = null
       try {
         existing = await readFile(p, 'utf8')
       } catch {
         /* absent */
       }
-      await writeFile(p, existing === null ? content : mergeGlobalIni(existing))
+      await writeFile(p, existing === null ? content : mergeIni(existing, spec))
     } else {
       await writeFile(p, content, { flag: 'wx' }).catch((e: NodeJS.ErrnoException) => {
         if (e.code !== 'EEXIST') throw e

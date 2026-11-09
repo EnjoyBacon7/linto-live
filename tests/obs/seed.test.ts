@@ -60,10 +60,47 @@ describe('writeSeed', () => {
     await writeSeed(d, o)
     await expect(access(join(d, '.sentinel', 'run_123'))).rejects.toThrow()
     await access(join(d, '.sentinel', 'keep'))
-    const p = join(d, 'basic/profiles/LinTO Live/basic.ini')
+    const p = join(d, 'basic/scenes/LinTO Live.json')
     await writeFile(p, 'modified')
     await writeSeed(d, o)
     expect(await readFile(p, 'utf8')).toBe('modified')
+  })
+  it('re-applies our basic.ini keys on an existing install, keeping keys and sections written by OBS', async () => {
+    const d = await tmp()
+    const p = join(d, 'basic/profiles/LinTO Live/basic.ini')
+    await mkdir(join(d, 'basic/profiles/LinTO Live'), { recursive: true })
+    await writeFile(
+      p,
+      '[General]\nName=LinTO Live\n\n[Video]\nBaseCX=1280\nColorFormat=NV12\n\n[SimpleOutput]\nVBitrate=2500\nFilePath=/tmp\n\n[Audio]\nSampleRate=48000\n'
+    )
+    await writeSeed(d, o)
+    const b = await readFile(p, 'utf8')
+    expect(b).toContain('BaseCX=1920')
+    expect(b).not.toContain('BaseCX=1280')
+    expect(b).toContain('ColorFormat=NV12')
+    expect(b).toContain('VBitrate=800')
+    expect(b).not.toContain('VBitrate=2500')
+    expect(b).toContain('FilePath=/tmp')
+    expect(b).toContain('[Audio]\nSampleRate=48000')
+    expect(b).toContain('[Output]\nMode=Simple') // missing section added
+    expect(b.match(/^\[Video\]$/gm)).toHaveLength(1)
+    // idempotent
+    await writeSeed(d, o)
+    expect(await readFile(p, 'utf8')).toBe(b)
+  })
+  it('re-applies our user.ini keys on an existing install', async () => {
+    const d = await tmp()
+    const p = join(d, 'user.ini')
+    await writeFile(p, '[General]\nFirstRun=false\nConfirmOnExit=true\nLastVersion=1\n\n[BasicWindow]\nSaveProjectors=true\ngeometry=abc\n')
+    await writeSeed(d, o)
+    const u = await readFile(p, 'utf8')
+    expect(u).toContain('ConfirmOnExit=false')
+    expect(u).not.toContain('ConfirmOnExit=true')
+    expect(u).toContain('SaveProjectors=false')
+    expect(u).not.toContain('SaveProjectors=true')
+    expect(u).toContain('LastVersion=1')
+    expect(u).toContain('geometry=abc')
+    expect(u).toContain('SysTrayEnabled=true')
   })
   it('always rewrites global.ini [General] keys, preserving other sections', async () => {
     const d = await tmp()
