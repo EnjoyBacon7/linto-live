@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { seedFiles, writeSeed } from '../../src/main/obs/seed'
 
-const o = { canvas: { width: 1920, height: 1080, fps: 30 } } as const
+const o = { canvas: { width: 1920, height: 1080, fps: 30 }, platform: 'darwin' } as const
 const dirs: string[] = []
 const tmp = async () => {
   const d = await mkdtemp(join(tmpdir(), 'seed-test-'))
@@ -31,10 +31,16 @@ describe('seedFiles', () => {
     expect(u).toContain('[BasicWindow]')
     for (const l of ['SysTrayEnabled=true', 'SysTrayWhenStarted=true', 'SaveProjectors=false']) expect(u).toContain(l)
   })
-  it('basic.ini', () => {
+  it('basic.ini: full HD canvas (projector), small cheap stream (LinTO only uses the audio)', () => {
     const b = f['basic/profiles/LinTO Live/basic.ini']
-    for (const l of ['BaseCX=1920', 'BaseCY=1080', 'OutputCX=1920', 'OutputCY=1080', 'FPSCommon=30', 'Mode=Simple', 'VBitrate=800', 'ABitrate=128'])
+    for (const l of ['BaseCX=1920', 'BaseCY=1080', 'OutputCX=640', 'OutputCY=360', 'FPSCommon=30', 'Mode=Simple', 'VBitrate=200', 'ABitrate=128'])
       expect(b).toContain(l)
+  })
+  it('basic.ini: hardware H.264 on macOS, x264 ultrafast on Linux', () => {
+    expect(f['basic/profiles/LinTO Live/basic.ini']).toContain('[SimpleOutput]\nVBitrate=200\nABitrate=128\nStreamEncoder=apple_h264\n')
+    const linux = seedFiles({ ...o, platform: 'linux' })['basic/profiles/LinTO Live/basic.ini']
+    expect(linux).toContain('StreamEncoder=x264\nPreset=ultrafast')
+    expect(linux).not.toContain('apple_h264')
   })
   it('scene collection', () => {
     const s = JSON.parse(f['basic/scenes/LinTO Live.json'])
@@ -78,7 +84,7 @@ describe('writeSeed', () => {
     expect(b).toContain('BaseCX=1920')
     expect(b).not.toContain('BaseCX=1280')
     expect(b).toContain('ColorFormat=NV12')
-    expect(b).toContain('VBitrate=800')
+    expect(b).toContain('VBitrate=200')
     expect(b).not.toContain('VBitrate=2500')
     expect(b).toContain('FilePath=/tmp')
     expect(b).toContain('[Audio]\nSampleRate=48000')

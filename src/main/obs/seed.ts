@@ -3,7 +3,21 @@ import { dirname, join } from 'node:path'
 
 export interface SeedOptions {
   canvas: { width: 1920; height: 1080; fps: 30 }
+  platform: NodeJS.Platform
 }
+
+/**
+ * The stream only carries the room audio to LinTO: its video is scaled down and cheap to encode.
+ * The canvas stays full HD for the projector (output window).
+ */
+const STREAM = { width: 640, height: 360, videoKbps: 200 }
+
+/**
+ * Simple output mode encoder (OBS 32 frontend ids): the hardware H.264 encoder (VideoToolbox) on macOS —
+ * the app ships for Apple Silicon only — and x264 at its cheapest preset on Linux.
+ */
+const streamEncoder = (p: NodeJS.Platform): [string, string][] =>
+  p === 'darwin' ? [['StreamEncoder', 'apple_h264']] : [['StreamEncoder', 'x264'], ['Preset', 'ultrafast']]
 
 /** INI content we own: section → ordered [key, value] pairs. Other keys/sections belong to OBS or the user. */
 type IniSpec = [section: string, keys: [string, string][]][]
@@ -33,14 +47,14 @@ function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
         [
           ['BaseCX', String(width)],
           ['BaseCY', String(height)],
-          ['OutputCX', String(width)],
-          ['OutputCY', String(height)],
+          ['OutputCX', String(STREAM.width)],
+          ['OutputCY', String(STREAM.height)],
           ['FPSType', '0'],
           ['FPSCommon', String(fps)]
         ]
       ],
       ['Output', [['Mode', 'Simple']]],
-      ['SimpleOutput', [['VBitrate', '800'], ['ABitrate', '128']]]
+      ['SimpleOutput', [['VBitrate', String(STREAM.videoKbps)], ['ABitrate', '128'], ...streamEncoder(o.platform)]]
     ]
   }
 }
