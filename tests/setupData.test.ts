@@ -11,7 +11,7 @@ function deps(over: Partial<SetupDeps> = {}, init: Settings = { instance: 'https
     profiles: vi.fn().mockResolvedValue([{ id: 7, name: 'P' }, { id: 8, name: 'Q' }]),
     devices: vi.fn().mockResolvedValue(dev),
     saveSettings: vi.fn(async (p) => { s = { ...s, ...p } }),
-    onUnauthorized: vi.fn(), ...over
+    onUnauthorized: vi.fn(), watermarkEnabled: () => true, ...over
   }
 }
 

@@ -5,23 +5,51 @@ html, body {
   background: transparent;
   overflow: hidden;
 }
+/* --fs: font size in px (set by overlay.js from the app's settings). As on the LinTO page:
+   line height 1.2 × font size, band 2 lines high. */
 #band {
+  --fs: 48px;
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 115.2px;
+  height: calc(2.4 * var(--fs));
   box-sizing: border-box;
   padding: 0 100px;
+  overflow: hidden;
   background: #000;
   color: #fff;
   font-family: Arial, sans-serif;
-  font-size: 48px;
-  line-height: 57.6px;
+  font-size: var(--fs);
+  line-height: calc(1.2 * var(--fs));
 }
 #band[hidden] { display: none; }
+#lines {
+  transition: transform 0.4s ease;
+  transform-origin: top center;
+}
+/* Watermark shown: the text shrinks to make room, as on the LinTO page. */
+#band.has-wm #lines { transform: scale(0.8) translateY(-8%); }
 #band .line {
-  height: 57.6px;
+  height: calc(1.2 * var(--fs));
   white-space: nowrap;
   overflow: hidden;
 }
+/* LinTO: 1.2rem for a 40 px subtitle, 16 px from the right, 4 px from the bottom. */
+#wm {
+  position: absolute;
+  right: calc(0.4 * var(--fs));
+  bottom: calc(0.1 * var(--fs));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  font-size: calc(0.48 * var(--fs));
+  line-height: 1;
+  white-space: pre;
+  opacity: 0;
+  transform: translate(6px, 6px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+}
+#band.has-wm #wm { opacity: 1; transform: none; }
+#wm img { height: 1em; vertical-align: middle; }

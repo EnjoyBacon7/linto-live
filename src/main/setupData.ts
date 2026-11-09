@@ -1,6 +1,10 @@
 import type { SetupData } from '../shared/ipc'
 import { toObsStreamService } from './obs/streamTarget'
-import { UnauthorizedError, type Organization, type Session, type SessionSummary, type Settings, type TranscriberProfile } from '../shared/types'
+import {
+  UnauthorizedError, type Organization, type Session, type SessionSummary, type Settings, type TranscriberProfile,
+  type WatermarkConfig
+} from '../shared/types'
+import { resolveWatermark } from './linto/watermark'
 
 type Devices = Pick<SetupData, 'videoDevices' | 'audioDevices'>
 
@@ -12,6 +16,8 @@ export interface SetupDeps {
   devices(): Promise<Devices>
   saveSettings(patch: Partial<Settings>): Promise<void>
   onUnauthorized(): void
+  /** The instance's watermark feature flag (from its config.js). */
+  watermarkEnabled(): boolean
 }
 
 /** Org/profile defaults to persist: the single org, and the first profile when the saved one is missing. */
@@ -26,7 +32,8 @@ export function defaultSelection(
 
 export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
   const devices = await d.devices()
-  const empty = (): SetupData => ({ settings: d.getSettings(), organizations: [], profiles: [], ...devices })
+  const watermarkEnabled = d.watermarkEnabled()
+  const empty = (): SetupData => ({ settings: d.getSettings(), organizations: [], profiles: [], ...devices, watermarkEnabled })
   if (!d.hasToken()) return empty()
   try {
     const organizations = await d.organizations()
@@ -35,7 +42,7 @@ export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
     const profiles = orgId ? await d.profiles(orgId) : []
     const patch = defaultSelection(s, organizations, profiles)
     if (Object.keys(patch).length > 0) await d.saveSettings(patch)
-    return { settings: d.getSettings(), organizations, profiles, ...devices }
+    return { settings: d.getSettings(), organizations, profiles, ...devices, watermarkEnabled }
   } catch (e) {
     if (e instanceof UnauthorizedError) {
       d.onUnauthorized()
@@ -46,13 +53,14 @@ export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
 }
 
 /** Sidebar entries: `active` first, then most recently updated. */
-export function toSessionSummaries(sessions: Session[]): SessionSummary[] {
+export function toSessionSummaries(sessions: Session[], watermark?: WatermarkConfig): SessionSummary[] {
   return sessions
     .filter((s): s is Session & { status: SessionSummary['status'] } => s.status !== 'terminated')
     .map((s): SessionSummary => {
       const out: SessionSummary = {
         id: s.id, name: s.name, status: s.status,
-        canStream: toObsStreamService(s.channels[0]?.streamEndpoints ?? {}) !== null
+        canStream: toObsStreamService(s.channels[0]?.streamEndpoints ?? {}) !== null,
+        watermark: resolveWatermark(s.meta, watermark)
       }
       if (s.updatedAt) out.updatedAt = s.updatedAt
       return out

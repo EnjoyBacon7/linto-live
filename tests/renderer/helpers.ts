@@ -7,7 +7,8 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     organizations: [{ id: 'o1', name: 'Org' }],
     profiles: [{ id: 1, name: 'Français' }],
     videoDevices: [{ id: 'v1', name: 'Capture HDMI' }],
-    audioDevices: [{ id: 'a1', name: 'Micro' }]
+    audioDevices: [{ id: 'a1', name: 'Micro' }],
+    watermarkEnabled: false
   }
   const api = {
     platform: 'darwin',
@@ -17,10 +18,11 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       ...over.auth
     },
     setup: { load: vi.fn().mockResolvedValue(setupData), save: vi.fn().mockResolvedValue(undefined), ...over.setup },
-    sessions: { list: vi.fn().mockResolvedValue([]), ...over.sessions },
+    sessions: { list: vi.fn().mockResolvedValue([]), setWatermark: vi.fn().mockResolvedValue(undefined), ...over.sessions },
     live: {
       start: vi.fn().mockResolvedValue({ ok: true, reused: false, canStream: true }), stop: vi.fn().mockResolvedValue(undefined),
       terminate: vi.fn().mockResolvedValue(undefined), showOutputWindow: vi.fn().mockResolvedValue(undefined),
+      clearSubtitles: vi.fn().mockResolvedValue(undefined),
       getState: vi.fn().mockResolvedValue({ phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }),
       ...over.live
     },

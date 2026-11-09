@@ -26,6 +26,7 @@ function toSession(s: any): Session {
   if (s.owner) out.owner = s.owner
   if (s.createdAt) out.createdAt = s.createdAt
   if (s.updatedAt) out.updatedAt = s.updatedAt
+  if (s.meta && typeof s.meta === 'object' && !Array.isArray(s.meta)) out.meta = s.meta
   return out
 }
 
@@ -129,6 +130,13 @@ export class LintoApi {
 
   async getSession(orgId: string, id: string): Promise<Session> {
     return toSession(await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}`))
+  }
+
+  /** Replaces the session's `meta` (send the whole object: LinTO does not merge it). */
+  async patchSessionMeta(orgId: string, id: string, meta: Record<string, unknown>): Promise<void> {
+    await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ meta })
+    })
   }
 
   async terminateSession(orgId: string, id: string): Promise<void> {

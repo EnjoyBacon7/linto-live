@@ -1,6 +1,9 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
-import { UnauthorizedError, type Channel, type DeviceItem, type Session, type Settings } from '../shared/types'
+import {
+  DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
+  type Channel, type DeviceItem, type Session, type SessionSummary, type Settings, type Watermark, type WatermarkConfig
+} from '../shared/types'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import type { ObsController, StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
@@ -8,6 +11,7 @@ import type { LintoApi } from './linto/api'
 import { CaptionBuffer, type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
 import { resolveSession } from './linto/sessionResolver'
 import type { OverlayServer } from './overlay/server'
+import { resolveWatermark, sameWatermark } from './linto/watermark'
 import type { SettingsStore } from './settings'
 
 export const MSG_NO_STREAM = "Impossible d'envoyer l'audio : tu n'es pas propriétaire de cette session."
@@ -64,6 +68,16 @@ export interface LiveDeps {
   overlay: LiveOverlay
   settings: LiveSettings
   platform: NodeJS.Platform
+  /** The instance's watermark defaults (config.js); LinTO Studio's defaults when absent. */
+  watermarkConfig?: () => WatermarkConfig
+}
+
+/** Font size actually used on the canvas: the saved one if valid, else the default. */
+export function subtitleFontSize(s: Pick<Settings, 'subtitleFontSize'>): number {
+  const v = s.subtitleFontSize
+  return typeof v === 'number' && Number.isFinite(v)
+    ? Math.min(SUBTITLE_FONT_SIZE_MAX, Math.max(SUBTITLE_FONT_SIZE_MIN, Math.round(v)))
+    : DEFAULT_SUBTITLE_FONT_SIZE
 }
 
 interface Current {
@@ -89,6 +103,8 @@ export class LiveController extends EventEmitter {
   private overlayUrl: string | null = null
   private current: Current | null = null
   private buffer = new CaptionBuffer()
+  /** Watermark of the session on air (null when off air: no watermark then). */
+  private watermark: Watermark | null = null
   /** An output window was opened during the current OBS run. */
   private outputOpened = false
   private streamRunning = false
@@ -151,6 +167,7 @@ export class LiveController extends EventEmitter {
   async boot(): Promise<void> {
     try {
       this.overlayUrl = (await this.d.overlay.start()).url
+      this.pushStyle()
       // Each successful start emits 'ready' → attach is queued.
       if (!(await this.startObsWithRetry(++this.restartGen))) throw new Error('OBS start failed')
       await this.settled()
@@ -241,6 +258,27 @@ export class LiveController extends EventEmitter {
     this.emit('auth-required')
   }
 
+  /** « Effacer les sous-titres »: empties the band (it comes back with the next words). */
+  clearSubtitles(): void {
+    this.buffer = new CaptionBuffer()
+    this.d.overlay.push({ type: 'reset' })
+    if (this.state.lastLine !== undefined) this.setState({ lastLine: undefined })
+  }
+
+  /** A session's watermark was saved or re-read from LinTO: the overlay follows if that session is on air. */
+  watermarkChanged(sessionId: string, w: Watermark): void {
+    if (this.current?.session.id !== sessionId || (this.watermark && sameWatermark(this.watermark, w))) return
+    this.watermark = w
+    this.pushStyle()
+  }
+
+  /** Fresh session list: picks up a watermark changed elsewhere (e.g. in LinTO Studio) for the session on air. */
+  syncWatermarks(list: SessionSummary[]): void {
+    const id = this.current?.session.id
+    const s = id ? list.find((x) => x.id === id) : undefined
+    if (s) this.watermarkChanged(s.id, s.watermark)
+  }
+
   /** Device lists for the setup screen (empty while OBS is not connected). */
   async listDevices(): Promise<{ videoDevices: DeviceItem[]; audioDevices: DeviceItem[] }> {
     const c = this.ctl
@@ -257,6 +295,7 @@ export class LiveController extends EventEmitter {
     return this.enqueue(async () => {
       const before = this.d.settings.get()
       this.d.settings.update(patch)
+      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined) this.pushStyle()
       const c = this.ctl
       if (!c) return
       if (patch.videoDeviceId && patch.videoDeviceId !== before.videoDeviceId) await c.setVideoDevice(patch.videoDeviceId)
@@ -276,6 +315,18 @@ export class LiveController extends EventEmitter {
     this.state = { ...this.state, ...patch }
     for (const k of Object.keys(this.state) as (keyof LiveState)[]) if (this.state[k] === undefined) delete this.state[k]
     this.emit('state', this.getState())
+  }
+
+  /** Sends the band's look (local settings + the on-air session's watermark) to the overlay. */
+  private pushStyle(): void {
+    const s = this.d.settings.get()
+    const cfg = this.d.watermarkConfig?.()
+    this.d.overlay.push({
+      type: 'style',
+      visible: s.subtitlesVisible !== false,
+      fontSize: subtitleFontSize(s),
+      watermark: this.watermark ?? resolveWatermark(undefined, cfg)
+    })
   }
 
   private showCaption(type: 'partial' | 'final', text: string, lines: string[]): void {
@@ -474,6 +525,8 @@ export class LiveController extends EventEmitter {
       const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
       this.current = cur
       this.buffer = new CaptionBuffer()
+      this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
+      this.pushStyle()
       this.d.overlay.push({ type: 'reset' })
       this.setState({
         phase: 'live',
@@ -508,6 +561,8 @@ export class LiveController extends EventEmitter {
     await this.ctl?.showPause().catch(() => {})
     this.current = null
     this.buffer = new CaptionBuffer()
+    this.watermark = null
+    this.pushStyle()
     this.d.overlay.push({ type: 'reset' })
     this.setState({
       phase: 'idle',

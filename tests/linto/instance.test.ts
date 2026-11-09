@@ -33,7 +33,7 @@ describe('loadInstance', () => {
     const f = (async (u: string) => { url = u; return new Response(js) }) as unknown as typeof fetch
     const r = await loadInstance('https://studio.linto.ai/', f)
     expect(url).toBe('https://studio.linto.ai/config.js')
-    expect(r.instance).toBe('https://studio.linto.ai')
+    expect(r.urls.instance).toBe('https://studio.linto.ai')
   })
   it('throws on non-2xx', async () => {
     const f = (async () => new Response('no', { status: 404 })) as unknown as typeof fetch

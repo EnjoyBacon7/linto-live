@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
-import { UnauthorizedError, type Settings, type SessionSummary } from '../shared/types'
+import { UnauthorizedError, type Settings, type SessionSummary, type WatermarkConfig } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -17,7 +17,8 @@ import { obsExecutable } from './obs/locate'
 import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { CaptionStream } from './linto/captions'
-import { loadInstance, type LintoUrls } from './linto/instance'
+import { loadInstance, STUDIO_WATERMARK_DEFAULTS, type LintoUrls } from './linto/instance'
+import { checkWatermark, WATERMARK_META_KEY } from './linto/watermark'
 import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
@@ -99,6 +100,7 @@ function main(): void {
   // LintoApi / CaptionStream read their URLs at call time: share one mutable object, filled from
   // <instance>/config.js on first use and refilled when the instance setting changes.
   const urls: LintoUrls = { instance: '', api: '', auth: '', wsUrl: '', wsPath: '' }
+  let watermarkCfg: WatermarkConfig = STUDIO_WATERMARK_DEFAULTS
   let urlsFor: string | null = null
   let urlsLoading: Promise<void> | null = null
   const ensureUrls = (): Promise<void> => {
@@ -107,7 +109,8 @@ function main(): void {
     if (!urlsLoading) {
       urlsLoading = loadInstance(inst)
         .then((u) => {
-          Object.assign(urls, u)
+          Object.assign(urls, u.urls)
+          watermarkCfg = u.watermark
           urlsFor = inst
         })
         .finally(() => (urlsLoading = null))
@@ -143,7 +146,8 @@ function main(): void {
     captions,
     overlay,
     settings,
-    platform
+    platform,
+    watermarkConfig: () => watermarkCfg
   })
 
   // ---- Native shell: app menu, menu-bar icon, notifications ----
@@ -250,7 +254,8 @@ function main(): void {
       devices: () => live.listDevices(),
       saveSettings: (p) => live.saveSettings(p),
       // Clears a stale token (unless a show is live) and asks the UI to log in.
-      onUnauthorized: () => live.reportUnauthorized()
+      onUnauthorized: () => live.reportUnauthorized(),
+      watermarkEnabled: () => watermarkCfg.enabled
     })
   })
   ipcMain.handle(IPC.sessionsList, async (): Promise<SessionSummary[]> => {
@@ -258,11 +263,31 @@ function main(): void {
     if (!orgId) return []
     await ensureUrls()
     try {
-      return toSessionSummaries(await api.listSessions(orgId))
+      const list = toSessionSummaries(await api.listSessions(orgId), watermarkCfg)
+      live.syncWatermarks(list)
+      return list
     } catch (e) {
       if (e instanceof UnauthorizedError) live.reportUnauthorized()
       throw e
     }
+  })
+  // Same storage as LinTO Studio: the session's meta['@watermark'] (PATCH replaces the whole meta).
+  ipcMain.handle(IPC.sessionsSetWatermark, async (_e, sessionId: unknown, raw: unknown) => {
+    const w = checkWatermark(raw)
+    const orgId = settings.get().orgId
+    if (!orgId || typeof sessionId !== 'string' || !sessionId) throw new Error('Aucune session choisie.')
+    await ensureUrls()
+    try {
+      const s = await api.getSession(orgId, sessionId)
+      await api.patchSessionMeta(orgId, sessionId, { ...(s.meta ?? {}), [WATERMARK_META_KEY]: w })
+    } catch (e) {
+      if (e instanceof UnauthorizedError) live.reportUnauthorized()
+      else if (/LinTO HTTP 403/.test(String((e as Error)?.message))) {
+        throw new Error("Tu n'as pas le droit de modifier cette session (il faut être gestionnaire de réunion dans l'organisation).")
+      }
+      throw e
+    }
+    live.watermarkChanged(sessionId, w)
   })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
   ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))
@@ -275,6 +300,7 @@ function main(): void {
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   ipcMain.handle(IPC.liveGetState, () => live.getState())
+  ipcMain.handle(IPC.liveClearSubtitles, () => live.clearSubtitles())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {

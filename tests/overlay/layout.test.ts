@@ -113,14 +113,15 @@ describe('SubtitleModel', () => {
 })
 
 describe('caption measurement', () => {
-  it('measures with the font the band is drawn with (size and family stack)', () => {
+  it('measures with the font the band is drawn with (default size and family stack)', () => {
     const dir = join(__dirname, '../../src/main/overlay/page')
     const css = readFileSync(join(dir, 'overlay.css'), 'utf8')
     const js = readFileSync(join(dir, 'overlay.js'), 'utf8')
     const band = /#band\s*\{([^}]*)\}/.exec(css)![1]!
     const family = /font-family:\s*([^;]+);/.exec(band)![1]!.trim()
-    const size = /font-size:\s*([^;]+);/.exec(band)![1]!.trim()
-    const canvasFont = /ctx\.font\s*=\s*'([^']+)'/.exec(js)![1]
-    expect(canvasFont).toBe(`${size} ${family}`)
+    expect(/font-size:\s*([^;]+);/.exec(band)![1]!.trim()).toBe('var(--fs)')
+    const cssSize = /--fs:\s*(\d+)px;/.exec(band)![1]
+    expect(/let fontSize = (\d+)/.exec(js)![1]).toBe(cssSize)
+    expect(/const font = size \+ 'px ([^']+)'/.exec(js)![1]).toBe(family)
   })
 })

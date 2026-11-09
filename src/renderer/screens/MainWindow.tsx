@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveState, SetupData } from '../../shared/ipc'
-import type { SessionSummary, Settings } from '../../shared/types'
+import type { SessionSummary, Settings, Watermark } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
 import { Sheet } from '../ui/Sheet'
 import { CloseIcon } from '../ui/icons'
 import { ConfirmSheet } from '../main/ConfirmSheet'
-import { Inspector } from '../main/Inspector'
+import { Inspector, type WatermarkTarget } from '../main/Inspector'
+import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
 import { NO_STREAM_REASON, STATUS, Sidebar } from '../main/Sidebar'
 import { Stage } from '../main/Stage'
@@ -42,6 +43,7 @@ type SheetState =
   | { kind: 'terminate' }
   | { kind: 'switch'; target: Selection }
   | { kind: 'login' }
+  | { kind: 'watermark' }
   | null
 
 const REFRESH_MS = 30_000
@@ -139,6 +141,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const caption = onAir && reused !== null ? (reused ? 'réutilisée' : 'nouvelle')
     : sel?.pending ? 'nouvelle'
     : summary ? STATUS[summary.status].label.toLowerCase() : null
+  const watermarkTarget: WatermarkTarget = sel?.pending ? { pending: true }
+    : summary ? { watermark: summary.watermark } : null
   const profile = !sel ? null
     : sel.pending ? (data?.profiles.find((p) => p.id === sel.pending?.profileId)?.name ?? '—')
     : 'Défini par la session'
@@ -238,6 +242,20 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     setSettings((s) => (s ? { ...s, ...patch } : s))
     window.lintoLive.setup.save(patch).catch((e) => setError(ipcErrorMessage(e)))
   }
+  /** Saved on the LinTO session (like LinTO Studio); shown at once, rolled back by a refresh on failure. */
+  const saveWatermark = (patch: Partial<Watermark>): void => {
+    if (!summary) return
+    const w: Watermark = { ...summary.watermark, ...patch }
+    const id = summary.id
+    setSessions((list) => list?.map((x) => (x.id === id ? { ...x, watermark: w } : x)) ?? list)
+    window.lintoLive.sessions.setWatermark(id, w).catch((e) => {
+      setError(ipcErrorMessage(e))
+      void refresh()
+    })
+  }
+  const clearSubtitles = (): void => {
+    window.lintoLive.live.clearSubtitles().catch((e) => setError(ipcErrorMessage(e)))
+  }
   const switchOrg = async (orgId: string): Promise<void> => {
     if (onAir) return // the show on air belongs to the current organisation
     try {
@@ -329,7 +347,10 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         />
         <div className="content-body">
           <Stage hasCamera={!!settings?.videoDeviceId} banners={hasBanner ? banners : null} />
-          <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings} />
+          <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
+            onAir={onAir} onClearSubtitles={clearSubtitles}
+            watermark={watermarkTarget} onWatermarkChange={saveWatermark}
+            onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />
         </div>
         <StatusBar state={state} onAir={onAir} />
       </div>
@@ -358,6 +379,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         detail="Le direct en cours s'arrête et reprend sur cette session ; la fenêtre de sortie reste ouverte."
         confirmLabel="Basculer"
         onConfirm={() => { if (sheet?.kind === 'switch') { const t = sheet.target; setSheet(null); void startSession(t) } }}
+        onCancel={() => setSheet(null)}
+      />
+      <WatermarkSheet
+        open={sheet?.kind === 'watermark' && !!summary}
+        watermark={summary?.watermark ?? null}
+        onApply={(w) => { setSheet(null); saveWatermark(w) }}
         onCancel={() => setSheet(null)}
       />
       <Sheet title="Se reconnecter à LinTO" open={sheet?.kind === 'login'} onClose={() => setSheet(null)} footer={null}>

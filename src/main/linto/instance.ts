@@ -1,9 +1,42 @@
+import type { WatermarkConfig } from '../../shared/types'
+
 export interface LintoUrls { instance: string; api: string; auth: string; wsUrl: string; wsPath: string }
 
-function readKey(js: string, key: string): string {
+function findKey(js: string, key: string): string | undefined {
   const m = new RegExp(`["']?${key}["']?\\s*:\\s*(["'])((?:\\\\.|(?!\\1).)*)\\1`).exec(js)
-  if (!m) throw new Error(`config.js: clé ${key} introuvable`)
-  return m[2]
+  return m?.[2]
+}
+
+function readKey(js: string, key: string): string {
+  const v = findKey(js, key)
+  if (v === undefined) throw new Error(`config.js: clé ${key} introuvable`)
+  return v
+}
+
+/** LinTO Studio's own defaults (studio-frontend const/defaultEnv.js), used for keys the instance leaves out. */
+export const STUDIO_WATERMARK_DEFAULTS: WatermarkConfig = {
+  enabled: false,
+  content: 'Transcription by LinTO.ai $linto Open Source AI by $linagora',
+  frequency: 600,
+  duration: 10
+}
+
+function positive(v: string | undefined, fallback: number): number {
+  const n = Number(v)
+  return v !== undefined && Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+/** The VUE_APP_*WATERMARK* keys of config.js (whether the web app offers the watermark, and its defaults). */
+export function parseWatermarkConfig(js: string): WatermarkConfig {
+  const d = STUDIO_WATERMARK_DEFAULTS
+  const enabled = findKey(js, 'VUE_APP_ENABLE_WATERMARK')
+  const content = findKey(js, 'VUE_APP_WATERMARK_CONTENT')
+  return {
+    enabled: enabled === undefined ? d.enabled : enabled === 'true',
+    content: content ?? d.content,
+    frequency: positive(findKey(js, 'VUE_APP_WATERMARK_FREQUENCY'), d.frequency),
+    duration: positive(findKey(js, 'VUE_APP_WATERMARK_DURATION'), d.duration)
+  }
 }
 
 function resolve(instance: string, v: string): string {
@@ -21,9 +54,12 @@ export function parseConfigJs(instance: string, js: string): LintoUrls {
   }
 }
 
-export async function loadInstance(instance: string, fetchFn: typeof fetch = fetch): Promise<LintoUrls> {
+export async function loadInstance(
+  instance: string, fetchFn: typeof fetch = fetch
+): Promise<{ urls: LintoUrls; watermark: WatermarkConfig }> {
   const inst = instance.replace(/\/+$/, '')
   const res = await fetchFn(`${inst}/config.js`)
   if (!res.ok) throw new Error(`config.js: HTTP ${res.status}`)
-  return parseConfigJs(inst, await res.text())
+  const js = await res.text()
+  return { urls: parseConfigJs(inst, js), watermark: parseWatermarkConfig(js) }
 }
