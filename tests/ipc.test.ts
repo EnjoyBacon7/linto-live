@@ -30,7 +30,7 @@ function fake() {
   const on = vi.fn()
   const off = vi.fn()
   const t: Transport = { invoke, on, off }
-  return { invoke, on, off, api: createLintoLiveApi(t) }
+  return { invoke, on, off, api: createLintoLiveApi(t, 'darwin') }
 }
 
 it('sessions channel', () => { expect(IPC.sessionsList).toBe('sessions:list') })
@@ -66,6 +66,11 @@ describe('createLintoLiveApi', () => {
       ['live:show-output'],
       [IPC.appUninstall]
     ])
+  })
+  it('passes the platform through', () => {
+    const t: Transport = { invoke: vi.fn(), on: vi.fn(), off: vi.fn() }
+    expect(createLintoLiveApi(t, 'darwin').platform).toBe('darwin')
+    expect(createLintoLiveApi(t, 'linux').platform).toBe('linux')
   })
   it('returns invoke result', async () => {
     const { api, invoke } = fake()

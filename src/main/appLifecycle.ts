@@ -1,4 +1,5 @@
 import type { LiveState } from '../shared/ipc'
+import type { Bounds } from '../shared/types'
 
 /** Electron-free helpers for main.ts (single instance, quit confirmation). */
 
@@ -99,4 +100,59 @@ export function createQuitGuard(d: QuitGuardDeps): {
       quitting = true
     }
   }
+}
+
+export type { Bounds }
+
+/** Main window size (Apple HIG-ish: comfortable default, never cramped). */
+export const WINDOW_SIZE = { width: 1100, height: 720, minWidth: 860, minHeight: 560 } as const
+
+const MIN_VISIBLE = 100
+
+const finite = (b: Bounds): boolean =>
+  [b.x, b.y, b.width, b.height].every((n) => typeof n === 'number' && Number.isFinite(n)) && b.width > 0 && b.height > 0
+
+/**
+ * Saved window bounds are reused only if at least 100×100 px of the window lands on one display's
+ * work area (a display may have been unplugged since); otherwise the default size, centred by Electron.
+ */
+export function restoreBounds(
+  saved: Bounds | undefined,
+  displays: Bounds[],
+  def: { width: number; height: number }
+): Bounds | { width: number; height: number } {
+  if (!saved || !finite(saved)) return def
+  const visible = displays.some((d) => {
+    const w = Math.min(saved.x + saved.width, d.x + d.width) - Math.max(saved.x, d.x)
+    const h = Math.min(saved.y + saved.height, d.y + d.height) - Math.max(saved.y, d.y)
+    return w >= MIN_VISIBLE && h >= MIN_VISIBLE
+  })
+  return visible ? saved : def
+}
+
+export type WindowChrome =
+  | {
+      titleBarStyle: 'hiddenInset'
+      trafficLightPosition: { x: number; y: number }
+      vibrancy: 'sidebar'
+      visualEffectState: 'followWindow'
+      backgroundColor: string
+    }
+  | { backgroundColor: string }
+
+/**
+ * macOS: title bar merged into the content, traffic lights inside the translucent sidebar.
+ * Linux: the system frame (integration is not reliable across desktops) and a solid background.
+ */
+export function windowChrome(platform: string, dark: boolean): WindowChrome {
+  if (platform === 'darwin') {
+    return {
+      titleBarStyle: 'hiddenInset',
+      trafficLightPosition: { x: 18, y: 18 },
+      vibrancy: 'sidebar',
+      visualEffectState: 'followWindow',
+      backgroundColor: '#00000000'
+    }
+  }
+  return { backgroundColor: dark ? '#1e1e1e' : '#ececec' }
 }

@@ -18,6 +18,9 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/** Window rectangle in screen coordinates (DIP). */
+export interface Bounds { x: number; y: number; width: number; height: number }
+
 export interface Settings {
   instance: string
   orgId?: string
@@ -25,6 +28,8 @@ export interface Settings {
   videoDeviceId?: string
   audioDeviceId?: string
   lastSessionName?: string
+  /** Main window position/size, restored at launch if still on a display. */
+  windowBounds?: Bounds
 }
 
 export interface DeviceItem { id: string; name: string }

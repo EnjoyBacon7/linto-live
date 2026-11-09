@@ -1,24 +1,24 @@
-:root { color-scheme: dark; --bg:#0f1218; --panel:#181d27; --line:#2b3344; --text:#e8ecf4; --muted:#9aa4b8; --accent:#3b82f6; --ok:#34d399; --warn:#fbbf24; --bad:#f87171; }
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-.app { display: flex; flex-direction: column; height: 100%; }
+/* Legacy v1 screen styles, mapped onto the theme.css tokens (theme.css is imported first). */
+:root { --bg: var(--bg-content); --panel: var(--bg-window); --line: var(--separator); --muted: var(--text-2); }
+.app { display: flex; flex-direction: column; height: 100%; background: var(--bg-content); }
 main { flex: 1; overflow: auto; padding: 20px 28px; }
+/* macOS hidden-inset title bar: a draggable strip clear of the traffic lights. */
+.legacy-titlebar { flex: none; height: 28px; }
+:root:not([data-platform='darwin']) .legacy-titlebar { display: none; }
 footer { padding: 8px 28px; border-top: 1px solid var(--line); text-align: right; }
 h1 { font-size: 20px; margin: 0 0 8px; }
 .center { text-align: center; color: var(--muted); }
 .card { max-width: 520px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
 label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
 input, select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit; }
-button { background: #232a38; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; font: inherit; cursor: pointer; }
-button:hover:not(:disabled) { background: #2c3547; }
+button { background: var(--control-bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; font: inherit; cursor: pointer; }
+button:hover:not(:disabled) { background: var(--control-bg-active); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-button.primary:hover:not(:disabled) { background: #2f6fe0; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); }
 button.danger { border-color: var(--bad); color: var(--bad); }
 button.big { padding: 14px 20px; font-size: 17px; }
 button.link { background: none; border: none; color: var(--muted); text-decoration: underline; padding: 4px; }
-:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
 .error { color: var(--bad); margin: 0; }
 .warn { color: var(--warn); margin: 0; }
 .switch { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
@@ -42,8 +42,8 @@ summary { cursor: pointer; color: var(--muted); }
 .caption { min-height: 3em; margin: 0; padding: 10px; background: var(--panel); border-radius: 8px; font-size: 16px; }
 .actions { display: flex; flex-direction: column; gap: 8px; }
 .banner { padding: 12px 16px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: 600; }
-.banner-warn { background: #3a2f0b; border: 1px solid var(--warn); color: var(--warn); }
-.banner-bad { background: #3a1515; border: 1px solid var(--bad); color: var(--bad); }
+.banner-warn { background: var(--banner-warn-bg); border: 1px solid var(--warn); color: var(--warn); }
+.banner-bad { background: var(--banner-bad-bg); border: 1px solid var(--bad); color: var(--bad); }
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: grid; place-items: center; z-index: 10; }
 .dialog { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; max-width: 520px; width: calc(100% - 40px); }
 .dialog .card { border: none; padding: 0; }

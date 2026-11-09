@@ -10,6 +10,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     audioDevices: [{ id: 'a1', name: 'Micro' }]
   }
   const api = {
+    platform: 'darwin',
     auth: {
       methods: vi.fn().mockResolvedValue([]), loginLocal: vi.fn().mockResolvedValue(undefined),
       loginSso: vi.fn().mockResolvedValue(undefined), logout: vi.fn(), status: vi.fn().mockResolvedValue({ loggedIn: true }),

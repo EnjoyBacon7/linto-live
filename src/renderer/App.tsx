@@ -3,7 +3,8 @@ import type { LiveState } from '../shared/ipc'
 import { Login } from './screens/Login'
 import { Setup } from './screens/Setup'
 import { Live } from './screens/Live'
-import './styles.css'
+import './theme.css'
+import './styles.css' // legacy screens; removed with them in the UI rebuild
 
 type Screen = 'loading' | 'login' | 'setup' | 'live'
 const STARTING: LiveState = { phase: 'starting', stream: 'off', captions: 'connecting', obs: 'running', output: 'off' }
@@ -32,6 +33,7 @@ export function App() {
 
   return (
     <div className="app">
+      <div className="legacy-titlebar drag" />
       <main>
         {screen === 'loading' && <p className="center">Chargement…</p>}
         {screen === 'login' && <Login onLoggedIn={() => { setAuthRequired(false); setScreen('setup') }} />}

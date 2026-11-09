@@ -7,5 +7,5 @@ contextBridge.exposeInMainWorld(
     invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     on: (channel, l) => void ipcRenderer.on(channel, l),
     off: (channel, l) => void ipcRenderer.removeListener(channel, l)
-  })
+  }, process.platform)
 )

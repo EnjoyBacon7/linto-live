@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, safeStorage, screen, shell } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -20,17 +20,26 @@ import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { loadSetupData, toSessionSummaries } from './setupData'
-import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow } from './appLifecycle'
+import {
+  QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
+} from './appLifecycle'
 
 const SHUTDOWN_CAP_MS = 15_000
 
 let win: BrowserWindow | null = null
 
-function createWindow(): BrowserWindow {
+function createWindow(settings: SettingsStore): BrowserWindow {
+  const bounds = restoreBounds(
+    settings.get().windowBounds,
+    screen.getAllDisplays().map((d) => d.workArea),
+    { width: WINDOW_SIZE.width, height: WINDOW_SIZE.height }
+  )
   const w = new BrowserWindow({
-    width: 900,
-    height: 640,
+    ...bounds,
+    minWidth: WINDOW_SIZE.minWidth,
+    minHeight: WINDOW_SIZE.minHeight,
     title: 'LinTO Live',
+    ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -39,6 +48,26 @@ function createWindow(): BrowserWindow {
     }
   })
   w.on('page-title-updated', (e) => e.preventDefault())
+  // Remember where the window was (normal bounds, even when maximized/fullscreen); written on close
+  // and, debounced, after a resize/move so a crash does not lose it.
+  let timer: NodeJS.Timeout | undefined
+  const saveBounds = (): void => {
+    clearTimeout(timer)
+    timer = undefined
+    if (w.isDestroyed()) return
+    try {
+      settings.update({ windowBounds: w.getNormalBounds() })
+    } catch (e) {
+      console.error('Saving the window bounds failed', e)
+    }
+  }
+  const saveSoon = (): void => {
+    clearTimeout(timer)
+    timer = setTimeout(saveBounds, 1000)
+  }
+  w.on('resize', saveSoon)
+  w.on('move', saveSoon)
+  w.on('close', saveBounds)
   if (process.env['ELECTRON_RENDERER_URL']) {
     void w.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -251,7 +280,7 @@ function main(): void {
 
   app.on('before-quit', (e) => quitGuard.onBeforeQuit(e))
 
-  win = createWindow()
+  win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
   // OBS + overlay start before login so device lists are ready for the setup screen.

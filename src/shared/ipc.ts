@@ -30,6 +30,8 @@ export interface LiveState {
 export type { Session }
 
 export interface LintoLiveApi {
+  /** process.platform of the app ('darwin' | 'linux' …): the sandboxed renderer cannot read it. */
+  platform: 'darwin' | 'linux' | (string & {})
   auth: {
     methods(): Promise<AuthMethod[]>
     loginLocal(email: string, pw: string): Promise<void>
@@ -89,9 +91,10 @@ export interface Transport {
   off(channel: string, listener: (event: unknown, ...args: unknown[]) => void): void
 }
 
-export function createLintoLiveApi(t: Transport): LintoLiveApi {
+export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi {
   const call = <T>(channel: string, ...args: unknown[]): Promise<T> => t.invoke(channel, ...args) as Promise<T>
   return {
+    platform,
     auth: {
       methods: () => call(IPC.authMethods),
       loginLocal: (email, pw) => call(IPC.authLoginLocal, email, pw),

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow } from '../src/main/appLifecycle'
+import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome, WINDOW_SIZE } from '../src/main/appLifecycle'
 import type { LiveState } from '../src/shared/ipc'
 
 const ev = () => ({ preventDefault: vi.fn() })
@@ -112,5 +112,52 @@ describe('createQuitGuard', () => {
     g.onBeforeQuit(ev())
     expect(d.ask).not.toHaveBeenCalled()
     expect(d.shutdown).not.toHaveBeenCalled()
+  })
+})
+
+describe('restoreBounds', () => {
+  const def = { width: 1100, height: 720 }
+  const main = { x: 0, y: 25, width: 1440, height: 875 }
+  const second = { x: 1440, y: 0, width: 1920, height: 1080 }
+  it('returns the saved bounds when they are visible on a display', () => {
+    const saved = { x: 100, y: 100, width: 1000, height: 700 }
+    expect(restoreBounds(saved, [main], def)).toEqual(saved)
+  })
+  it('accepts a window on a secondary display', () => {
+    const saved = { x: 2000, y: 200, width: 1000, height: 700 }
+    expect(restoreBounds(saved, [main, second], def)).toEqual(saved)
+  })
+  it('falls back to the default when the display it was on is gone', () => {
+    const saved = { x: 2000, y: 200, width: 1000, height: 700 }
+    expect(restoreBounds(saved, [main], def)).toEqual(def)
+  })
+  it('falls back when less than 100x100 px would be visible', () => {
+    const saved = { x: 1400, y: 100, width: 1000, height: 700 } // 40 px wide strip on the main display
+    expect(restoreBounds(saved, [main], def)).toEqual(def)
+    const edge = { x: 1340, y: 800, width: 1000, height: 700 } // exactly 100x100 visible
+    expect(restoreBounds(edge, [main], def)).toEqual(edge)
+  })
+  it('falls back when nothing was saved or the value is malformed', () => {
+    expect(restoreBounds(undefined, [main], def)).toEqual(def)
+    expect(restoreBounds({ x: 0, y: 0, width: Number.NaN, height: 700 }, [main], def)).toEqual(def)
+  })
+})
+
+describe('windowChrome', () => {
+  it('macOS: hidden-inset title bar, traffic lights in the sidebar, vibrancy, transparent background', () => {
+    expect(windowChrome('darwin', false)).toEqual({
+      titleBarStyle: 'hiddenInset',
+      trafficLightPosition: { x: 18, y: 18 },
+      vibrancy: 'sidebar',
+      visualEffectState: 'followWindow',
+      backgroundColor: '#00000000'
+    })
+  })
+  it('Linux: system frame, solid background following the system theme', () => {
+    expect(windowChrome('linux', true)).toEqual({ backgroundColor: '#1e1e1e' })
+    expect(windowChrome('linux', false)).toEqual({ backgroundColor: '#ececec' })
+  })
+  it('window size constants', () => {
+    expect(WINDOW_SIZE).toEqual({ width: 1100, height: 720, minWidth: 860, minHeight: 560 })
   })
 })

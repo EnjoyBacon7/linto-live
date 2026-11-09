@@ -83,4 +83,11 @@ describe('SettingsStore instance', () => {
     s.update({ instance: 'http://127.0.0.1:8080' })
     expect(s.get().instance).toBe('http://127.0.0.1:8080')
   })
+  it('persists windowBounds', () => {
+    const p = appPaths(dir, 'linux')
+    const s = new SettingsStore(p, crypto)
+    s.update({ windowBounds: { x: 10, y: 20, width: 1100, height: 720 } })
+    expect(new SettingsStore(p, crypto).get().windowBounds).toEqual({ x: 10, y: 20, width: 1100, height: 720 })
+    expect(statSync(p.settingsFile).mode & 0o777).toBe(0o600)
+  })
 })
