@@ -1,0 +1,122 @@
+/* Login: a full native window (content background, draggable top), a 360 px centred column. */
+
+.login-window {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-content);
+}
+
+.login-titlebar {
+  flex: none;
+  height: 52px;
+}
+
+.login-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4vh 24px 40px;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-form.is-embedded {
+  max-width: none;
+}
+
+.login-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.login-logo {
+  width: 64px;
+  height: 64px;
+  -webkit-user-drag: none;
+}
+
+.login-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.login-instance {
+  text-align: center;
+  min-height: 18px;
+}
+
+.login-form.is-embedded .login-instance {
+  text-align: left;
+}
+
+.login-instance .field {
+  text-align: left;
+}
+
+.login-instance p {
+  margin: 0;
+}
+
+.login-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.login-link:hover {
+  text-decoration: underline;
+}
+
+.login-error {
+  margin: 0;
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.login-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.login-window .login-actions .btn {
+  flex: 1;
+}
+
+.login-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.login-or::before,
+.login-or::after {
+  content: '';
+  flex: 1;
+  border-top: 0.5px solid var(--separator);
+}
+
+.login-sso {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

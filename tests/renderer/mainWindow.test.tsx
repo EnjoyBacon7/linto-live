@@ -1,0 +1,509 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { App } from '../../src/renderer/App'
+import { formatElapsed } from '../../src/renderer/main/useLive'
+import type { LintoLiveApi, LiveState, SetupData, StartResult } from '../../src/shared/ipc'
+import type { SessionSummary } from '../../src/shared/types'
+import { makeApi, withEvents } from './helpers'
+
+const fn = (x: unknown) => x as ReturnType<typeof vi.fn>
+
+const SESSIONS: SessionSummary[] = [
+  { id: 's1', name: 'Conférence', status: 'ready', canStream: true },
+  { id: 's2', name: 'Atelier', status: 'paused', canStream: true },
+  { id: 's3', name: 'Externe', status: 'on_schedule', canStream: false },
+  { id: 's4', name: 'Plénière', status: 'active', canStream: true }
+]
+
+const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<SetupData> = {}): SetupData => ({
+  settings: { instance: 'https://studio.linto.ai', orgId: 'o1', profileId: 1, videoDeviceId: 'v1', audioDeviceId: 'a1', ...over },
+  organizations: [{ id: 'o1', name: 'Org' }],
+  profiles: [{ id: 1, name: 'Français' }, { id: 2, name: 'Anglais' }],
+  videoDevices: [{ id: 'v1', name: 'Capture HDMI' }, { id: 'v2', name: 'FaceTime HD' }],
+  audioDevices: [{ id: 'a1', name: 'Micro USB' }],
+  ...extra
+})
+
+const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }
+const live = (over: Partial<LiveState> = {}): LiveState => ({
+  phase: 'live', session: { name: 'Conférence', status: 'active' }, stream: 'active', captions: 'live', obs: 'running',
+  output: 'shown', startedAt: Date.now() - 5000, ...over
+})
+
+let api: LintoLiveApi
+let emit: (evt: string, payload?: unknown) => void
+
+function setup(over: Parameters<typeof makeApi>[0] = {}, data: SetupData = setupData(), sessions: SessionSummary[] = SESSIONS) {
+  api = makeApi({ setup: { load: vi.fn().mockResolvedValue(data) }, sessions: { list: vi.fn().mockResolvedValue(sessions) }, ...over })
+  emit = withEvents(api)
+  window.lintoLive = api
+  return api
+}
+
+async function renderMain() {
+  render(<App />)
+  await screen.findByRole('listbox', { name: 'Sessions' })
+}
+const row = (name: string) => screen.getByRole('option', { name })
+const startBtn = () => screen.getByRole('button', { name: 'Démarrer' }) as HTMLButtonElement
+const toolbar = () => screen.getByRole('toolbar')
+
+beforeEach(() => { vi.useRealTimers() })
+afterEach(() => { cleanup(); vi.useRealTimers() })
+
+describe('Sidebar', () => {
+  it('lists the sessions with a status (title) and dims the ones LinTO Live cannot stream to', async () => {
+    setup()
+    await renderMain()
+    expect(row('Conférence').getAttribute('title')).toBe('Prête')
+    expect(row('Atelier').getAttribute('title')).toBe('En pause')
+    expect(row('Plénière').getAttribute('title')).toBe('En direct')
+    const ext = row('Externe')
+    expect(ext.getAttribute('title')).toBe(
+      'LinTO Live ne peut pas envoyer le son à cette session (droits insuffisants ou pas d\'entrée audio)')
+    expect(ext.className).toContain('is-dimmed')
+    expect(ext.querySelector('.dot-idle')).toBeTruthy()
+    expect(row('Plénière').querySelector('.dot-live')).toBeTruthy()
+    expect(row('Conférence').querySelector('.dot-ok')).toBeTruthy()
+    expect(row('Atelier').querySelector('.dot-warn')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Nouvelle session…' })).toBeTruthy()
+  })
+
+  it('a session that cannot be streamed to is selectable but Démarrer stays disabled', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(row('Externe'))
+    expect(row('Externe').getAttribute('aria-selected')).toBe('true')
+    expect(within(toolbar()).getByText('Externe')).toBeTruthy()
+    expect(startBtn().disabled).toBe(true)
+  })
+
+  it('shows an empty state', async () => {
+    setup({}, setupData(), [])
+    await renderMain()
+    expect(screen.getByText('Aucune session en cours')).toBeTruthy()
+  })
+
+  it('shows a readable list error with Réessayer', async () => {
+    const list = vi.fn()
+      .mockRejectedValueOnce(new Error("Error invoking remote method 'sessions:list': Error: Trop de sessions dans l'organisation."))
+      .mockResolvedValue(SESSIONS)
+    setup({ sessions: { list } })
+    render(<App />)
+    expect(await screen.findByText("Trop de sessions dans l'organisation.")).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
+    expect(await screen.findByRole('option', { name: 'Conférence' })).toBeTruthy()
+    expect(screen.queryByText("Trop de sessions dans l'organisation.")).toBeNull()
+  })
+
+  it('preselects the last session used', async () => {
+    setup({}, setupData({ lastSessionName: 'Atelier' }))
+    await renderMain()
+    await waitFor(() => expect(row('Atelier').getAttribute('aria-selected')).toBe('true'))
+  })
+
+  it('refreshes the list every 30 s', async () => {
+    vi.useFakeTimers()
+    setup()
+    render(<App />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    const calls = fn(api.sessions.list).mock.calls.length
+    expect(calls).toBeGreaterThanOrEqual(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(fn(api.sessions.list).mock.calls.length).toBe(calls + 1)
+  })
+
+  it('footer shows the instance host; the menu logs out', async () => {
+    setup()
+    await renderMain()
+    expect(screen.getByText('studio.linto.ai')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Compte' }))
+    expect(screen.queryByRole('menuitemradio')).toBeNull() // single organisation: no switch
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Se déconnecter' }))
+    expect(api.auth.logout).toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Connexion à LinTO' })).toBeTruthy()
+  })
+
+  it('the menu switches organisation when there are several, then reloads the lists', async () => {
+    setup({}, setupData({}, { organizations: [{ id: 'o1', name: 'Org' }, { id: 'o2', name: 'Autre org' }] }))
+    await renderMain()
+    const loads = fn(api.setup.load).mock.calls.length
+    const lists = fn(api.sessions.list).mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Compte' }))
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Autre org' }))
+    expect(api.setup.save).toHaveBeenCalledWith({ orgId: 'o2' })
+    await waitFor(() => expect(fn(api.setup.load).mock.calls.length).toBe(loads + 1))
+    await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBe(lists + 1))
+  })
+})
+
+describe('Démarrer', () => {
+  it('is disabled without a session, a camera or a micro', async () => {
+    setup({}, setupData({ videoDeviceId: undefined }))
+    await renderMain()
+    expect(startBtn().disabled).toBe(true)
+    await userEvent.click(row('Conférence'))
+    expect(startBtn().disabled).toBe(true)
+    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v1')
+    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v1' })
+    expect(startBtn().disabled).toBe(false)
+  })
+
+  it('starts an existing session and shows « réutilisée », then refreshes the list', async () => {
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: true, reused: true, canStream: true }) } })
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const lists = fn(api.sessions.list).mock.calls.length
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Conférence')
+    act(() => emit('live-state', live()))
+    expect(within(toolbar()).getByText('réutilisée')).toBeTruthy()
+    await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBeGreaterThan(lists))
+  })
+
+  it('shows the refusal message', async () => {
+    const msg = 'La session « Conférence » est terminée et ne peut pas être reprise. Choisis un autre nom.'
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: false, message: msg }) } })
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    await userEvent.click(startBtn())
+    expect(await screen.findByText(msg)).toBeTruthy()
+  })
+
+  it('ignores a second click while starting (busy guard)', async () => {
+    let release: (r: StartResult) => void = () => {}
+    const start = vi.fn(() => new Promise<StartResult>((r) => { release = r }))
+    setup({ live: { start } })
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    await userEvent.click(startBtn())
+    const busy = screen.getByRole('button', { name: 'Démarrage…' }) as HTMLButtonElement
+    expect(busy.disabled).toBe(true)
+    await userEvent.click(busy)
+    expect(start).toHaveBeenCalledTimes(1)
+    await act(async () => release({ ok: true, reused: false, canStream: true }))
+  })
+})
+
+describe('Nouvelle session…', () => {
+  it('selects a pending session (not created) and saves the profile before starting it', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    await userEvent.type(within(sheet).getByLabelText('Nom'), '  Débat ')
+    await userEvent.selectOptions(within(sheet).getByLabelText('Profil de transcription'), '2')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'OK' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(api.setup.save).not.toHaveBeenCalledWith({ profileId: 2 })
+    expect(row('Débat').getAttribute('aria-selected')).toBe('true')
+    expect(within(toolbar()).getByText('nouvelle')).toBeTruthy()
+    expect(screen.getByText('Anglais')).toBeTruthy() // inspector: profile of the pending session
+
+    await userEvent.click(startBtn())
+    expect(api.setup.save).toHaveBeenCalledWith({ profileId: 2 })
+    expect(api.live.start).toHaveBeenCalledWith('Débat')
+    const saveOrder = fn(api.setup.save).mock.invocationCallOrder.at(-1)!
+    expect(saveOrder).toBeLessThan(fn(api.live.start).mock.invocationCallOrder[0]!)
+  })
+
+  it('typing an existing name selects that session instead', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Atelier{Enter}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getAllByRole('option', { name: 'Atelier' })).toHaveLength(1)
+    expect(row('Atelier').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText('Défini par la session')).toBeTruthy()
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Atelier')
+    expect(fn(api.setup.save).mock.calls.some(([p]) => 'profileId' in (p as object))).toBe(false)
+  })
+
+  it('OK is disabled without a name; Escape cancels', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    expect((screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('offers the organisation when there are several', async () => {
+    setup({}, setupData({}, { organizations: [{ id: 'o1', name: 'Org' }, { id: 'o2', name: 'Autre org' }] }))
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.selectOptions(screen.getByLabelText('Organisation'), 'o2')
+    expect(api.setup.save).toHaveBeenCalledWith({ orgId: 'o2' })
+  })
+})
+
+describe('Live toolbar', () => {
+  it('shows EN DIRECT with the elapsed time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-09T10:00:00Z'))
+    setup()
+    render(<App />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    act(() => emit('live-state', live({ startedAt: Date.now() - 5000 })))
+    expect(screen.getByText('EN DIRECT 00:05')).toBeTruthy()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+    expect(screen.getByText('EN DIRECT 00:06')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Démarrer' })).toBeNull()
+    expect(within(toolbar()).getByText('Conférence')).toBeTruthy()
+  })
+
+  it('formats past an hour as h:mm:ss', () => {
+    expect(formatElapsed(5_000)).toBe('00:05')
+    expect(formatElapsed(42 * 60_000 + 17_000)).toBe('42:17')
+    expect(formatElapsed(3_600_000 + 65_000)).toBe('1:01:05')
+    expect(formatElapsed(-50)).toBe('00:00')
+  })
+
+  it('Arrêter calls stop once on double click, shows Arrêt…, then refreshes the list', async () => {
+    let release: () => void = () => {}
+    const stop = vi.fn(() => new Promise<void>((r) => { release = r }))
+    setup({ live: { stop } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    const lists = fn(api.sessions.list).mock.calls.length
+    await userEvent.dblClick(screen.getByRole('button', { name: 'Arrêter' }))
+    expect(stop).toHaveBeenCalledTimes(1)
+    expect((screen.getByRole('button', { name: 'Arrêt…' }) as HTMLButtonElement).disabled).toBe(true)
+    await act(async () => release())
+    act(() => emit('live-state', IDLE))
+    await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBeGreaterThan(lists))
+    expect(startBtn()).toBeTruthy()
+  })
+
+  it('« Afficher la fenêtre de sortie » asks main to open one', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Afficher la fenêtre de sortie' }))
+    expect(api.live.showOutputWindow).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Terminer…', () => {
+  it('asks for confirmation; Annuler and Escape close it', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Terminer…' }))
+    expect(screen.getByText('Terminer définitivement la session « Conférence » ? Elle ne pourra plus être reprise.')).toBeTruthy()
+    expect(document.activeElement?.textContent).toBe('Annuler')
+    await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Terminer…' }))
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(api.live.terminate).not.toHaveBeenCalled()
+  })
+
+  it('terminates on confirm, with busy state disabling the actions', async () => {
+    let release: () => void = () => {}
+    const terminate = vi.fn(() => new Promise<void>((r) => { release = r }))
+    setup({ live: { terminate } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Terminer…' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Terminer' }))
+    expect(terminate).toHaveBeenCalledTimes(1)
+    expect((screen.getByRole('button', { name: 'Fin de session…' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(true)
+    const lists = fn(api.sessions.list).mock.calls.length
+    await act(async () => release())
+    await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBeGreaterThan(lists))
+  })
+})
+
+describe('Switch while live', () => {
+  it('asks « Basculer le direct sur … ? » and switches; selection follows on success', async () => {
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: true, reused: true, canStream: true }) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Atelier'))
+    expect(row('Conférence').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText('Basculer le direct sur « Atelier » ?')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect(api.live.start).toHaveBeenCalledWith('Atelier')
+    await waitFor(() => expect(row('Atelier').getAttribute('aria-selected')).toBe('true'))
+    expect(within(toolbar()).getByText('Atelier')).toBeTruthy()
+    expect(within(toolbar()).getByText('réutilisée')).toBeTruthy()
+  })
+
+  it('a refused switch keeps the current session and shows the message', async () => {
+    const msg = 'La session « Atelier » est terminée et ne peut pas être reprise. Choisis un autre nom.'
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: false, message: msg }) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Atelier'))
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect(await screen.findByText(msg)).toBeTruthy()
+    expect(row('Conférence').getAttribute('aria-selected')).toBe('true')
+    expect(within(toolbar()).getByText('Conférence')).toBeTruthy()
+  })
+
+  it('respects the busy guard while switching', async () => {
+    let release: (r: StartResult) => void = () => {}
+    const start = vi.fn(() => new Promise<StartResult>((r) => { release = r }))
+    setup({ live: { start } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Atelier'))
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(row('Plénière'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(start).toHaveBeenCalledTimes(1)
+    await act(async () => release({ ok: true, reused: false, canStream: true }))
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('does not offer to switch to a session that cannot be streamed to', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Externe'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a new session typed while live asks to switch, saving its profile first', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Débat{Enter}')
+    expect(screen.getByText('Basculer le direct sur « Débat » ?')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
+    expect(api.live.start).toHaveBeenCalledWith('Débat')
+  })
+})
+
+describe('Stage, inspector and status bar', () => {
+  it('asks to choose a camera, then shows the OBS preview', async () => {
+    setup({}, setupData({ videoDeviceId: undefined }))
+    await renderMain()
+    expect(screen.getByText('Choisis une caméra')).toBeTruthy()
+    expect(screen.getByText('Sortie OBS — ce qui s\'affiche dans la fenêtre de sortie')).toBeTruthy()
+    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    act(() => emit('preview', 'data:image/jpeg;base64,AAA'))
+    expect((screen.getByRole('img', { name: 'Aperçu de la sortie OBS' }) as HTMLImageElement).src).toBe('data:image/jpeg;base64,AAA')
+  })
+
+  it('micro change is saved; the level meter follows audio-level', async () => {
+    setup({}, setupData({ audioDeviceId: undefined }))
+    await renderMain()
+    await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
+    expect(api.setup.save).toHaveBeenCalledWith({ audioDeviceId: 'a1' })
+    act(() => emit('audio-level', -12))
+    expect(screen.getByRole('meter', { name: 'Niveau audio' }).getAttribute('aria-valuenow')).toBe('-12')
+  })
+
+  it('camera and micro stay editable while live', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    expect((screen.getByLabelText('Caméra') as HTMLSelectElement).disabled).toBe(false)
+    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v2' })
+  })
+
+  it('status bar shows LinTO, captions and OBS states and the last line', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live({ stream: 'error', captions: 'connecting', lastLine: 'Bonjour à tous' })))
+    const bar = screen.getByRole('status')
+    expect(within(bar).getByText('LinTO reçoit le son')).toBeTruthy()
+    expect(within(bar).getByText('Sous-titres')).toBeTruthy()
+    expect(within(bar).getByText('OBS')).toBeTruthy()
+    expect(within(bar).getByText('Bonjour à tous')).toBeTruthy()
+    expect(bar.querySelector('.dot-bad')).toBeTruthy()
+    expect(bar.querySelector('.dot-warn')).toBeTruthy()
+  })
+
+  it('shows the warning carried by live-state, also while idle, and clears it', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', { ...IDLE, obs: 'down', warning: 'Impossible de démarrer le moteur vidéo (OBS).' }))
+    expect(screen.getByText('Impossible de démarrer le moteur vidéo (OBS).')).toBeTruthy()
+    act(() => emit('live-state', IDLE))
+    expect(screen.queryByText('Impossible de démarrer le moteur vidéo (OBS).')).toBeNull()
+  })
+
+  it('shows a setup.load error readably', async () => {
+    setup({ setup: { load: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'setup:load': Error: LinTO injoignable.")) } })
+    render(<App />)
+    expect(await screen.findByText('LinTO injoignable.')).toBeTruthy()
+  })
+})
+
+describe('Authentication', () => {
+  it('while live, auth-required shows a banner; Se reconnecter opens Login in a sheet', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', live()))
+    act(() => emit('auth-required'))
+    expect(screen.getByText('Session LinTO expirée — se reconnecter')).toBeTruthy()
+    expect(screen.getByRole('listbox', { name: 'Sessions' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Se reconnecter' }))
+    const sheet = screen.getByRole('dialog')
+    await userEvent.type(within(sheet).getByLabelText('Email'), 'a@b.c')
+    await userEvent.type(within(sheet).getByLabelText('Mot de passe'), 'pw')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Se connecter' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.queryByText('Session LinTO expirée — se reconnecter')).toBeNull()
+  })
+
+  it('while idle, auth-required goes back to the login screen', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('auth-required'))
+    expect(await screen.findByRole('heading', { name: 'Connexion à LinTO' })).toBeTruthy()
+  })
+
+  it('ignores a late auth.status result after auth-required', async () => {
+    let status: (v: { loggedIn: boolean }) => void = () => {}
+    setup({ auth: { status: vi.fn(() => new Promise<{ loggedIn: boolean }>((r) => { status = r })) } })
+    render(<App />)
+    act(() => emit('auth-required'))
+    await screen.findByRole('heading', { name: 'Connexion à LinTO' })
+    await act(async () => status({ loggedIn: true }))
+    expect(screen.getByRole('heading', { name: 'Connexion à LinTO' })).toBeTruthy()
+  })
+
+  it('logs in from the login screen into the main window', async () => {
+    setup({ auth: { status: vi.fn().mockResolvedValue({ loggedIn: false }) } })
+    render(<App />)
+    await userEvent.type(await screen.findByLabelText('Email'), 'a@b.c')
+    await userEvent.type(screen.getByLabelText('Mot de passe'), 'pw')
+    await userEvent.click(screen.getByRole('button', { name: 'Se connecter' }))
+    expect(await screen.findByRole('listbox', { name: 'Sessions' })).toBeTruthy()
+  })
+
+  it('has no uninstall link in the window', async () => {
+    setup()
+    await renderMain()
+    expect(screen.queryByText(/Désinstaller/)).toBeNull()
+  })
+})
+
+describe('Commands (menu/tray hooks)', () => {
+  it('exposes start, new-session, terminate and logout as plain functions', async () => {
+    setup({}, setupData({ lastSessionName: 'Conférence' }))
+    const ref: { current: import('../../src/renderer/screens/MainWindow').MainWindowCommands | null } = { current: null }
+    render(<App commands={ref} />)
+    await screen.findByRole('listbox', { name: 'Sessions' })
+    await waitFor(() => expect(row('Conférence').getAttribute('aria-selected')).toBe('true'))
+    await act(async () => { ref.current!.run('start') })
+    expect(api.live.start).toHaveBeenCalledWith('Conférence')
+    act(() => ref.current!.run('new-session'))
+    expect(screen.getByRole('dialog', { name: 'Nouvelle session' })).toBeTruthy()
+  })
+})

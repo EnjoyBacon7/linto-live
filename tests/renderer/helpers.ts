@@ -27,3 +27,13 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
   }
   return api as unknown as LintoLiveApi
 }
+
+/** Routes `on(evt, cb)` subscriptions (several per event) so a test can `emit` main-process events. */
+export function withEvents(api: LintoLiveApi): (evt: string, payload?: unknown) => void {
+  const listeners: Record<string, Set<(p: unknown) => void>> = {}
+  ;(api as { on: unknown }).on = vi.fn((evt: string, cb: (p: unknown) => void) => {
+    ;(listeners[evt] ??= new Set()).add(cb)
+    return () => { listeners[evt]?.delete(cb) }
+  })
+  return (evt, payload) => { for (const cb of [...(listeners[evt] ?? [])]) cb(payload) }
+}

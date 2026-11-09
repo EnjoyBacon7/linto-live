@@ -1,53 +1,36 @@
 import { useEffect, useRef, useState } from 'react'
-import type { LiveState } from '../shared/ipc'
 import { Login } from './screens/Login'
-import { Setup } from './screens/Setup'
-import { Live } from './screens/Live'
+import { MainWindow, type MainWindowCommands } from './screens/MainWindow'
+import { isOnAir, useLiveState } from './main/useLive'
 import './theme.css'
-import './styles.css' // legacy screens; removed with them in the UI rebuild
 
-type Screen = 'loading' | 'login' | 'setup' | 'live'
-const STARTING: LiveState = { phase: 'starting', stream: 'off', captions: 'connecting', obs: 'running', output: 'off' }
+type Screen = 'loading' | 'login' | 'main'
 
-export function App() {
+export function App({ commands }: { commands?: { current: MainWindowCommands | null } }) {
   const [screen, setScreen] = useState<Screen>('loading')
-  const [reused, setReused] = useState(false)
-  const [state, setState] = useState<LiveState>(STARTING)
-  const [loginModal, setLoginModal] = useState(false)
+  const state = useLiveState()
+  const onAir = isOnAir(state)
   const [authRequired, setAuthRequired] = useState(false)
 
   const authEvent = useRef(false)
   useEffect(() => {
-    window.lintoLive.auth.status().then((s) => { if (!authEvent.current) setScreen(s.loggedIn ? 'setup' : 'login') }).catch(() => setScreen('login'))
-    return window.lintoLive.on('live-state', setState)
+    window.lintoLive.auth.status()
+      .then((s) => { if (!authEvent.current) setScreen(s.loggedIn ? 'main' : 'login') })
+      .catch(() => setScreen('login'))
   }, [])
-  // Auth lost while not live: go back to Login. While live, Live shows a banner instead.
-  useEffect(() => window.lintoLive.on('auth-required', () => { authEvent.current = true; setAuthRequired(true); setScreen((s) => (s === 'live' ? s : 'login')) }), [])
+  useEffect(() => window.lintoLive.on('auth-required', () => { authEvent.current = true; setAuthRequired(true) }), [])
+  // Auth lost while not on air: back to Login. On air, MainWindow shows a banner and keeps the show running.
+  useEffect(() => { if (authRequired && !onAir) setScreen('login') }, [authRequired, onAir])
 
-  useEffect(() => {
-    if (!loginModal) return
-    const h = (e: KeyboardEvent): void => { if (e.key === 'Escape') setLoginModal(false) }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [loginModal])
-
+  if (screen === 'loading') return <div className="app-loading drag" />
+  if (screen === 'login') return <Login onLoggedIn={() => { setAuthRequired(false); setScreen('main') }} />
   return (
-    <div className="app">
-      <div className="legacy-titlebar drag" />
-      <main>
-        {screen === 'loading' && <p className="center">Chargement…</p>}
-        {screen === 'login' && <Login onLoggedIn={() => { setAuthRequired(false); setScreen('setup') }} />}
-        {screen === 'setup' && <Setup warning={state.warning} onStarted={(r) => { setReused(r); setState(STARTING); setScreen('live') }} />}
-        {screen === 'live' && <Live state={state} reused={reused} authRequired={authRequired} onStopped={() => setScreen('setup')} onNeedLogin={() => setLoginModal(true)} onSwitched={setReused} />}
-      </main>
-      {loginModal && (
-        <div className="overlay"><div className="dialog" role="dialog" aria-modal="true" aria-label="Connexion">
-          <Login onLoggedIn={() => { setLoginModal(false); setAuthRequired(false) }} onCancel={() => setLoginModal(false)} />
-        </div></div>
-      )}
-      <footer>
-        <button type="button" className="link" onClick={() => void window.lintoLive.app.uninstall()}>Désinstaller LinTO Live…</button>
-      </footer>
-    </div>
+    <MainWindow
+      state={state}
+      authRequired={authRequired}
+      onReauthenticated={() => setAuthRequired(false)}
+      onLoggedOut={() => setScreen('login')}
+      commands={commands}
+    />
   )
 }
