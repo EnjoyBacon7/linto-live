@@ -666,6 +666,31 @@ describe('LiveController final fixes', () => {
       expect(t.captions.open).not.toHaveBeenCalled()
     })
 
+    it('start while obs is still booting is refused without killing the booting OBS', async () => {
+      const t = setup()
+      let release: () => void = () => {}
+      t.obs.start.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => {
+              const conn = { port: 4900, password: 'pw' }
+              t.obs.emit('ready', conn)
+              resolve(conn)
+            }
+          })
+      )
+      const boot = t.live.boot()
+      await flush()
+      expect(await t.live.start('Conf')).toEqual({ ok: false, message: MSG_OBS_NOT_READY })
+      expect(t.obs.stop).not.toHaveBeenCalled()
+      expect(t.obs.start).toHaveBeenCalledTimes(1)
+      release()
+      await boot
+      expect(t.last().obs).toBe('running')
+      expect((await t.live.start('Conf')).ok).toBe(true)
+      expect(t.obs.start).toHaveBeenCalledTimes(1)
+    })
+
     it('start while obs is restarting is refused', async () => {
       const t = setup()
       await t.live.boot()

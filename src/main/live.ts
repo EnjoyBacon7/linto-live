@@ -103,6 +103,8 @@ export class LiveController extends EventEmitter {
   private restartGen = 0
   private attachedConn: ObsConnection | null = null
   private crashRestart = false
+  /** boot() is starting/attaching OBS: Démarrer must not revive (kill) it meanwhile. */
+  private booting = false
   private captionsTimer: NodeJS.Timeout | null = null
   private captionsAuthLost = false
   /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
@@ -167,6 +169,7 @@ export class LiveController extends EventEmitter {
   }
 
   async boot(): Promise<void> {
+    this.booting = true
     try {
       this.overlayUrl = (await this.d.overlay.start()).url
       // Each successful start emits 'ready' → attach is queued.
@@ -176,6 +179,8 @@ export class LiveController extends EventEmitter {
     } catch (e) {
       this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
       throw e
+    } finally {
+      this.booting = false
     }
   }
 
@@ -459,7 +464,7 @@ export class LiveController extends EventEmitter {
       return { ok: false, message: 'Choisis une organisation et un profil de transcription.' }
     }
     if (!this.ctl) {
-      if (this.state.obs === 'restarting') return { ok: false, message: MSG_OBS_NOT_READY }
+      if (this.state.obs === 'restarting' || this.booting) return { ok: false, message: MSG_OBS_NOT_READY }
       if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
     }
 
