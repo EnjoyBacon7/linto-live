@@ -27,10 +27,24 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
   const loaded = useRef(norm('https://studio.linto.ai'))
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // « Se souvenir de moi »: offered only when main can keep the password in the OS keychain.
+  const [canRemember, setCanRemember] = useState(false)
+  const [remember, setRemember] = useState(false)
+  const typed = useRef(false) // the user typed in Email / Mot de passe: a late saved login must not overwrite it
+  const prefilled = useRef(false)
 
   useEffect(() => {
     let alive = true
     window.lintoLive.auth.methods().then((m) => alive && setMethods(m)).catch((e) => alive && setError(ipcErrorMessage(e)))
+    window.lintoLive.auth.savedLogin().then(({ canRemember: can, login }) => {
+      if (!alive) return
+      setCanRemember(can)
+      if (!can || !login || typed.current) return
+      prefilled.current = true
+      setEmail(login.email)
+      setPassword(login.password)
+      setRemember(true)
+    }).catch(() => {}) // no saved login: the form simply stays empty
     window.lintoLive.setup.load().then((d) => { if (!alive) return; loaded.current = norm(d.settings.instance); setInstance(d.settings.instance) }).catch(() => {}) // rejects (Unauthorized) while logged out: keep the default
     return () => { alive = false }
   }, [])
@@ -46,13 +60,21 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
     try {
       await window.lintoLive.setup.save({ instance: norm(instance) })
       loaded.current = norm(instance)
+      // Main forgot the saved login along with the old instance: do not offer its password to the new one.
+      if (prefilled.current) {
+        prefilled.current = false
+        setPassword('')
+        setRemember(false)
+      }
       setMethods(await window.lintoLive.auth.methods())
     } catch (e) { setError(ipcErrorMessage(e)) }
   }
   const submit = (e: FormEvent): void => {
     e.preventDefault()
     if (busy || !email || !password) return
-    void run(() => window.lintoLive.auth.loginLocal(email, password))
+    void run(() => (canRemember
+      ? window.lintoLive.auth.loginLocal(email, password, remember)
+      : window.lintoLive.auth.loginLocal(email, password)))
   }
   const sso = (m: AuthMethod): void => {
     if (m.path.endsWith('/organization') && !email.trim()) { setError("Saisis d'abord ton email pour utiliser cette connexion."); return }
@@ -60,7 +82,7 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
   }
 
   const form = (
-    <form className={embedded ? 'login-form is-embedded' : 'login-form'} onSubmit={submit}>
+    <form name="login" className={embedded ? 'login-form is-embedded' : 'login-form'} onSubmit={submit}>
       {!embedded && (
         <div className="login-head">
           <img className="login-logo" src={logo} alt="LinTO" width={64} height={64} draggable={false} />
@@ -90,8 +112,21 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
           </p>
         )}
       </div>
-      <TextField label="Email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
-      <TextField label="Mot de passe" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+      {/* name / id / autocomplete: what 1Password, Bitwarden and KeePassXC look for to fill the form. */}
+      <TextField
+        label="Email" type="email" name="username" id="login-email" autoComplete="username" value={email}
+        onChange={(e) => { typed.current = true; setEmail(e.target.value) }}
+      />
+      <TextField
+        label="Mot de passe" type="password" name="password" id="login-password" autoComplete="current-password" value={password}
+        onChange={(e) => { typed.current = true; setPassword(e.target.value) }}
+      />
+      {canRemember && (
+        <label className="login-remember">
+          <input type="checkbox" name="remember" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          <span>Se souvenir de moi</span>
+        </label>
+      )}
       {error && <p className="login-error" role="alert">{error}</p>}
       <div className="login-actions">
         {onCancel && <Button size="large" onClick={onCancel}>Annuler</Button>}

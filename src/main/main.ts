@@ -20,7 +20,15 @@ import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { CaptionStream } from './linto/captions'
 import { loadInstance, type LintoUrls } from './linto/instance'
-import { LEGACY_SSO_DIR, clearSsoSession, loginWithPassword, ssoLogin } from './linto/auth'
+import {
+  LEGACY_SSO_DIR,
+  applyRemember,
+  canRememberLogin,
+  clearSsoSession,
+  loginWithPassword,
+  mainWindowTitle,
+  ssoLogin
+} from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
@@ -230,7 +238,19 @@ function main(): void {
       ...(typeof r?.sessionName === 'string' && r.sessionName ? { sessionName: r.sessionName } : {})
     }
     rebuildShell()
+    syncTitle()
   })
+
+  // The login screen's title names the instance (password managers match on it).
+  const syncTitle = (): void => {
+    if (win && !win.isDestroyed()) win.setTitle(mainWindowTitle(report.loggedIn, settings.get().instance))
+  }
+  const canRemember = (): boolean =>
+    canRememberLogin(
+      platform,
+      safeStorage.isEncryptionAvailable(),
+      platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined
+    )
 
   const loggedIn = (t: string): void => {
     settings.setToken(t)
@@ -241,9 +261,15 @@ function main(): void {
     await ensureUrls()
     return api.authMethods()
   })
-  ipcMain.handle(IPC.authLoginLocal, async (_e, email: string, pw: string) => {
+  ipcMain.handle(IPC.authLoginLocal, async (_e, email: string, pw: string, remember?: boolean) => {
     await ensureUrls()
     loggedIn(await loginWithPassword(api, email, pw)) // 401 → InvalidCredentialsError
+    // Only a password LinTO accepted is kept.
+    applyRemember(settings, canRemember(), email, pw, typeof remember === 'boolean' ? remember : undefined)
+  })
+  ipcMain.handle(IPC.authSavedLogin, async () => {
+    const ok = canRemember()
+    return { canRemember: ok, login: ok ? settings.getSavedLogin() : null }
   })
   ipcMain.handle(IPC.authLoginSso, async (_e, path: string, email?: string) => {
     await ensureUrls()
@@ -253,6 +279,7 @@ function main(): void {
   })
   ipcMain.handle(IPC.authLogout, async () => {
     settings.setToken(null)
+    settings.setSavedLogin(null) // logging out means « forget me » too (shared control-room machines)
     await clearSsoSession().catch((e) => console.error('Clearing the SSO session failed', e))
   })
   ipcMain.handle(IPC.authStatus, async () => ({ loggedIn: settings.getToken() !== null }))
@@ -282,7 +309,10 @@ function main(): void {
     }
   })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
-  ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))
+  ipcMain.handle(IPC.setupSave, async (_e, patch: Partial<Settings>) => {
+    await live.saveSettings(patch)
+    syncTitle()
+  })
 
   ipcMain.handle(IPC.liveStart, async (_e, name: string) => {
     await ensureUrls()

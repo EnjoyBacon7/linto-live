@@ -11,7 +11,7 @@ describe('IPC constants', () => {
     const keys = Object.keys(IPC).sort()
     expect(keys).toEqual(
       [
-        'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
+        'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
         'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState',
         'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtCaptionLine',
         'previewSubscribe', 'previewUnsubscribe'
@@ -46,6 +46,8 @@ describe('createLintoLiveApi', () => {
     const { api, invoke } = fake()
     await api.auth.methods()
     await api.auth.loginLocal('a@b', 'pw')
+    await api.auth.loginLocal('a@b', 'pw', true)
+    await api.auth.savedLogin()
     await api.auth.loginSso('/p', 'e')
     await api.auth.logout()
     await api.auth.status()
@@ -64,6 +66,8 @@ describe('createLintoLiveApi', () => {
     expect(invoke.mock.calls).toEqual([
       [IPC.authMethods],
       [IPC.authLoginLocal, 'a@b', 'pw'],
+      [IPC.authLoginLocal, 'a@b', 'pw', true],
+      ['auth:saved-login'],
       [IPC.authLoginSso, '/p', 'e'],
       [IPC.authLogout],
       [IPC.authStatus],
