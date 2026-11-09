@@ -19,7 +19,8 @@ export function layoutText(prev, text, fits) {
 
   let s = 0
   for (const c of prev.cuts) if (c <= k && c > s) s = c
-  const cuts = prev.cuts.filter((c) => c <= s)
+  // never keep a cut at/after the end: it would yield an empty last line
+  const cuts = prev.cuts.filter((c) => c <= s && c < words.length)
 
   let line = ''
   for (let i = s; i < words.length; i++) {

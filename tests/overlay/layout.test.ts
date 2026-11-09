@@ -29,6 +29,18 @@ describe('layoutText', () => {
     expect(shortened.cuts).toEqual([])
   })
 
+  it('never leaves an empty last line when text shrinks to a cut boundary', () => {
+    const prev = layoutText(empty, SIX, fits)
+    expect(prev.cuts).toEqual([4])
+    expect(layoutText(prev, 'un deux trois quatre', fits).cuts).toEqual([])
+  })
+
+  it('a correction exactly at the first word of line 2 keeps the cut', () => {
+    const prev = layoutText(empty, SIX, fits)
+    expect(layoutText(prev, 'un deux trois quatre CINQ six', fits).cuts).toEqual([4])
+    expect(layoutText(prev, 'un deux trois quatre cinquante six', fits).cuts).toEqual([4])
+  })
+
   it('drops cuts when text shrinks', () => {
     const prev = layoutText(empty, SIX, fits)
     expect(layoutText(prev, 'un deux', fits).cuts).toEqual([])
@@ -72,6 +84,13 @@ describe('SubtitleModel', () => {
     const m = new SubtitleModel(fits)
     m.partial('un deux trois quatre cinq six sept huit neuf dix onze douze')
     expect(m.lines()).toEqual(['cinq six sept huit', 'neuf dix onze douze'])
+  })
+
+  it('final with blank text keeps previous', () => {
+    const m = new SubtitleModel(fits)
+    m.final('bonjour')
+    m.final('')
+    expect(m.lines()).toEqual(['bonjour', ''])
   })
 
   it('reset clears everything', () => {
