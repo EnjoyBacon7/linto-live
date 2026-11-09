@@ -124,7 +124,25 @@ export class LiveController extends EventEmitter {
       if (this.intentionalObsStop || this.shuttingDown) return
       this.dropController()
       this.stopPreview()
-      this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
+      // OBS gave up: the show cannot continue. Tear it down like Arrêter (nothing left to stop in OBS)
+      // so the UI is not stuck on a live session; the error phase and warning tell what happened.
+      this.clearCaptionsTimer()
+      if (this.current) {
+        this.d.captions.close()
+        this.current = null
+        this.buffer = new CaptionBuffer()
+        this.d.overlay.push({ type: 'reset' })
+      }
+      this.setState({
+        obs: 'down',
+        phase: 'error',
+        warning: MSG_OBS_DOWN,
+        session: undefined,
+        stream: 'off',
+        captions: 'offline',
+        startedAt: undefined,
+        lastLine: undefined
+      })
     })
     d.captions.on('status', (s: CaptionStatus) => {
       this.setState({ captions: s })

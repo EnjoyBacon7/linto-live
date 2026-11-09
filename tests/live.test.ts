@@ -257,6 +257,25 @@ describe('LiveController', () => {
     expect(t.last()).toMatchObject({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
   })
 
+  it('obs exit after giving up during a show tears the show down (captions, session, timers)', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.captions.emit('status', 'offline') // arms the stale-captions probe
+    t.api.getSession.mockClear()
+    t.obs.emit('exit', null)
+    expect(t.captions.close).toHaveBeenCalled()
+    const s = t.last()
+    expect(s).toMatchObject({ obs: 'down', phase: 'error', stream: 'off', captions: 'offline', warning: MSG_OBS_DOWN })
+    expect(s).not.toHaveProperty('session')
+    expect(s).not.toHaveProperty('startedAt')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.api.getSession).not.toHaveBeenCalled()
+    // Arrêter still works and returns to idle
+    await t.live.stop()
+    expect(t.last().phase).toBe('idle')
+  })
+
   it('keeps obs running on auth error', async () => {
     const t = setup()
     await t.live.boot()
