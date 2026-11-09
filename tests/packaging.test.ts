@@ -26,4 +26,13 @@ describe('electron-builder.yml', () => {
       expect(existsSync(join(__dirname, '..', 'resources', 'tray', f))).toBe(true)
     }
   })
+  it('flips the Electron fuses that harden the packaged app', () => {
+    const block = yml.slice(yml.indexOf('\nelectronFuses:'))
+    expect(yml).toContain('\nelectronFuses:\n')
+    for (const l of [
+      'runAsNode: false', 'enableNodeOptionsEnvironmentVariable: false', 'enableNodeCliInspectArguments: false',
+      'enableCookieEncryption: true', 'enableEmbeddedAsarIntegrityValidation: true', 'onlyLoadAppFromAsar: true',
+      'grantFileProtocolExtraPrivileges: false'
+    ]) expect(block).toMatch(new RegExp(`\\n  ${l}\\n`))
+  })
 })

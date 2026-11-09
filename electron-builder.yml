@@ -8,6 +8,17 @@ files:
   - package.json
 asarUnpack:
   - out/main/overlay-page/**
+# Hardened Electron binary (flipped before signing): no Node mode, NODE_OPTIONS or --inspect for anyone
+# who can launch the app, encrypted cookies, only the integrity-checked app.asar is loaded, and file://
+# pages get no privileges beyond a browser's.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
 # Shared by every platform; each platform adds its own OBS build below (merged by electron-builder),
 # so a package only ever ships the OBS for its own OS.
 extraResources:

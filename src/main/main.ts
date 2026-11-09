@@ -1,10 +1,12 @@
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, shell, Tray
+  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, shell,
+  Tray
 } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
@@ -21,6 +23,7 @@ import { loadInstance, type LintoUrls } from './linto/instance'
 import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
+import { RENDERER_SCHEME, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
@@ -76,11 +79,8 @@ function createWindow(settings: SettingsStore): BrowserWindow {
   w.on('resize', saveSoon)
   w.on('move', saveSoon)
   w.on('close', saveBounds)
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void w.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void w.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  // A packaged app ignores ELECTRON_RENDERER_URL: an environment variable must not choose its UI.
+  void w.loadURL(rendererEntry(app.isPackaged, process.env['ELECTRON_RENDERER_URL']))
   return w
 }
 
@@ -88,7 +88,17 @@ function send(channel: string, payload?: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
 }
 
+/** Serves out/renderer over app://linto-live/ (see security.ts). */
+function serveRenderer(): void {
+  const root = join(__dirname, '../renderer')
+  protocol.handle(RENDERER_SCHEME, (req) => {
+    const file = rendererFilePath(req.url, root)
+    return file ? net.fetch(pathToFileURL(file).toString()) : new Response('Not found', { status: 404 })
+  })
+}
+
 function main(): void {
+  serveRenderer()
   const platform = process.platform
   const paths = appPaths(app.getPath('userData'), platform)
   const settings = new SettingsStore(paths, {
@@ -414,6 +424,10 @@ function main(): void {
 }
 
 app.setName('LinTO Live')
+// Before 'ready': the renderer's origin behaves like https (secure context, fetch, CSP 'self').
+protocol.registerSchemesAsPrivileged([
+  { scheme: RENDERER_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+])
 // A second instance would start a second OBS on the same profile: it quits before booting anything.
 if (acquireSingleInstance(app, () => focusWindow(win))) {
   void app.whenReady().then(main)
