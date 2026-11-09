@@ -23,7 +23,7 @@ export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
 
-const PREVIEW_MS = 200
+export const PREVIEW_MS = 50 // 20 fps: a 640 px JPEG screenshot costs ~3 ms in OBS and does not delay its rendering
 const STOP_WAIT_MS = 10_000
 const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -184,7 +184,7 @@ describe('LiveController', () => {
 
     const previews: string[] = []
     t.live.on('preview', (d: string) => previews.push(d))
-    await vi.advanceTimersByTimeAsync(200)
+    await vi.advanceTimersByTimeAsync(PREVIEW_MS)
     expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
 
     t.overlay.push.mockClear()
@@ -471,7 +471,7 @@ describe('LiveController', () => {
       await vi.advanceTimersByTimeAsync(2_000)
       expect(c.startStream).toHaveBeenCalledTimes(2)
       const n = previews.length
-      await vi.advanceTimersByTimeAsync(200)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
       expect(previews.length).toBe(n + 1)
     })
 
@@ -581,7 +581,7 @@ describe('LiveController final fixes', () => {
       t.live.on('preview', (d: string) => previews.push(d))
       await t.live.boot()
       expect(t.last().phase).toBe('idle')
-      await vi.advanceTimersByTimeAsync(200)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
       expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
       t.obs.emit('exit', null) // OBS gone: no more screenshots
       const n = t.ctl().screenshot.mock.calls.length
