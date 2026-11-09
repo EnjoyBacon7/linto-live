@@ -78,15 +78,17 @@ export function Sidebar(p: SidebarProps) {
                   <span className="sidebar-row-name">{p.pendingName}</span>
                 </li>
               )}
-              {p.sessions.map((s) => {
+              {p.sessions.map((s, i) => {
                 const selected = hasSelection(s.name)
+                // Roving tab stop: the selected row, else the first row (the selection may not be listed).
+                const tabStop = selected || (p.pendingName === null && i === 0 && !p.sessions?.some((x) => hasSelection(x.name)))
                 const cls = ['sidebar-row', selected ? 'is-selected' : '', s.canStream ? '' : 'is-dimmed'].filter(Boolean).join(' ')
                 return (
                   <li
                     key={s.id}
                     role="option"
                     aria-selected={selected}
-                    tabIndex={selected || (p.selectedName === null && p.pendingName === null) ? 0 : -1}
+                    tabIndex={tabStop ? 0 : -1}
                     className={cls}
                     title={s.canStream ? STATUS[s.status].label : NO_STREAM_REASON}
                     onClick={() => p.onSelect(s)}

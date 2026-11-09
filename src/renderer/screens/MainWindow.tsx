@@ -119,7 +119,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     : !settings?.videoDeviceId ? 'Choisis une caméra.'
     : !settings.audioDeviceId ? 'Choisis un micro.'
     : !canStream ? NO_STREAM_REASON : undefined
-  const canStart = !onAir && busy === null && startHint === undefined
+  // 'error' = the last start failed: retrying is allowed. Any other phase means a show is starting/running.
+  const idle = state.phase === 'idle' || state.phase === 'error'
+  const canStart = idle && busy === null && startHint === undefined
   const caption = onAir && reused !== null ? (reused ? 'réutilisée' : 'nouvelle')
     : sel?.pending ? 'nouvelle'
     : summary ? STATUS[summary.status].label.toLowerCase() : null
@@ -222,6 +224,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     window.lintoLive.setup.save(patch).catch((e) => setError(ipcErrorMessage(e)))
   }
   const switchOrg = async (orgId: string): Promise<void> => {
+    if (onAir) return // the show on air belongs to the current organisation
     try {
       await window.lintoLive.setup.save({ orgId })
       setSel(null)
@@ -311,7 +314,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
 
       <NewSessionSheet
         open={sheet?.kind === 'new'}
-        organizations={data?.organizations ?? []}
+        organizations={onAir ? [] : data?.organizations ?? []}
         orgId={settings?.orgId}
         profiles={data?.profiles ?? []}
         profileId={settings?.profileId}

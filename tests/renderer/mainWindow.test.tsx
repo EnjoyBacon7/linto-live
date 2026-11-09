@@ -494,6 +494,43 @@ describe('Authentication', () => {
   })
 })
 
+describe('Review fixes', () => {
+  it('the new-session sheet does not offer the organisation while on air', async () => {
+    setup({}, setupData({}, { organizations: [{ id: 'o1', name: 'Org' }, { id: 'o2', name: 'Autre org' }] }))
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    expect(within(screen.getByRole('dialog')).queryByLabelText('Organisation')).toBeNull()
+    expect(api.setup.save).not.toHaveBeenCalledWith({ orgId: 'o2' })
+  })
+
+  it('keeps the list reachable by keyboard when the selection is not listed', async () => {
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: true, reused: false, canStream: true }) } })
+    await renderMain()
+    act(() => emit('live-state', live({ session: { name: 'Ailleurs', status: 'active' } })))
+    const tabbable = screen.getAllByRole('option').filter((o) => o.tabIndex === 0)
+    expect(tabbable.map((o) => o.textContent)).toEqual(['Conférence'])
+  })
+
+  it('Démarrer stays disabled while a start launched elsewhere is in progress', async () => {
+    setup({}, setupData({ lastSessionName: 'Conférence' }))
+    await renderMain()
+    await waitFor(() => expect(startBtn().disabled).toBe(false))
+    act(() => emit('live-state', { ...IDLE, phase: 'starting' }))
+    expect(startBtn().disabled).toBe(true)
+    act(() => emit('live-state', { ...IDLE, phase: 'error', warning: 'Échec' }))
+    expect(startBtn().disabled).toBe(false)
+  })
+
+  it('a failed list then auth-required while idle goes to Login', async () => {
+    setup({ sessions: { list: vi.fn().mockRejectedValue(new Error('Unauthorized')) } })
+    render(<App />)
+    expect(await screen.findByText('Unauthorized')).toBeTruthy()
+    act(() => emit('auth-required'))
+    expect(await screen.findByRole('heading', { name: 'Connexion à LinTO' })).toBeTruthy()
+  })
+})
+
 describe('Commands (menu/tray hooks)', () => {
   it('exposes start, new-session, terminate and logout as plain functions', async () => {
     setup({}, setupData({ lastSessionName: 'Conférence' }))
