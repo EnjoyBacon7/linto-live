@@ -16,6 +16,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       ...over.auth
     },
     setup: { load: vi.fn().mockResolvedValue(setupData), save: vi.fn().mockResolvedValue(undefined), ...over.setup },
+    sessions: { list: vi.fn().mockResolvedValue([]), ...over.sessions },
     live: {
       start: vi.fn().mockResolvedValue({ ok: true, reused: false, canStream: true }), stop: vi.fn().mockResolvedValue(undefined),
       terminate: vi.fn().mockResolvedValue(undefined), showOutputWindow: vi.fn().mockResolvedValue(undefined), ...over.live

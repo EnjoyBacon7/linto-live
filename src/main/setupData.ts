@@ -1,5 +1,6 @@
 import type { SetupData } from '../shared/ipc'
-import { UnauthorizedError, type Organization, type Settings, type TranscriberProfile } from '../shared/types'
+import { toObsStreamService } from './obs/streamTarget'
+import { UnauthorizedError, type Organization, type Session, type SessionSummary, type Settings, type TranscriberProfile } from '../shared/types'
 
 type Devices = Pick<SetupData, 'videoDevices' | 'audioDevices'>
 
@@ -42,4 +43,21 @@ export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
     }
     throw e
   }
+}
+
+/** Sidebar entries: `active` first, then most recently updated. */
+export function toSessionSummaries(sessions: Session[]): SessionSummary[] {
+  return sessions
+    .filter((s): s is Session & { status: SessionSummary['status'] } => s.status !== 'terminated')
+    .map((s): SessionSummary => {
+      const out: SessionSummary = {
+        id: s.id, name: s.name, status: s.status,
+        canStream: toObsStreamService(s.channels[0]?.streamEndpoints ?? {}) !== null
+      }
+      if (s.updatedAt) out.updatedAt = s.updatedAt
+      return out
+    })
+    .sort((a, b) =>
+      Number(b.status === 'active') - Number(a.status === 'active') ||
+      (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
 }

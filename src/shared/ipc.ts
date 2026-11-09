@@ -1,5 +1,5 @@
 import type {
-  AuthMethod, DeviceItem, Organization, Session, SessionStatus, Settings,
+  AuthMethod, DeviceItem, Organization, Session, SessionStatus, SessionSummary, Settings,
   TranscriberProfile
 } from './types'
 
@@ -38,6 +38,7 @@ export interface LintoLiveApi {
     status(): Promise<{ loggedIn: boolean }>
   }
   setup: { load(): Promise<SetupData>; save(s: Partial<Settings>): Promise<void> }
+  sessions: { list(): Promise<SessionSummary[]> }
   live: {
     start(sessionName: string): Promise<StartResult>
     stop(): Promise<void>
@@ -60,6 +61,7 @@ export const IPC = {
   authStatus: 'auth:status',
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
+  sessionsList: 'sessions:list',
   liveStart: 'live:start',
   liveStop: 'live:stop',
   liveTerminate: 'live:terminate',
@@ -98,6 +100,7 @@ export function createLintoLiveApi(t: Transport): LintoLiveApi {
       status: () => call(IPC.authStatus)
     },
     setup: { load: () => call(IPC.setupLoad), save: (s) => call(IPC.setupSave, s) },
+    sessions: { list: () => call(IPC.sessionsList) },
     live: {
       start: (name) => call(IPC.liveStart, name),
       stop: () => call(IPC.liveStop),

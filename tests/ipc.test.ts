@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
-        'setupLoad', 'setupSave', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput',
+        'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput',
         'appUninstall', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired'
       ].sort()
     )
@@ -33,6 +33,8 @@ function fake() {
   return { invoke, on, off, api: createLintoLiveApi(t) }
 }
 
+it('sessions channel', () => { expect(IPC.sessionsList).toBe('sessions:list') })
+
 describe('createLintoLiveApi', () => {
   it('methods invoke the right channel with args', async () => {
     const { api, invoke } = fake()
@@ -43,6 +45,7 @@ describe('createLintoLiveApi', () => {
     await api.auth.status()
     await api.setup.load()
     await api.setup.save({ instance: 'i' })
+    await api.sessions.list()
     await api.live.start('S')
     await api.live.stop()
     await api.live.terminate()
@@ -56,6 +59,7 @@ describe('createLintoLiveApi', () => {
       [IPC.authStatus],
       [IPC.setupLoad],
       [IPC.setupSave, { instance: 'i' }],
+      [IPC.sessionsList],
       [IPC.liveStart, 'S'],
       [IPC.liveStop],
       [IPC.liveTerminate],

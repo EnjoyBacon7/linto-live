@@ -25,6 +25,7 @@ function toSession(s: any): Session {
   }
   if (s.owner) out.owner = s.owner
   if (s.createdAt) out.createdAt = s.createdAt
+  if (s.updatedAt) out.updatedAt = s.updatedAt
   return out
 }
 
@@ -75,16 +76,14 @@ export class LintoApi {
   }
 
   /**
-   * Every session whose name starts with `namePrefix`, all pages (offset += limit until totalItems or an
-   * empty/short page). Missing an exact match on a later page would create a duplicate session, so hitting
-   * the page cap is an error rather than a partial answer.
+   * All pages of the org's sessions (offset += limit until totalItems or an empty/short page).
+   * Hitting the page cap is an error rather than a partial answer.
    */
-  async searchSessions(orgId: string, namePrefix: string): Promise<Session[]> {
+  private async pagedSessions(orgId: string, params: Record<string, string>, tooManyMsg: string): Promise<Session[]> {
     const out: Session[] = []
     for (let page = 0; page < SEARCH_MAX_PAGES; page++) {
       const q = new URLSearchParams({
-        searchName: namePrefix,
-        statusList: 'on_schedule,ready,active,paused,terminated',
+        ...params,
         limit: String(SEARCH_PAGE_SIZE),
         offset: String(out.length) // = page * limit, and still correct if the server caps the page size
       })
@@ -97,7 +96,20 @@ export class LintoApi {
       const last = total !== null ? out.length >= total : items.length < SEARCH_PAGE_SIZE
       if (items.length === 0 || last) return out
     }
-    throw new Error('Trop de sessions correspondent à ce nom.')
+    throw new Error(tooManyMsg)
+  }
+
+  /** Every session whose name starts with `namePrefix` (missing an exact match would create a duplicate). */
+  searchSessions(orgId: string, namePrefix: string): Promise<Session[]> {
+    return this.pagedSessions(orgId, {
+      searchName: namePrefix,
+      statusList: 'on_schedule,ready,active,paused,terminated'
+    }, 'Trop de sessions correspondent à ce nom.')
+  }
+
+  /** The organisation's non-terminated sessions. */
+  listSessions(orgId: string): Promise<Session[]> {
+    return this.pagedSessions(orgId, { statusList: 'on_schedule,ready,active,paused' }, "Trop de sessions dans l'organisation.")
   }
 
   async createSession(orgId: string, name: string, profileId: number): Promise<Session> {

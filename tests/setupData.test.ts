@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { defaultSelection, loadSetupData, type SetupDeps } from '../src/main/setupData'
-import { UnauthorizedError, type Settings } from '../src/shared/types'
+import { defaultSelection, loadSetupData, toSessionSummaries, type SetupDeps } from '../src/main/setupData'
+import { UnauthorizedError, type Session, type Settings } from '../src/shared/types'
 
 const dev = { videoDevices: [{ id: 'v', name: 'V' }], audioDevices: [] }
 function deps(over: Partial<SetupDeps> = {}, init: Settings = { instance: 'https://x' }): SetupDeps {
@@ -50,5 +50,21 @@ describe('defaultSelection', () => {
   })
   it('replaces a profile missing from the list', () => {
     expect(defaultSelection({ instance: 'x', orgId: 'a', profileId: 99 }, [{ id: 'a', name: 'A' }], [{ id: 1, name: 'P' }])).toEqual({ profileId: 1 })
+  })
+})
+
+describe('toSessionSummaries', () => {
+  const ep = { srt: 'srt://h:1?streamid=k' }
+  const mk = (id: string, status: Session['status'], updatedAt?: string, streamEndpoints: Session['channels'][0]['streamEndpoints'] = ep): Session =>
+    ({ id, name: id, status, updatedAt, channels: [{ id: 1, name: 'c', streamEndpoints }] })
+  it('active first, then newest updatedAt', () => {
+    const r = toSessionSummaries([
+      mk('old', 'ready', '2026-01-01'), mk('act', 'active', '2025-01-01'), mk('new', 'paused', '2026-02-01')
+    ])
+    expect(r.map((s) => s.id)).toEqual(['act', 'new', 'old'])
+  })
+  it('canStream false without endpoints or channels', () => {
+    const r = toSessionSummaries([mk('a', 'ready', undefined, {}), { id: 'b', name: 'b', status: 'ready', channels: [] }, mk('c', 'ready')])
+    expect(r.map((s) => s.canStream)).toEqual([false, false, true])
   })
 })

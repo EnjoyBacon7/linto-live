@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type LiveState, type SetupData } from '../shared/ipc'
-import type { Settings } from '../shared/types'
+import { UnauthorizedError, type Settings, type SessionSummary } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -19,7 +19,7 @@ import { loadInstance, type LintoUrls } from './linto/instance'
 import { loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
-import { loadSetupData } from './setupData'
+import { loadSetupData, toSessionSummaries } from './setupData'
 import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow } from './appLifecycle'
 
 const SHUTDOWN_CAP_MS = 15_000
@@ -150,6 +150,17 @@ function main(): void {
       // Clears a stale token (unless a show is live) and asks the UI to log in.
       onUnauthorized: () => live.reportUnauthorized()
     })
+  })
+  ipcMain.handle(IPC.sessionsList, async (): Promise<SessionSummary[]> => {
+    const orgId = settings.get().orgId
+    if (!orgId) return []
+    await ensureUrls()
+    try {
+      return toSessionSummaries(await api.listSessions(orgId))
+    } catch (e) {
+      if (e instanceof UnauthorizedError) live.reportUnauthorized()
+      throw e
+    }
   })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
   ipcMain.handle(IPC.setupSave, (_e, patch: Partial<Settings>) => live.saveSettings(patch))

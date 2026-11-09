@@ -67,6 +67,19 @@ describe('LintoApi', () => {
     expect(r).toHaveLength(120)
     expect(r.filter((x) => x.name === 'Conf').map((x) => x.id)).toEqual(['exact'])
   })
+  it('listSessions requests non-terminated sessions without searchName, pages, maps updatedAt', async () => {
+    const page = (from: number, n: number) => Array.from({ length: n }, (_, i) => ({ id: `s${from + i}`, name: 'C', status: 'ready', updatedAt: '2026-01-01T00:00:00Z', channels: [] }))
+    const { calls, api } = mk((c) => {
+      const off = Number(new URL(c.url).searchParams.get('offset'))
+      return json({ sessions: off === 0 ? page(0, 50) : page(50, 10), totalItems: 60 })
+    })
+    const r = await api.listSessions('o1')
+    expect(calls[0].url).toContain('statusList=on_schedule%2Cready%2Cactive%2Cpaused')
+    expect(calls[0].url).not.toContain('searchName')
+    expect(calls.map((c) => new URL(c.url).searchParams.get('offset'))).toEqual(['0', '50'])
+    expect(r).toHaveLength(60)
+    expect(r[0].updatedAt).toBe('2026-01-01T00:00:00Z')
+  })
   it('searchSessions stops on an empty page when totalItems is missing', async () => {
     const { calls, api } = mk((c) => {
       const off = Number(new URL(c.url).searchParams.get('offset'))
