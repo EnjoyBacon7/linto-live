@@ -330,17 +330,36 @@ describe('LiveController', () => {
     expect(t.last().warning).toBeUndefined()
   })
 
-  it('terminate calls terminateSession then stop', async () => {
+  it('terminate stops the stream, terminates the session, then tears down captions', async () => {
     const t = setup()
     await t.live.boot()
     await t.live.start('Conf')
+    t.ctl().emitState('active')
     t.log.length = 0
+    const states = t.states.length
     await t.live.terminate()
     expect(t.api.terminateSession).toHaveBeenCalledWith('org1', 's1')
-    expect(t.log.indexOf('terminateSession')).toBeGreaterThanOrEqual(0)
-    expect(t.log.indexOf('terminateSession')).toBeLessThan(t.log.indexOf('stopStream'))
+    expect(t.log.indexOf('stopStream')).toBeGreaterThanOrEqual(0)
+    expect(t.log.indexOf('stopStream')).toBeLessThan(t.log.indexOf('terminateSession'))
+    expect(t.log.indexOf('terminateSession')).toBeLessThan(t.log.indexOf('captions.close'))
     expect(t.log).toContain('showPause')
     expect(t.last().phase).toBe('idle')
+    // no false stream error / retry on the way
+    expect(t.states.slice(states).some((s) => s.stream === 'error' || s.warning === MSG_STREAM_RETRY)).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed terminate resumes the stream and keeps the show live', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().emitState('active')
+    t.api.terminateSession.mockRejectedValueOnce(new Error('LinTO HTTP 500'))
+    await expect(t.live.terminate()).rejects.toThrow('LinTO HTTP 500')
+    expect(t.last().phase).toBe('live')
+    expect(t.ctl().startStream).toHaveBeenCalledTimes(2)
+    expect(t.captions.close).not.toHaveBeenCalled()
   })
 
   it('waits for stopped before switching target', async () => {

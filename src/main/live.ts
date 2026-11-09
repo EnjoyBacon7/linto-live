@@ -198,9 +198,21 @@ export class LiveController extends EventEmitter {
     return this.enqueue(async () => {
       const cur = this.current
       if (cur) {
+        // Stop sending audio first: a session terminated under a running stream looks like a stream
+        // failure (error, retry, notification). Captions are torn down by doStop, after the termination.
+        const wasLive = this.state.phase === 'live'
+        this.setState({ phase: 'stopping' })
+        this.clearRetry()
+        await this.stopStreamAndWait()
         try {
           await this.d.api.terminateSession(cur.orgId, cur.session.id)
         } catch (e) {
+          if (wasLive && cur === this.current) {
+            // The session goes on: so does the show.
+            this.setState({ phase: 'live' })
+            const c = this.ctl
+            if (c && cur.service) await this.startStreamSafe(c, cur.service)
+          }
           if (e instanceof UnauthorizedError) {
             this.reportUnauthorized()
             throw new Error(MSG_AUTH)
