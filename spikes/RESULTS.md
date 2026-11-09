@@ -38,3 +38,14 @@ cd spikes && LINTO_EMAIL=... LINTO_PASSWORD=... SPIKE_PROTOCOL=rtmp node stream-
 # or LINTO_TOKEN=<auth_token> for SSO accounts; optional LINTO_ORG_ID, LINTO_PROFILE_ID, SPIKE_AUDIO_DEVICE, SPIKE_DURATION_S
 ```
 Record here: protocol that worked, session reaching `active`, `final` latency.
+
+## Spike B — OBS → LinTO (2026-11-09, studio.linto.ai, profil 26 « LinTO Live » voxstral)
+
+Audio : phrase française `say -v Thomas` lue en boucle par une source `ffmpeg_source` (sans micro).
+Compte machine rôle 4 (Meeting manager) ; un rôle 3 (Quick meeting) reçoit 403 à la création de session.
+
+- **SRT : OK.** Session `active` en continu, sous-titres `partial`/`final` exacts mot pour mot,
+  ~1 phrase finalisée toutes les 3-5 s, latence de quelques secondes. → défaut de l'appli confirmé.
+- **RTMP : KO.** La session alterne `active`/`ready` toutes les ~3,5 s et les `final` arrivent vides
+  (connexion qui tombe et se refait). Non creusé : le repli RTMP ne doit pas être considéré comme fiable.
+- Le script attend désormais qu'OBS soit prêt (code 207 au chargement), comme l'appli.

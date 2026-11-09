@@ -74,6 +74,10 @@ sock.on('connect_error', (e) => console.error('socket error', e.message))
 
 const { obs, stop } = await startObs()
 try {
+  // OBS answers 207 "not ready" while it is still loading: wait for a request to succeed
+  for (let i = 0; ; i++) {
+    try { await obs.call('GetSceneList'); break } catch (e) { if (e.code !== 207 || i > 60) throw e; await sleep(500) }
+  }
   if (process.env.SPIKE_AUDIO_FILE) {
     // Deterministic test audio: a local file played in a loop by OBS (no mic needed)
     await obs.call('CreateInput', {
