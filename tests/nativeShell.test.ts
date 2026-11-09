@@ -189,7 +189,7 @@ describe('notificationFor', () => {
   })
   it('no-op and other transitions: null', () => {
     expect(notificationFor(LIVE, LIVE)).toBeNull()
-    expect(notificationFor(LIVE, { ...LIVE, lastLine: 'Bonjour' })).toBeNull()
+    expect(notificationFor(LIVE, { ...LIVE, startedAt: 1 })).toBeNull()
     // A first start that never reached 'active' is not « the sound stopped ».
     expect(notificationFor({ ...LIVE, stream: 'starting' }, { ...LIVE, stream: 'error' }, 'off')).toBeNull()
     expect(notificationFor({ ...LIVE, captions: 'connecting' }, { ...LIVE, captions: 'offline' })).toBeNull()
@@ -227,6 +227,9 @@ describe('notificationFor', () => {
     const generic = notificationFor({ ...LIVE, phase: 'starting' }, { ...LIVE, phase: 'error' })
     expect(generic?.title).toBe("Le direct s'est arrêté")
     expect(generic?.body).toBeTruthy()
+    // the show ended by main because the session was terminated elsewhere (stopping → error)
+    const ended = notificationFor({ ...LIVE, phase: 'stopping' }, { ...IDLE, phase: 'error', warning: 'terminée' })
+    expect(ended).toEqual({ title: "Le direct s'est arrêté", body: 'terminée' })
     expect(notificationFor(IDLE, { ...IDLE, phase: 'error', warning: 'x' })).toBeNull()
     expect(notificationFor({ ...IDLE, phase: 'error' }, { ...IDLE, phase: 'error', warning: 'y' })).toBeNull()
   })

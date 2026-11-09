@@ -216,10 +216,7 @@ export class ObsProcess extends EventEmitter {
 
   private async doLaunch(): Promise<ObsConnection> {
     await this.killOrphan()
-    await writeSeed(this.o.paths.obsConfigDir, {
-      canvas: { width: 1920, height: 1080, fps: 30 },
-      obsTrayIcon: this.o.platform === 'darwin'
-    })
+    await writeSeed(this.o.paths.obsConfigDir, { canvas: { width: 1920, height: 1080, fps: 30 }, platform: this.o.platform })
     const conn: ObsConnection = {
       port: await freePort(),
       password: randomBytes(32).toString('hex')

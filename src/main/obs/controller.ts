@@ -23,6 +23,8 @@ export interface ObsClient {
 }
 
 const MIN_DB = -100
+/** obs-websocket RequestStatus::OutputNotRunning. */
+const OUTPUT_NOT_RUNNING = 501
 const TRACKS_NONE = { '1': false, '2': false, '3': false, '4': false, '5': false, '6': false }
 
 const videoKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'macos-avcapture' : 'v4l2_input')
@@ -184,9 +186,20 @@ export class ObsController {
     }
   }
 
-  async stopStream(): Promise<void> {
-    if (await this.streamActive()) await this.client.call('StopStream')
+  /**
+   * Asks OBS to stop the stream, also while it is still connecting (GetStreamStatus reports
+   * outputActive false then, so it is not consulted). Resolves true when OBS accepted the request
+   * (a 'stopped' state change follows), false when no stream output was running.
+   */
+  async stopStream(): Promise<boolean> {
     this.lastServer = null
+    try {
+      await this.client.call('StopStream')
+      return true
+    } catch (e) {
+      if ((e as { code?: unknown })?.code === OUTPUT_NOT_RUNNING) return false
+      throw e
+    }
   }
 
   streamState$(cb: (s: StreamState) => void): () => void {

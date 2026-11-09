@@ -1,10 +1,12 @@
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, shell, Tray
+  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
+  shell, Tray
 } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
@@ -18,9 +20,18 @@ import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { CaptionStream } from './linto/captions'
 import { loadInstance, type LintoUrls } from './linto/instance'
-import { applyRemember, canRememberLogin, loginWithPassword, mainWindowTitle, ssoLogin } from './linto/auth'
+import {
+  LEGACY_SSO_DIR,
+  applyRemember,
+  canRememberLogin,
+  clearSsoSession,
+  loginWithPassword,
+  mainWindowTitle,
+  ssoLogin
+} from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
+import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
@@ -80,11 +91,10 @@ function createWindow(settings: SettingsStore): BrowserWindow {
   w.on('resize', saveSoon)
   w.on('move', saveSoon)
   w.on('close', saveBounds)
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    void w.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void w.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  // A packaged app ignores ELECTRON_RENDERER_URL: an environment variable must not choose its UI.
+  const entry = rendererEntry(app.isPackaged, process.env['ELECTRON_RENDERER_URL'])
+  lockNavigation(w.webContents, entry)
+  void w.loadURL(entry)
   return w
 }
 
@@ -92,7 +102,20 @@ function send(channel: string, payload?: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
 }
 
+/** Serves out/renderer over app://linto-live/ (see security.ts). */
+function serveRenderer(): void {
+  const root = join(__dirname, '../renderer')
+  protocol.handle(RENDERER_SCHEME, (req) => {
+    const file = rendererFilePath(req.url, root)
+    return file ? net.fetch(pathToFileURL(file).toString()) : new Response('Not found', { status: 404 })
+  })
+}
+
 function main(): void {
+  denyAllPermissions(session.defaultSession)
+  // Older versions kept the SSO cookies on disk (persist:linto-sso) in plaintext.
+  void rm(join(app.getPath('userData'), ...LEGACY_SSO_DIR), { recursive: true, force: true }).catch(() => {})
+  serveRenderer()
   const platform = process.platform
   const paths = appPaths(app.getPath('userData'), platform)
   // Linux without a usable keyring (no gnome-keyring / KWallet, or none unlocked): safeStorage falls
@@ -212,6 +235,7 @@ function main(): void {
     if (n) notify(n)
     rebuildShell()
   })
+  live.on('caption-line', (line: string) => send(IPC.evtCaptionLine, line))
   live.on('preview', (d: string) => send(IPC.evtPreview, d))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   live.on('auth-required', () => {
@@ -267,6 +291,7 @@ function main(): void {
   ipcMain.handle(IPC.authLogout, async () => {
     settings.setToken(null)
     settings.setSavedLogin(null) // logging out means « forget me » too (shared control-room machines)
+    await clearSsoSession().catch((e) => console.error('Clearing the SSO session failed', e))
   })
   ipcMain.handle(IPC.authStatus, async () => ({ loggedIn: settings.getToken() !== null }))
 
@@ -308,6 +333,8 @@ function main(): void {
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   ipcMain.handle(IPC.liveGetState, () => live.getState())
+  ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
+  ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
@@ -420,6 +447,14 @@ function main(): void {
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
+  // A reloaded (or crashed) page re-subscribes when its preview mounts.
+  win.webContents.on('did-start-loading', () => live.setPreviewSubscribed(false))
+  win.webContents.on('render-process-gone', () => live.setPreviewSubscribed(false))
+  // No OBS screenshots nor audio levels for a window nobody sees.
+  win.on('hide', () => live.setWindowVisible(false))
+  win.on('minimize', () => live.setWindowVisible(false))
+  win.on('show', () => live.setWindowVisible(!win?.isMinimized()))
+  win.on('restore', () => live.setWindowVisible(true))
   app.on('activate', showWindow) // Dock click brings back a window hidden during a show
 
   rebuildShell()
@@ -437,6 +472,10 @@ function main(): void {
 }
 
 app.setName('LinTO Live')
+// Before 'ready': the renderer's origin behaves like https (secure context, fetch, CSP 'self').
+protocol.registerSchemesAsPrivileged([
+  { scheme: RENDERER_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+])
 // A second instance would start a second OBS on the same profile: it quits before booting anything.
 if (acquireSingleInstance(app, () => focusWindow(win))) {
   void app.whenReady().then(main)

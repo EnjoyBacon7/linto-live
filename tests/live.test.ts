@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -26,6 +26,8 @@ function fakeController(log: string[]) {
   let stateCb: ((s: StreamState) => void) | null = null
   const c = {
     autoStop: true,
+    /** stopStream() result: false = OBS answered "output not running" (e.g. still connecting). */
+    stopSent: true,
     ensureScene: vi.fn(async () => {}),
     listVideoDevices: vi.fn(async () => [{ id: 'cam', name: 'Cam' }]),
     listAudioDevices: vi.fn(async () => [{ id: 'mic', name: 'Mic' }]),
@@ -37,9 +39,10 @@ function fakeController(log: string[]) {
     startStream: vi.fn(async (s: { streamServiceSettings: { server: string } }) => {
       log.push(`startStream:${s.streamServiceSettings.server}`)
     }),
-    stopStream: vi.fn(async () => {
+    stopStream: vi.fn(async (): Promise<boolean> => {
       log.push('stopStream')
-      if (c.autoStop) queueMicrotask(() => stateCb?.('stopped'))
+      if (c.stopSent && c.autoStop) queueMicrotask(() => stateCb?.('stopped'))
+      return c.stopSent
     }),
     streamState$: vi.fn((cb: (s: StreamState) => void) => {
       stateCb = cb
@@ -64,7 +67,7 @@ function fakeController(log: string[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[] } = {}) {
+function setup(opts: { sessions?: Session[]; preview?: boolean } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
@@ -123,6 +126,7 @@ function setup(opts: { sessions?: Session[] } = {}) {
   }
   const deps = { obs, controllerFactory, api, captions, overlay, settings, platform: 'darwin' as const } satisfies LiveDeps
   const live = new LiveController(deps)
+  if (opts.preview !== false) live.setPreviewSubscribed(true) // the main window shows the preview
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
@@ -178,9 +182,15 @@ describe('LiveController', () => {
     t.captions.emit('status', 'live')
     expect(t.last().captions).toBe('live')
 
+    const lines: string[] = []
+    t.live.on('caption-line', (l: string) => lines.push(l))
+    const nStates = t.states.length
+    t.captions.emit('partial', { segmentId: 1, text: 'Bonjour' })
     t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous' })
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour à tous' })
-    expect(t.last().lastLine).toBe('Bonjour à tous')
+    expect(lines).toEqual(['Bonjour', 'Bonjour à tous'])
+    expect(t.states.length).toBe(nStates) // captions never re-send the live state
+    expect(t.last()).not.toHaveProperty('lastLine')
 
     const previews: string[] = []
     t.live.on('preview', (d: string) => previews.push(d))
@@ -190,6 +200,7 @@ describe('LiveController', () => {
     t.overlay.push.mockClear()
     await t.live.stop()
     expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
+    expect(lines[lines.length - 1]).toBe('') // the status bar line is cleared
     const n = previews.length
     await vi.advanceTimersByTimeAsync(1000)
     expect(previews.length).toBeGreaterThan(n) // the preview keeps running while idle
@@ -257,6 +268,25 @@ describe('LiveController', () => {
     expect(t.last()).toMatchObject({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
   })
 
+  it('obs exit after giving up during a show tears the show down (captions, session, timers)', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.captions.emit('status', 'offline') // arms the stale-captions probe
+    t.api.getSession.mockClear()
+    t.obs.emit('exit', null)
+    expect(t.captions.close).toHaveBeenCalled()
+    const s = t.last()
+    expect(s).toMatchObject({ obs: 'down', phase: 'error', stream: 'off', captions: 'offline', warning: MSG_OBS_DOWN })
+    expect(s).not.toHaveProperty('session')
+    expect(s).not.toHaveProperty('startedAt')
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.api.getSession).not.toHaveBeenCalled()
+    // Arrêter still works and returns to idle
+    await t.live.stop()
+    expect(t.last().phase).toBe('idle')
+  })
+
   it('keeps obs running on auth error', async () => {
     const t = setup()
     await t.live.boot()
@@ -308,17 +338,36 @@ describe('LiveController', () => {
     expect(t.last().warning).toBeUndefined()
   })
 
-  it('terminate calls terminateSession then stop', async () => {
+  it('terminate stops the stream, terminates the session, then tears down captions', async () => {
     const t = setup()
     await t.live.boot()
     await t.live.start('Conf')
+    t.ctl().emitState('active')
     t.log.length = 0
+    const states = t.states.length
     await t.live.terminate()
     expect(t.api.terminateSession).toHaveBeenCalledWith('org1', 's1')
-    expect(t.log.indexOf('terminateSession')).toBeGreaterThanOrEqual(0)
-    expect(t.log.indexOf('terminateSession')).toBeLessThan(t.log.indexOf('stopStream'))
+    expect(t.log.indexOf('stopStream')).toBeGreaterThanOrEqual(0)
+    expect(t.log.indexOf('stopStream')).toBeLessThan(t.log.indexOf('terminateSession'))
+    expect(t.log.indexOf('terminateSession')).toBeLessThan(t.log.indexOf('captions.close'))
     expect(t.log).toContain('showPause')
     expect(t.last().phase).toBe('idle')
+    // no false stream error / retry on the way
+    expect(t.states.slice(states).some((s) => s.stream === 'error' || s.warning === MSG_STREAM_RETRY)).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed terminate resumes the stream and keeps the show live', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().emitState('active')
+    t.api.terminateSession.mockRejectedValueOnce(new Error('LinTO HTTP 500'))
+    await expect(t.live.terminate()).rejects.toThrow('LinTO HTTP 500')
+    expect(t.last().phase).toBe('live')
+    expect(t.ctl().startStream).toHaveBeenCalledTimes(2)
+    expect(t.captions.close).not.toHaveBeenCalled()
   })
 
   it('waits for stopped before switching target', async () => {
@@ -343,6 +392,38 @@ describe('LiveController', () => {
     expect(t.log.indexOf('stopStream')).toBeLessThan(t.log.lastIndexOf(`startStream:${SRT_B}`))
     expect(t.last().warning).toBeUndefined()
     expect(t.last().session?.name).toBe('Autre')
+  })
+
+  it('Arrêter during the SRT connect is prompt; a stream that connects afterwards is stopped', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('starting')
+    c.stopSent = false // OBS: output not running yet
+    let done = false
+    const p = t.live.stop().then(() => (done = true))
+    await flush()
+    expect(done).toBe(true) // no 10 s wait for a 'stopped' that will not come
+    await p
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+    c.stopStream.mockClear()
+    c.stopSent = true
+    c.emitState('active') // the connect succeeded after Arrêter
+    expect(c.stopStream).toHaveBeenCalledTimes(1)
+    await flush()
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it('a stream becoming active while idle is stopped', async () => {
+    const t = setup()
+    await t.live.boot()
+    const c = t.ctl()
+    c.emitState('starting')
+    c.emitState('active')
+    expect(c.stopStream).toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
   })
 
   it('serializes concurrent start and stop', async () => {
@@ -590,6 +671,54 @@ describe('LiveController final fixes', () => {
     })
   })
 
+  describe('preview and audio level only while someone looks at them', () => {
+    it('no screenshots until the renderer subscribes; none after it unsubscribes', async () => {
+      const t = setup({ preview: false })
+      await t.live.boot()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).not.toHaveBeenCalled()
+      t.live.setPreviewSubscribed(true)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+      t.live.setPreviewSubscribed(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('a subscription made before OBS is attached starts the preview on attach', async () => {
+      const t = setup({ preview: false })
+      t.live.setPreviewSubscribed(true)
+      await t.live.boot()
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('pauses while the window is hidden or minimised, resumes when shown', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.live.setWindowVisible(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).not.toHaveBeenCalled()
+      t.live.setWindowVisible(true)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('audio levels are not forwarded while the window is hidden', async () => {
+      const t = setup()
+      await t.live.boot()
+      const cb = (t.ctl().audioLevel$.mock.calls as unknown as [(db: number) => void][])[0][0]
+      const levels: number[] = []
+      t.live.on('audio-level', (db: number) => levels.push(db))
+      cb(-20)
+      t.live.setWindowVisible(false)
+      cb(-10)
+      t.live.setWindowVisible(true)
+      cb(-5)
+      expect(levels).toEqual([-20, -5])
+    })
+  })
+
   describe('I2 OBS down is recoverable', () => {
     it('boot retries obs start with backoff', async () => {
       const t = setup()
@@ -645,6 +774,31 @@ describe('LiveController final fixes', () => {
       expect(await p).toEqual({ ok: false, message: MSG_BOOT_FAILED })
       expect(t.last()).toMatchObject({ obs: 'down', warning: MSG_BOOT_FAILED })
       expect(t.captions.open).not.toHaveBeenCalled()
+    })
+
+    it('start while obs is still booting is refused without killing the booting OBS', async () => {
+      const t = setup()
+      let release: () => void = () => {}
+      t.obs.start.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => {
+              const conn = { port: 4900, password: 'pw' }
+              t.obs.emit('ready', conn)
+              resolve(conn)
+            }
+          })
+      )
+      const boot = t.live.boot()
+      await flush()
+      expect(await t.live.start('Conf')).toEqual({ ok: false, message: MSG_OBS_NOT_READY })
+      expect(t.obs.stop).not.toHaveBeenCalled()
+      expect(t.obs.start).toHaveBeenCalledTimes(1)
+      release()
+      await boot
+      expect(t.last().obs).toBe('running')
+      expect((await t.live.start('Conf')).ok).toBe(true)
+      expect(t.obs.start).toHaveBeenCalledTimes(1)
     })
 
     it('start while obs is restarting is refused', async () => {
@@ -717,6 +871,41 @@ describe('LiveController final fixes', () => {
       await vi.advanceTimersByTimeAsync(30_000)
       expect(t.api.getSession).toHaveBeenCalledTimes(2)
       expect(t.captions.close).not.toHaveBeenCalled()
+    })
+
+    it('a session terminated elsewhere is detected by the probe: the show stops with a message', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.ctl().emitState('active')
+      t.api.getSession.mockResolvedValue(session({ status: 'terminated' }))
+      t.captions.emit('status', 'offline')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await t.live.settled()
+      expect(t.ctl().stopStream).toHaveBeenCalled()
+      expect(t.captions.close).toHaveBeenCalled()
+      expect(t.ctl().showPause).toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'error', stream: 'off', warning: msgTerminated('Conf') })
+      expect(t.last()).not.toHaveProperty('session')
+      expect(t.api.terminateSession).not.toHaveBeenCalled()
+    })
+
+    it('a session terminated elsewhere is detected after failed stream retries', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      const c = t.ctl()
+      t.captions.emit('status', 'live')
+      c.emitState('active')
+      t.api.getSession.mockResolvedValue(session({ status: 'terminated' }))
+      c.startStream.mockRejectedValue(new Error('SRT refused'))
+      c.emitState('stopped')
+      await vi.advanceTimersByTimeAsync(2_000 + 5_000 + 10_000 + 30_000)
+      await t.live.settled()
+      expect(t.last()).toMatchObject({ phase: 'error', stream: 'off', warning: msgTerminated('Conf') })
+      const n = c.startStream.mock.calls.length
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(c.startStream.mock.calls.length).toBe(n) // no more retries
     })
 
     it('captions back live before 30 s cancels the probe', async () => {

@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron'
 import { UnauthorizedError, type AuthMethod, type SavedLogin } from '../../shared/types'
 import type { LintoApi } from './api'
 import type { LintoUrls } from './instance'
+import { denyAllPermissions } from '../security'
 
 export type RedirectResult = { kind: 'token'; token: string } | { kind: 'exchange' } | { kind: 'none' }
 
@@ -98,7 +99,19 @@ export function createRedirectHandler(instance: string): (event: NavEvent, url: 
   }
 }
 
-const PARTITION = 'persist:linto-sso'
+/**
+ * In-memory partition (no 'persist:'): the identity provider's cookies never reach the disk, and they
+ * are cleared after each login attempt and on logout. LinTO's own token lives in the settings store.
+ */
+const PARTITION = 'linto-sso'
+/** On-disk data of the former persistent partition (persist:linto-sso), relative to userData. */
+export const LEGACY_SSO_DIR = ['Partitions', 'linto-sso'] as const
+
+/** Logout: forget the identity provider session (cookies, storage, cache). */
+export async function clearSsoSession(): Promise<void> {
+  const { session } = await import('electron')
+  await session.fromPartition(PARTITION).clearStorageData()
+}
 
 export async function ssoLogin(
   urls: LintoUrls,
@@ -108,6 +121,7 @@ export async function ssoLogin(
 ): Promise<string> {
   const { BrowserWindow: BW, session } = await import('electron')
   const ses = session.fromPartition(PARTITION)
+  denyAllPermissions(ses)
 
   let loginUrl = `${urls.auth}/${method.path}/login`
   if (method.path === 'oidc/organization') {
@@ -133,6 +147,8 @@ export async function ssoLogin(
       if (done) return
       done = true
       if (!win.isDestroyed()) win.destroy()
+      // The token (or the failure) is known: the identity provider session is not kept.
+      void ses.clearStorageData().catch(() => {})
       if (err) reject(err)
       else resolve(token as string)
     }

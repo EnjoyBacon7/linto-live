@@ -27,6 +27,8 @@ export const PREVIEW_MS = 50 // 20 fps: a 640 px JPEG screenshot costs ~3 ms in 
 const STOP_WAIT_MS = 10_000
 const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
+/** From this stream retry on, ask LinTO whether the session was terminated elsewhere before retrying. */
+const RETRY_PROBE_FROM = 3
 /** Delays between obs.start() attempts after an intentional restart: 5 attempts in total. */
 const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
 /** Captions not live for this long during a show: hide the stale overlay box and probe the LinTO token. */
@@ -77,9 +79,10 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
- * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'().
+ * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'() 'caption-line'(text, '' = cleared).
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
- * The preview runs whenever OBS is attached. No request closes or lists projectors: the output window is
+ * The preview runs while OBS is attached, the renderer shows it (setPreviewSubscribed) and the window is
+ * visible (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists projectors: the output window is
  * opened once per OBS run by the first show (Arrêter leaves it open, black) and on demand by showOutputWindow.
  */
 export class LiveController extends EventEmitter {
@@ -98,16 +101,21 @@ export class LiveController extends EventEmitter {
   private retryAttempt = 0
   private previewTimer: NodeJS.Timeout | null = null
   private previewBusy = false
+  private previewSubscribed = false
+  private windowVisible = true
   private intentionalObsStop = false
   private shuttingDown = false
   private restartGen = 0
   private attachedConn: ObsConnection | null = null
   private crashRestart = false
+  /** boot() is starting/attaching OBS: Démarrer must not revive (kill) it meanwhile. */
+  private booting = false
   private captionsTimer: NodeJS.Timeout | null = null
   private captionsAuthLost = false
   /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
   private authLost = false
   private tail: Promise<unknown> = Promise.resolve()
+  private lastLine: string | undefined
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -124,7 +132,25 @@ export class LiveController extends EventEmitter {
       if (this.intentionalObsStop || this.shuttingDown) return
       this.dropController()
       this.stopPreview()
-      this.setState({ obs: 'down', phase: 'error', warning: MSG_OBS_DOWN })
+      // OBS gave up: the show cannot continue. Tear it down like Arrêter (nothing left to stop in OBS)
+      // so the UI is not stuck on a live session; the error phase and warning tell what happened.
+      this.clearCaptionsTimer()
+      if (this.current) {
+        this.d.captions.close()
+        this.current = null
+        this.buffer = new CaptionBuffer()
+        this.d.overlay.push({ type: 'reset' })
+      }
+      this.setState({
+        obs: 'down',
+        phase: 'error',
+        warning: MSG_OBS_DOWN,
+        session: undefined,
+        stream: 'off',
+        captions: 'offline',
+        startedAt: undefined
+      })
+      this.setLine(undefined)
     })
     d.captions.on('status', (s: CaptionStatus) => {
       this.setState({ captions: s })
@@ -149,6 +175,7 @@ export class LiveController extends EventEmitter {
   }
 
   async boot(): Promise<void> {
+    this.booting = true
     try {
       this.overlayUrl = (await this.d.overlay.start()).url
       // Each successful start emits 'ready' → attach is queued.
@@ -158,6 +185,8 @@ export class LiveController extends EventEmitter {
     } catch (e) {
       this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
       throw e
+    } finally {
+      this.booting = false
     }
   }
 
@@ -173,9 +202,21 @@ export class LiveController extends EventEmitter {
     return this.enqueue(async () => {
       const cur = this.current
       if (cur) {
+        // Stop sending audio first: a session terminated under a running stream looks like a stream
+        // failure (error, retry, notification). Captions are torn down by doStop, after the termination.
+        const wasLive = this.state.phase === 'live'
+        this.setState({ phase: 'stopping' })
+        this.clearRetry()
+        await this.stopStreamAndWait()
         try {
           await this.d.api.terminateSession(cur.orgId, cur.session.id)
         } catch (e) {
+          if (wasLive && cur === this.current) {
+            // The session goes on: so does the show.
+            this.setState({ phase: 'live' })
+            const c = this.ctl
+            if (c && cur.service) await this.startStreamSafe(c, cur.service)
+          }
           if (e instanceof UnauthorizedError) {
             this.reportUnauthorized()
             throw new Error(MSG_AUTH)
@@ -210,6 +251,18 @@ export class LiveController extends EventEmitter {
     await this.d.obs.stop().catch(() => {})
     await this.d.overlay.stop().catch(() => {})
     this.setState({ obs: 'down' })
+  }
+
+  /** The renderer shows (or stops showing) the preview. */
+  setPreviewSubscribed(on: boolean): void {
+    this.previewSubscribed = on
+    this.updatePreview()
+  }
+
+  /** The main window was shown/restored (true) or hidden/minimised (false). */
+  setWindowVisible(on: boolean): void {
+    this.windowVisible = on
+    this.updatePreview()
   }
 
   /** After a successful re-login: re-open captions on the session being shown. */
@@ -281,7 +334,14 @@ export class LiveController extends EventEmitter {
   private showCaption(type: 'partial' | 'final', text: string, lines: string[]): void {
     this.d.overlay.push({ type, text })
     const last = lines[lines.length - 1]
-    if (last !== undefined && last !== this.state.lastLine) this.setState({ lastLine: last })
+    if (last !== undefined) this.setLine(last)
+  }
+
+  /** The status bar line goes through its own 'caption-line' event: no LiveState round trip per partial. */
+  private setLine(line: string | undefined): void {
+    if (line === this.lastLine) return
+    this.lastLine = line
+    this.emit('caption-line', line ?? '')
   }
 
   private dropController(): void {
@@ -314,7 +374,11 @@ export class LiveController extends EventEmitter {
       return
     }
     const ready = c
-    this.unsubs.push(ready.audioLevel$((db) => this.emit('audio-level', db)))
+    this.unsubs.push(
+      ready.audioLevel$((db) => {
+        if (this.windowVisible) this.emit('audio-level', db)
+      })
+    )
     this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
     this.ctl = ready
     this.attachedConn = conn
@@ -328,7 +392,7 @@ export class LiveController extends EventEmitter {
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
-    this.startPreview()
+    this.updatePreview()
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
 
@@ -418,7 +482,12 @@ export class LiveController extends EventEmitter {
     if (!cur || this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost) return
     this.d.overlay.push({ type: 'reset' }) // hide the frozen box; the next caption restores it
     try {
-      await this.d.api.getSession(cur.orgId, cur.session.id)
+      const { status } = await this.d.api.getSession(cur.orgId, cur.session.id)
+      if (cur !== this.current) return
+      if (status === 'terminated') {
+        void this.enqueue(() => this.stopTerminated(cur)).catch(() => {})
+        return
+      }
     } catch (e) {
       if (cur !== this.current) return
       if (e instanceof UnauthorizedError) {
@@ -428,6 +497,21 @@ export class LiveController extends EventEmitter {
       }
     }
     if (cur === this.current) this.superviseCaptions() // still not live: probe again later
+  }
+
+  /** True when LinTO says the session was terminated (elsewhere: web UI, another device); errors → false. */
+  private async sessionTerminated(cur: Current): Promise<boolean> {
+    try {
+      return (await this.d.api.getSession(cur.orgId, cur.session.id)).status === 'terminated'
+    } catch {
+      return false
+    }
+  }
+
+  /** Runs inside the queue: the shown session was terminated elsewhere — end the show and say why. */
+  private async stopTerminated(cur: Current): Promise<void> {
+    if (cur !== this.current) return
+    await this.doStop(STOP_WAIT_MS, { phase: 'error', warning: msgTerminated(cur.session.name) })
   }
 
   private clearCaptionsTimer(): void {
@@ -441,7 +525,7 @@ export class LiveController extends EventEmitter {
       return { ok: false, message: 'Choisis une organisation et un profil de transcription.' }
     }
     if (!this.ctl) {
-      if (this.state.obs === 'restarting') return { ok: false, message: MSG_OBS_NOT_READY }
+      if (this.state.obs === 'restarting' || this.booting) return { ok: false, message: MSG_OBS_NOT_READY }
       if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
     }
 
@@ -480,9 +564,9 @@ export class LiveController extends EventEmitter {
         session: { name: res.session.name, status: res.session.status },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : MSG_NO_STREAM,
-        startedAt: Date.now(),
-        lastLine: undefined
+        startedAt: Date.now()
       })
+      this.setLine(undefined)
       this.d.captions.open(res.session.id, res.channel.id)
 
       const c = this.ctl
@@ -497,7 +581,8 @@ export class LiveController extends EventEmitter {
     return { ok: true, reused: res.kind === 'reused', canStream: res.canStream }
   }
 
-  private async doStop(streamWaitMs = STOP_WAIT_MS): Promise<void> {
+  /** `end` overrides the final (idle, no warning) state, e.g. to end in error with a message. */
+  private async doStop(streamWaitMs = STOP_WAIT_MS, end: Partial<LiveState> = {}): Promise<void> {
     if (this.state.phase === 'idle' && !this.current) return
     this.setState({ phase: 'stopping' })
     this.clearRetry()
@@ -516,8 +601,9 @@ export class LiveController extends EventEmitter {
       captions: 'offline',
       startedAt: undefined,
       warning: undefined,
-      lastLine: undefined
+      ...end
     })
+    this.setLine(undefined)
   }
 
   /** Stops the OBS stream and waits for OBS to report it stopped (StopStream is asynchronous). */
@@ -535,8 +621,9 @@ export class LiveController extends EventEmitter {
       timer = setTimeout(resolve, waitMs)
     })
     try {
-      await c.stopStream()
-      await stopped
+      // false: OBS had no running output (e.g. the SRT connect is still pending) — no 'stopped' will
+      // come; if the connect succeeds later, onStreamState stops the unwanted stream.
+      if (await c.stopStream()) await stopped
     } catch {
       /* OBS gone or already stopped */
     } finally {
@@ -555,13 +642,21 @@ export class LiveController extends EventEmitter {
   private onStreamState(c: LiveObsController, s: StreamState): void {
     if (c !== this.ctl) return
     const live = this.state.phase === 'live' && !!this.current?.service
+    // A stream (re)starting while no show wants one — e.g. an SRT connect that succeeded after Arrêter —
+    // must not keep sending the room audio to LinTO.
+    const unwanted = this.stopRequested || (this.state.phase !== 'live' && this.state.phase !== 'starting')
     switch (s) {
       case 'starting':
         this.streamRunning = true
-        if (live) this.setState({ stream: 'starting' })
+        if (unwanted) void c.stopStream().catch(() => {})
+        else if (live) this.setState({ stream: 'starting' })
         return
       case 'active':
         this.streamRunning = true
+        if (unwanted) {
+          void c.stopStream().catch(() => {})
+          return
+        }
         this.retryAttempt = 0
         this.clearRetry()
         if (live) {
@@ -590,6 +685,8 @@ export class LiveController extends EventEmitter {
         const c = this.ctl
         const cur = this.current
         if (!c || !cur?.service || this.state.phase !== 'live') return
+        if (this.retryAttempt >= RETRY_PROBE_FROM && (await this.sessionTerminated(cur))) return this.stopTerminated(cur)
+        if (c !== this.ctl || cur !== this.current || this.state.phase !== 'live') return
         await this.startStreamSafe(c, cur.service)
       })
     }, delay)
@@ -598,6 +695,15 @@ export class LiveController extends EventEmitter {
   private clearRetry(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = null
+  }
+
+  /** Polls OBS screenshots only when someone can see them. */
+  private updatePreview(): void {
+    if (this.ctl && this.previewSubscribed && this.windowVisible) {
+      if (!this.previewTimer) this.startPreview()
+    } else {
+      this.stopPreview()
+    }
   }
 
   private startPreview(): void {
