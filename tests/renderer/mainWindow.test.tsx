@@ -450,7 +450,7 @@ describe('Authentication', () => {
     await renderMain()
     act(() => emit('live-state', live()))
     act(() => emit('auth-required'))
-    expect(screen.getByText('Session LinTO expirée — se reconnecter')).toBeTruthy()
+    expect(screen.getByText('Session LinTO expirée — le direct continue.')).toBeTruthy()
     expect(screen.getByRole('listbox', { name: 'Sessions' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Se reconnecter' }))
     const sheet = screen.getByRole('dialog')
@@ -458,7 +458,7 @@ describe('Authentication', () => {
     await userEvent.type(within(sheet).getByLabelText('Mot de passe'), 'pw')
     await userEvent.click(within(sheet).getByRole('button', { name: 'Se connecter' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(screen.queryByText('Session LinTO expirée — se reconnecter')).toBeNull()
+    expect(screen.queryByText('Session LinTO expirée — le direct continue.')).toBeNull()
   })
 
   it('while idle, auth-required goes back to the login screen', async () => {

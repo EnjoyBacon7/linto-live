@@ -251,7 +251,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     <>
       {authRequired && onAir && (
         <Banner tone="warn" action={<Button onClick={() => setSheet({ kind: 'login' })}>Se reconnecter</Button>}>
-          Session LinTO expirée — se reconnecter
+          Session LinTO expirée — le direct continue.
         </Banner>
       )}
       {state.warning && <Banner tone="warn">{state.warning}</Banner>}
