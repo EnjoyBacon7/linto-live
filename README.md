@@ -37,12 +37,15 @@ en charge. Seule Ubuntu 24.04 a été testée ; les autres distributions sont «
 
 **Ubuntu 24.04+ / Debian 13+ : paquet `.deb` (recommandé)**
 
-Double-cliquer sur `LinTO-Live-<version>-amd64.deb` pour l'ouvrir dans le gestionnaire de
-logiciels, ou :
+Dans un terminal, depuis le dossier du fichier téléchargé :
 
 ```bash
 sudo apt install ./LinTO-Live-<version>-amd64.deb
 ```
+
+(Le `./` est nécessaire.) Sans terminal : clic droit sur le fichier › « Ouvrir avec » ›
+**App Center** ou **GDebi** (`sudo apt install gdebi`). Un simple double-clic ouvre souvent le
+`.deb` dans le gestionnaire d'archives au lieu de l'installer.
 
 `apt` installe en même temps tout ce dont l'application a besoin : rien d'autre à faire.
 LinTO Live apparaît ensuite dans le menu des applications.
