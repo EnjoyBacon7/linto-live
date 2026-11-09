@@ -20,7 +20,7 @@ import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { CaptionStream } from './linto/captions'
 import { loadInstance, type LintoUrls } from './linto/instance'
-import { loginWithPassword, ssoLogin } from './linto/auth'
+import { LEGACY_SSO_DIR, clearSsoSession, loginWithPassword, ssoLogin } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
@@ -101,6 +101,8 @@ function serveRenderer(): void {
 
 function main(): void {
   denyAllPermissions(session.defaultSession)
+  // Older versions kept the SSO cookies on disk (persist:linto-sso) in plaintext.
+  void rm(join(app.getPath('userData'), ...LEGACY_SSO_DIR), { recursive: true, force: true }).catch(() => {})
   serveRenderer()
   const platform = process.platform
   const paths = appPaths(app.getPath('userData'), platform)
@@ -251,6 +253,7 @@ function main(): void {
   })
   ipcMain.handle(IPC.authLogout, async () => {
     settings.setToken(null)
+    await clearSsoSession().catch((e) => console.error('Clearing the SSO session failed', e))
   })
   ipcMain.handle(IPC.authStatus, async () => ({ loggedIn: settings.getToken() !== null }))
 
