@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Linux AppImage (dist/LinTO-Live-<version>-x86_64.AppImage) inside an Ubuntu 24.04
+# Builds the Linux AppImage (dist/LinTO-Live-<version>-x86_64.AppImage) and .deb (-amd64.deb) inside an Ubuntu 24.04
 # x86_64 container, from any Docker host, including macOS on Apple silicon (x86_64 emulation,
 # Docker Desktop's Rosetta: the first OBS build takes about an hour).
 #
@@ -57,6 +57,6 @@ docker run --rm --platform linux/amd64 -v "$ROOT":/src:ro -v "$WORK_HOST":/work 
   npm test
   rm -rf dist
   npm run dist:linux
-  cp dist/*.AppImage /out/
-  ls -la /out/*.AppImage
+  cp dist/*.AppImage dist/*.deb /out/
+  ls -la /out/*.AppImage /out/*.deb
 '

@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
-import { uninstallTargets, runUninstall, UninstallError } from './uninstall'
+import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
 import { UnauthorizedError, type Settings, type SessionSummary, type WatermarkConfig } from '../shared/types'
 import { appPaths } from './paths'
@@ -430,7 +430,7 @@ function main(): void {
     const { response } = await show({
       type: 'warning',
       message: 'Supprimer LinTO Live et toutes ses données ?',
-      detail: 'Cette action est définitive.',
+      detail: uninstallConfirmDetail(plan, platform),
       buttons: ['Annuler', 'Désinstaller'],
       defaultId: 0,
       cancelId: 0

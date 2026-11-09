@@ -82,7 +82,7 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Build AppImage
+      - name: Build AppImage + .deb
         run: npm run dist:linux
 
       - name: Inspect AppImage
@@ -99,6 +99,13 @@ jobs:
           if ldd "$obs" | grep 'not found'; then exit 1; fi
           echo "OBS_EXTRACTED=$obs" >> "$GITHUB_ENV"
 
+      - name: Inspect .deb
+        run: |
+          set -euo pipefail
+          deb="$(ls dist/*.deb)"
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb" | grep -q 'resources/obs/bin/obs$'
+
       # Best-effort smoke test: start/stop the bundled OBS under Xvfb (software GL) through the
       # real ObsProcess, isolated config. Informational only: CI has no GPU, audio or camera.
       - name: Smoke test bundled OBS (Xvfb)
@@ -111,11 +118,13 @@ jobs:
             xvfb-run -a -s '-screen 0 1920x1080x24' \
             npx vitest run --config vitest.it.config.ts tests/integration/obs-process.it.test.ts
 
-      - name: Upload AppImage
+      - name: Upload AppImage + .deb
         uses: actions/upload-artifact@v4
         with:
           name: LinTO-Live-linux-x86_64
-          path: dist/*.AppImage
+          path: |
+            dist/*.AppImage
+            dist/*.deb
           if-no-files-found: error
 
   checks-macos:

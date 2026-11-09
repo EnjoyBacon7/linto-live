@@ -103,6 +103,16 @@ export function uninstallTargets(o: UninstallInput): UninstallPlan {
   return { remove, trash }
 }
 
+/**
+ * Detail of the confirmation dialog. On Linux without an AppImage, the app was installed by the .deb
+ * package (/opt, root-owned): only its data can be removed from inside, the package goes through apt.
+ */
+export function uninstallConfirmDetail(t: UninstallPlan, platform: NodeJS.Platform): string {
+  const base = 'Cette action est définitive.'
+  if (platform !== 'linux' || t.trash) return base
+  return `${base} Ses données seront effacées ; l'application elle-même, installée par un paquet système, se retire ensuite avec « sudo apt remove linto-live ».`
+}
+
 /** Removes everything it can; failures never stop the rest. Throws UninstallError listing what is left. */
 export async function runUninstall(
   t: UninstallPlan,

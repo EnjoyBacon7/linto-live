@@ -1,7 +1,7 @@
 # Linux build (AppImage with OBS built from source)
 
-LinTO Live for Linux is one AppImage (x86_64) that contains the Electron app and its own OBS
-Studio 32.1.0, built from source with the browser source and obs-websocket. Nothing is installed
+LinTO Live for Linux ships as an AppImage and a `.deb` (x86_64), both containing the Electron app
+and its own OBS Studio 32.1.0, built from source with the browser source and obs-websocket. Nothing is installed
 system-wide; OBS runs hidden with its configuration under the app's `userData`.
 
 - OBS build script: `scripts/build-obs-linux.sh` (Ubuntu 24.04 x86_64 only), plus the small OBS
@@ -23,7 +23,7 @@ bash scripts/build-obs-linux.sh          # apt deps + OBS build -> vendor/obs/li
 # Node 22 (e.g. via nvm), then:
 npm ci
 npm test
-npm run dist:linux                       # -> dist/LinTO-Live-<version>-x86_64.AppImage
+npm run dist:linux                       # -> dist/LinTO-Live-<version>-x86_64.AppImage + -amd64.deb
 ```
 
 `vendor/` and `dist/` are git-ignored. Delete `vendor/cache/obs-linux-build` after a successful
@@ -32,7 +32,7 @@ build to reclaim ~5 GB (sources, CEF archive, build tree); rerunning the script 
 ## Building from macOS (Docker)
 
 ```bash
-npm run dist:linux:docker                # -> dist/LinTO-Live-<version>-x86_64.AppImage
+npm run dist:linux:docker                # -> dist/LinTO-Live-<version>-x86_64.AppImage + -amd64.deb
 ```
 
 `scripts/build-linux-docker.sh` does the same as above inside an Ubuntu 24.04 x86_64 container:
@@ -95,6 +95,11 @@ What can and cannot be checked under emulation (Docker Desktop's Rosetta, Apple 
    `$APPDIR/usr/lib` from `LD_LIBRARY_PATH` before spawning OBS (`src/main/paths.ts`).
 8. Fails if any binary still has an unresolved library without `LD_LIBRARY_PATH`, runs
    `obs --version`, copies `COPYING` and writes `BUILD-INFO.txt` (commits, CEF archive, build host).
+
+The `.deb` installs the same tree under `/opt/LinTO Live/resources/obs/`. Its `depends` (in
+`electron-builder.yml`) list Electron's needs plus every host library OBS links against but does not
+ship (step 6), so `apt install ./LinTO-Live-*.deb` needs no manual step (no libfuse2 either). The
+in-app uninstall removes the data only; the package itself goes with `sudo apt remove linto-live`.
 
 In the packaged app, the tree lands in `<AppImage>/resources/obs/`, and the app starts
 `resources/obs/bin/obs` (`src/main/obs/locate.ts`). Unlike macOS, there is no copy out of the

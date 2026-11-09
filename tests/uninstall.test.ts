@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { uninstallTargets, runUninstall, UninstallError } from '../src/main/uninstall'
+import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from '../src/main/uninstall'
 
 const H = '/Users/u'
 const base = {
@@ -153,5 +153,16 @@ describe('runUninstall', () => {
     let n = 0
     await runUninstall({ remove: [], trash: null }, { rm: async () => {}, trash: async () => void n++ })
     expect(n).toBe(0)
+  })
+})
+
+describe('uninstallConfirmDetail', () => {
+  it('says nothing more when the app itself goes to the trash', () => {
+    expect(uninstallConfirmDetail({ remove: [], trash: '/x/LinTO Live.app' }, 'darwin')).toBe('Cette action est définitive.')
+    expect(uninstallConfirmDetail({ remove: [], trash: '/h/LinTO-Live.AppImage' }, 'linux')).toBe('Cette action est définitive.')
+  })
+  it('linux package install (no AppImage): tells how to remove the package', () => {
+    const d = uninstallConfirmDetail({ remove: [], trash: null }, 'linux')
+    expect(d).toContain('sudo apt remove linto-live')
   })
 })

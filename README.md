@@ -31,24 +31,38 @@ Les Mac Intel ne sont pas pris en charge.
 
 ### Linux (x86_64)
 
-Un seul fichier **AppImage**, qui contient l'application et son propre OBS Studio 32.1 : rien n'est
-installé sur le système.
+L'application embarque son propre OBS Studio 32.1. Il faut une distribution avec
+**glibc 2.39 ou plus récente** : Debian 12 et les distributions plus anciennes ne sont **pas** prises
+en charge. Seule Ubuntu 24.04 a été testée ; les autres distributions sont « au mieux ».
+
+**Ubuntu 24.04+ / Debian 13+ : paquet `.deb` (recommandé)**
+
+Double-cliquer sur `LinTO-Live-<version>-amd64.deb` pour l'ouvrir dans le gestionnaire de
+logiciels, ou :
+
+```bash
+sudo apt install ./LinTO-Live-<version>-amd64.deb
+```
+
+`apt` installe en même temps tout ce dont l'application a besoin : rien d'autre à faire.
+LinTO Live apparaît ensuite dans le menu des applications.
+
+**Autres distributions (Arch…) : AppImage**
+
+Un seul fichier, rien n'est installé sur le système :
 
 ```bash
 chmod +x LinTO-Live-<version>-x86_64.AppImage
 ./LinTO-Live-<version>-x86_64.AppImage
 ```
 
-Prérequis : une distribution avec **glibc 2.39 ou plus récente**.
+Paquets nécessaires selon la distribution :
 
 | Distribution | Paquets à installer |
 |---|---|
 | Ubuntu 24.04+ | `sudo apt install libfuse2t64` |
 | Debian 13 (trixie) | `sudo apt install libfuse2t64 libnss3 libxcb-cursor0 libpulse0` |
 | Arch Linux | `sudo pacman -S fuse2 nss xcb-util-cursor libpulse` (+ `pipewire-pulse` avec PipeWire) |
-
-Debian 12 et les distributions plus anciennes ne sont **pas** prises en charge (glibc trop
-ancienne). Seule Ubuntu 24.04 a été testée ; les autres distributions sont « au mieux ».
 
 Conseils :
 
@@ -59,7 +73,7 @@ Conseils :
   **accélération graphique** fonctionnelle (pas de VM sans 3D).
 - Si l'application ne démarre pas à cause du bac à sable (sandbox) d'Electron, la lancer avec
   `--no-sandbox`.
-- S'il manque une bibliothèque, la liste s'obtient avec :
+- S'il manque une bibliothèque (AppImage), la liste s'obtient avec :
   ```bash
   ./LinTO-Live-*.AppImage --appimage-extract
   ldd squashfs-root/resources/obs/bin/obs | grep 'not found'
@@ -92,12 +106,16 @@ Menu **LinTO Live › Désinstaller LinTO Live…** (macOS) ou **Fichier › Dé
 (Linux). L'application arrête OBS, supprime toutes ses données (configuration, OBS embarqué et sa
 configuration, cookies, cache) et se met à la corbeille.
 
+Avec le paquet `.deb`, l'application elle-même se retire ensuite avec
+`sudo apt remove linto-live` (la désinstallation intégrée efface les données, pas le paquet).
+
 Données concernées, si besoin de les retirer à la main :
 
 - macOS : `/Applications/LinTO Live.app`, `~/Library/Application Support/LinTO Live`, et les
   entrées `LinTO Live` / `ai.linto.live` de `~/Library/Caches`, `~/Library/Logs`,
   `~/Library/Preferences` et `~/Library/Saved Application State`
-- Linux : `~/.config/LinTO Live`, `~/.cache/LinTO Live`, le fichier `.AppImage`
+- Linux : `~/.config/LinTO Live`, `~/.cache/LinTO Live`, le fichier `.AppImage` (ou le paquet
+  `linto-live` avec `.deb`)
 
 L'OBS personnel éventuellement installé sur la machine n'est jamais touché.
 
@@ -117,7 +135,7 @@ Paquets :
 - macOS : `npm run fetch:obs:mac` (télécharge l'OBS officiel) puis `npm run dist:mac`
   → `dist/LinTO-Live-<version>-arm64.dmg`
 - Linux, depuis n'importe quel hôte Docker : `npm run dist:linux:docker`
-  → `dist/LinTO-Live-<version>-x86_64.AppImage`
+  → `dist/LinTO-Live-<version>-x86_64.AppImage` et `dist/LinTO-Live-<version>-amd64.deb`
 - Linux, sur Ubuntu 24.04 : voir [`docs/linux-build.md`](docs/linux-build.md)
 
 ## OBS Studio
