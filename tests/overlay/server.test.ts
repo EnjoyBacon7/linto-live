@@ -78,7 +78,7 @@ describe('OverlayServer', () => {
     srv = new OverlayServer({ pageDir })
     const { url } = await srv.start()
     const ws = new WebSocket(wsUrl(url))
-    await new Promise((r) => ws.once('open', r))
+    expect(JSON.parse(await nextMessage(ws))).toEqual({ type: 'reset' }) // replay on connect
     const p = nextMessage(ws)
     srv.push({ type: 'final', text: 'x' })
     expect(JSON.parse(await p)).toEqual({ type: 'final', text: 'x' })
