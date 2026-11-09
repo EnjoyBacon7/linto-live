@@ -3,7 +3,7 @@ import { ObsController, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_OVERLAY, SRC_VIDEO, t
 
 type Call = { req: string; data?: Record<string, unknown> }
 
-function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
+function fakeClient(opts: { items?: unknown[]; failStart?: boolean; noAudio?: string[] } = {}) {
   let active = false
   const calls: Call[] = []
   const scenes = new Set<string>()
@@ -12,6 +12,10 @@ function fakeClient(opts: { items?: unknown[]; failStart?: boolean } = {}) {
   const client: ObsClient = {
     async call(req, data) {
       calls.push({ req, data })
+      // Real obs-websocket: audio requests on an input without audio (Linux v4l2) fail with 604.
+      if ((req === 'SetInputAudioTracks' || req === 'SetInputMute') && opts.noAudio?.includes(data!.inputName as string)) {
+        throw Object.assign(new Error('The specified input does not support audio.'), { code: 604 })
+      }
       switch (req) {
         case 'GetSceneList':
           return { scenes: [...scenes].map((sceneName) => ({ sceneName })) }
@@ -87,6 +91,19 @@ describe('ObsController', () => {
     const muted = of(f.calls, 'SetInputMute').filter((x) => x.data!.inputMuted === true).map((x) => x.data!.inputName)
     expect(muted).toEqual(expect.arrayContaining([SRC_VIDEO, SRC_OVERLAY]))
     expect(muted).not.toContain(SRC_AUDIO)
+  })
+
+  it('a video input without audio (Linux v4l2) does not stop the scene setup', async () => {
+    const f = fakeClient({ noAudio: [SRC_VIDEO] })
+    await new ObsController(f.client).ensureScene('linux')
+    const tracks = of(f.calls, 'SetInputAudioTracks').map((x) => x.data!.inputName)
+    expect(tracks).toEqual(expect.arrayContaining([SRC_OVERLAY, SRC_AUDIO]))
+    expect(of(f.calls, 'SetInputMute').map((x) => x.data!.inputName)).toContain(SRC_OVERLAY)
+  })
+
+  it('other audio setup errors still fail the scene setup', async () => {
+    const f = fakeClient({ noAudio: [SRC_AUDIO] })
+    await expect(new ObsController(f.client).ensureScene('linux')).rejects.toThrow('does not support audio')
   })
 
   it('setOverlayUrl sends exact browser settings and mutes', async () => {

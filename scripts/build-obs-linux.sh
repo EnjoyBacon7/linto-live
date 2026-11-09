@@ -16,10 +16,13 @@
 # fallback search paths can never pick up a system-wide OBS installation's plugins.
 #
 # Inputs are pinned: obs-studio tag + commit, CEF archive SHA-256 (from obs-studio's
-# CMakePresets.json at that tag), AppImage excludelist commit + SHA-256.
+# CMakePresets.json at that tag), AppImage excludelist commit + SHA-256. The small LinTO Live
+# patches in scripts/obs-linux-patches/ are applied to the source and shipped in patches/.
 #
 # Usage: scripts/build-obs-linux.sh            (installs apt build deps with sudo)
 #        SKIP_APT=1 scripts/build-obs-linux.sh (deps already installed)
+#        DEPS_ONLY=1 scripts/build-obs-linux.sh (only install the deps)
+# From macOS or any other Docker host: scripts/build-linux-docker.sh (OBS + AppImage in a container).
 # Env:   WORK_DIR (default vendor/cache/obs-linux-build), JOBS (default nproc)
 set -euo pipefail
 
@@ -48,7 +51,8 @@ EXCLUDELIST_SHA256="50db0f894f34b169c47a5cbc0c17dbab61e9edebca5bc8269a1e6ac1bf4b
 # ABI must match the host (GPU/VA drivers, D-Bus, udev, PulseAudio/PipeWire, GIO modules).
 EXTRA_EXCLUDE_REGEX='^(libglib-2\.0|libgobject-2\.0|libgio-2\.0|libgmodule-2\.0|libgthread-2\.0|libdbus-1|libudev|libsystemd|libpulse|libpulse-simple|libpulsecommon-.*|libva|libva-.*|libvdpau|libvulkan|libnvidia-.*|libcuda|libGLESv2|libEGL_mesa|libGLX_mesa)\.so'
 
-# OBS's prebuilt CEF files: shipped as-is (not scanned, not patched). CEF's own dependencies
+# OBS's prebuilt CEF files: shipped as-is apart from their debug info (not scanned, not patched,
+# no RPATH change). CEF's own dependencies
 # (NSS, ATK, CUPS, ...) are standard desktop libraries resolved from the host.
 CEF_FILES_REGEX='/(libcef\.so|libEGL\.so|libGLESv2\.so|libvk_swiftshader\.so|libvulkan\.so\.1|chrome-sandbox)$'
 
@@ -109,9 +113,14 @@ if [[ -z "${SKIP_APT:-}" ]]; then
     nlohmann-json3-dev libwebsocketpp-dev libasio-dev libqrcodegencpp-dev \
     libffmpeg-nvenc-dev librist-dev libsrt-openssl-dev \
     qt6-base-dev libqt6svg6-dev qt6-base-private-dev \
-    libvpl-dev libvpl2
+    libvpl-dev libvpl2 \
+    libnss3 libnspr4
+  # libnss3/libnspr4: obs-browser links against OBS's prebuilt libcef.so, which needs them to link;
+  # GitHub's runners happen to have them, a clean Ubuntu does not.
 fi
-for tool in git cmake ninja curl patchelf sha256sum ldd tar; do
+# DEPS_ONLY=1: stop after the dependencies (used to bake them into scripts/build-linux-docker.sh's image).
+[[ -z "${DEPS_ONLY:-}" ]] || exit 0
+for tool in git cmake ninja curl patchelf sha256sum ldd tar strip; do
   command -v "$tool" >/dev/null || die "missing tool: $tool"
 done
 
@@ -131,6 +140,21 @@ fi
   die "tag $OBS_VERSION is $(git -C "$SRC" rev-parse HEAD), expected $OBS_COMMIT"
 git -C "$SRC" submodule update --init --depth 1 plugins/obs-browser plugins/obs-websocket
 sha_ok "$SRC/COPYING" "$COPYING_SHA256" || die "unexpected COPYING checksum"
+
+# LinTO Live patches (scripts/obs-linux-patches/*.patch, shipped in patches/ next to COPYING).
+# Idempotent: a patch already applied to a reused checkout is left alone.
+PATCHES_DIR="$ROOT/scripts/obs-linux-patches"
+shopt -s nullglob
+PATCHES=("$PATCHES_DIR"/*.patch)
+shopt -u nullglob
+for patch in "${PATCHES[@]}"; do
+  if git -C "$SRC" apply --reverse --check "$patch" 2>/dev/null; then
+    echo "already applied: $(basename "$patch")"
+  else
+    log "Applying $(basename "$patch")"
+    git -C "$SRC" apply "$patch"
+  fi
+done
 
 # ---------------------------------------------------------------------------------------------
 # 3. OBS's prebuilt CEF for Linux x86_64 (same archive + checksum as obs-studio's own CI).
@@ -188,6 +212,13 @@ DESTDIR="$DEST_PARENT" cmake --install "$BUILD" --config Release --strip
 
 # Development files are not needed at runtime.
 rm -rf "$DEST/include" "$DEST/lib/cmake" "$DEST/lib/pkgconfig"
+
+# OBS's prebuilt CEF binaries carry their debug info (libcef.so alone is ~1.9 GB, ~350 MB without):
+# drop it, as OBS's own Linux packages do. Code and symbols used at runtime are untouched.
+while IFS= read -r -d '' f; do
+  strip --strip-debug "$f"
+done < <(find "$DEST/lib/obs-plugins" -maxdepth 1 -type f \( -name 'libcef.so' -o -name 'libEGL.so' \
+  -o -name 'libGLESv2.so' -o -name 'libvk_swiftshader.so' -o -name 'libvulkan.so.1' \) -print0)
 
 # Replace intra-tree symlinks (e.g. libobs.so.0 -> libobs.so.30) by real files: the tree is
 # copied by electron-builder and packed into squashfs; plain files avoid any symlink handling.
@@ -329,12 +360,18 @@ else
 fi
 
 cp "$SRC/COPYING" "$DEST/COPYING"
+rm -rf "$DEST/patches"
+if ((${#PATCHES[@]} > 0)); then
+  mkdir -p "$DEST/patches"
+  cp "${PATCHES[@]}" "$DEST/patches/"
+fi
 cat > "$DEST/BUILD-INFO.txt" <<EOF
 OBS Studio $OBS_VERSION built from source by scripts/build-obs-linux.sh (LinTO Live)
 obs-studio commit: $OBS_COMMIT
 obs-browser commit: $(git -C "$SRC/plugins/obs-browser" rev-parse HEAD)
 obs-websocket commit: $(git -C "$SRC/plugins/obs-websocket" rev-parse HEAD)
 CEF: $CEF_FILE (sha256 $CEF_SHA256)
+LinTO Live patches: $(cd "$PATCHES_DIR" && ls -1 -- *.patch 2>/dev/null | tr '\n' ' ')
 Build host: ${PRETTY_NAME:-unknown}, $(uname -srm)
 EOF
 

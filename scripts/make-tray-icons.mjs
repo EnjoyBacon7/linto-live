@@ -3,6 +3,9 @@
 //   trayTemplate.png (16 px), trayTemplate@2x.png (32 px)          — a screen with two caption lines
 //   trayLiveTemplate.png, trayLiveTemplate@2x.png                   — the same with a filled dot (on air)
 // Black + alpha only, so macOS treats them as template images (tinted for light/dark menu bars).
+//   trayLinux.png (22 px), trayLinux@2x.png (44 px), trayLinuxLive*  — Linux variants: Linux panels
+// do not tint icons and are dark on most desktops (Ubuntu's top bar always is), so the screen is
+// light grey and the on-air dot red.
 // Usage: node scripts/make-tray-icons.mjs
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -23,10 +26,10 @@ const circle = (x, y, cx, cy, r) => Math.hypot(x - cx, y - cy) - r
 
 const DOT = { cx: 12.5, cy: 3.5, r: 3 }
 
-/** Coverage (0..1) of the design point (x, y). */
+/** What the design point (x, y) hits: 0 nothing, 1 the screen, 2 the on-air dot. */
 function shape(x, y, live) {
   if (live) {
-    if (circle(x, y, DOT.cx, DOT.cy, DOT.r) <= 0) return 1
+    if (circle(x, y, DOT.cx, DOT.cy, DOT.r) <= 0) return 2
     if (circle(x, y, DOT.cx, DOT.cy, DOT.r + 1.25) <= 0) return 0 // gap between the dot and the screen
   }
   const outer = roundRect(x, y, 1, 2.5, 15, 13.5, 2.25)
@@ -37,18 +40,25 @@ function shape(x, y, live) {
   return 0
 }
 
-/** RGBA pixels, black with anti-aliased alpha (8×8 supersampling). */
-function render(size, live) {
+const BLACK = [0, 0, 0]
+/** RGBA pixels with anti-aliased alpha (8×8 supersampling); `colors` = [screen, dot] RGB. */
+function render(size, live, colors = [BLACK, BLACK]) {
   const S = 8
   const scale = 16 / size
   const px = Buffer.alloc(size * size * 4)
   for (let j = 0; j < size; j++) {
     for (let i = 0; i < size; i++) {
-      let hit = 0
+      const hits = [0, 0]
       for (let sj = 0; sj < S; sj++) {
-        for (let si = 0; si < S; si++) hit += shape((i + (si + 0.5) / S) * scale, (j + (sj + 0.5) / S) * scale, live)
+        for (let si = 0; si < S; si++) {
+          const part = shape((i + (si + 0.5) / S) * scale, (j + (sj + 0.5) / S) * scale, live)
+          if (part) hits[part - 1] += 1
+        }
       }
-      px[(j * size + i) * 4 + 3] = Math.round((hit / (S * S)) * 255)
+      const hit = hits[0] + hits[1]
+      const o = (j * size + i) * 4
+      if (hit) for (let c = 0; c < 3; c++) px[o + c] = Math.round((hits[0] * colors[0][c] + hits[1] * colors[1][c]) / hit)
+      px[o + 3] = Math.round((hit / (S * S)) * 255)
     }
   }
   return px
@@ -93,5 +103,11 @@ mkdirSync(OUT, { recursive: true })
 for (const [name, live] of [['trayTemplate', false], ['trayLiveTemplate', true]]) {
   writeFileSync(join(OUT, `${name}.png`), png(16, render(16, live)))
   writeFileSync(join(OUT, `${name}@2x.png`), png(32, render(32, live)))
+}
+// Linux: StatusNotifierItem / AppIndicator icons are 22 px.
+const LINUX = [[0xf2, 0xf2, 0xf2], [0xe5, 0x48, 0x4d]]
+for (const [name, live] of [['trayLinux', false], ['trayLinuxLive', true]]) {
+  writeFileSync(join(OUT, `${name}.png`), png(22, render(22, live, LINUX)))
+  writeFileSync(join(OUT, `${name}@2x.png`), png(44, render(44, live, LINUX)))
 }
 console.log(`Tray icons written to ${OUT}`)

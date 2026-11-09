@@ -1,8 +1,8 @@
 # OBS Studio bundled with LinTO Live
 
-LinTO Live ships an unmodified copy of **OBS Studio 32.1.0** and drives it as a
-separate process over obs-websocket (mere aggregation; LinTO Live is not a derivative
-of OBS Studio).
+LinTO Live ships **OBS Studio 32.1.0** (unmodified on macOS, with one small patch on
+Linux, see below) and drives it as a separate process over obs-websocket (mere aggregation;
+LinTO Live is not a derivative of OBS Studio).
 
 ## macOS (Apple Silicon)
 
@@ -15,10 +15,15 @@ of OBS Studio).
 
 ## Linux (x86_64)
 
-- Binary: built from the unmodified source below (tag `32.1.0`, commit
+- Binary: built from the source below (tag `32.1.0`, commit
   `5533a277e4400203b50114c993f89878d50a27b9`, with its `obs-browser` and `obs-websocket`
   submodules) on Ubuntu 24.04 by `scripts/build-obs-linux.sh` in the LinTO Live repository.
   The exact submodule commits and build host are recorded in `BUILD-INFO.txt` next to this file.
+- Modification: one patch, shipped in `patches/` next to this file
+  (`0001-minimize-to-tray-without-tray.patch`, `frontend/widgets/OBSBasic.cpp`): with
+  `--minimize-to-tray`, the main window stays hidden even when the desktop has no system tray
+  (upstream only hides it when a tray is available). Apply it to the source below with
+  `patch -p1 < patches/0001-minimize-to-tray-without-tray.patch`.
 - Configuration: Release, `CMAKE_INSTALL_PREFIX=/obs`, `ENABLE_RELOCATABLE=ON`,
   `ENABLE_BROWSER=ON`, `ENABLE_WEBSOCKET=ON`, `ENABLE_NEW_MPEGTS_OUTPUT=ON`, `ENABLE_AJA=OFF`,
   `ENABLE_WEBRTC=OFF`, `ENABLE_SCRIPTING=OFF`, `ENABLE_VLC=OFF`, `ENABLE_WHATSNEW=OFF`.
@@ -31,6 +36,8 @@ of OBS Studio).
   (`apt-get source <package>`, https://launchpad.net/ubuntu/noble).
 
 ## Corresponding source code
+
+The upstream source below, plus (Linux) the patch in `patches/`.
 
 - Repository: https://github.com/obsproject/obs-studio
 - Tag: `32.1.0`

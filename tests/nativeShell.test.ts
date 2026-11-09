@@ -121,8 +121,10 @@ describe('appMenuTemplate', () => {
 
 describe('tray', () => {
   it('icon: live variant only while live', () => {
-    expect(trayIconName('live')).toBe('trayLiveTemplate')
-    for (const p of ['idle', 'starting', 'stopping', 'error'] as const) expect(trayIconName(p)).toBe('trayTemplate')
+    expect(trayIconName('live', 'darwin')).toBe('trayLiveTemplate')
+    for (const p of ['idle', 'starting', 'stopping', 'error'] as const) expect(trayIconName(p, 'darwin')).toBe('trayTemplate')
+    expect(trayIconName('live', 'linux')).toBe('trayLinuxLive')
+    for (const p of ['idle', 'starting', 'stopping', 'error'] as const) expect(trayIconName(p, 'linux')).toBe('trayLinux')
   })
 
   it('tooltip names the session on air', () => {

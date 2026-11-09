@@ -48,9 +48,15 @@ linux:
       arch: x64
   category: AudioVideo
   synopsis: LinTO live captions over a hidden OBS
+  # linto-live.desktop (package.json desktopName) with StartupWMClass=linto-live, the window class
+  # Electron sets: docks/taskbars attach the running window to the launcher entry and its icon.
+  syncDesktopName: true
   # OBS 32.1 built from source by scripts/build-obs-linux.sh: bin/obs, lib/, share/obs/, COPYING.
   extraResources:
     - from: vendor/obs/linux/obs
       to: obs
+    # Window icon (BrowserWindow `icon`): X11 taskbars and Alt-Tab read it from the window.
+    - from: build/icon.png
+      to: icon.png
 appImage:
   artifactName: LinTO-Live-${version}-x86_64.${ext}

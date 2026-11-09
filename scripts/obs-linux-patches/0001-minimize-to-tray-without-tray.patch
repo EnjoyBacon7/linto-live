@@ -1,0 +1,13 @@
+--- a/frontend/widgets/OBSBasic.cpp
++++ b/frontend/widgets/OBSBasic.cpp
+@@ -1152,6 +1152,10 @@
+ 	bool sysTrayWhenStarted = config_get_bool(App()->GetUserConfig(), "BasicWindow", "SysTrayWhenStarted");
+ 	bool hideWindowOnStart = QSystemTrayIcon::isSystemTrayAvailable() && sysTrayEnabled &&
+ 				 (opt_minimize_tray || sysTrayWhenStarted);
++	/* LinTO Live: OBS is driven over obs-websocket and must never show its main window, even on
++	 * desktops without a system tray (GNOME without the AppIndicator extension, Xvfb). */
++	if (opt_minimize_tray)
++		hideWindowOnStart = true;
+ 
+ #ifdef _WIN32
+ 	SetWin32DropStyle(this);

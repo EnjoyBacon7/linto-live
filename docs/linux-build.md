@@ -4,7 +4,9 @@ LinTO Live for Linux is one AppImage (x86_64) that contains the Electron app and
 Studio 32.1.0, built from source with the browser source and obs-websocket. Nothing is installed
 system-wide; OBS runs hidden with its configuration under the app's `userData`.
 
-- OBS build script: `scripts/build-obs-linux.sh` (Ubuntu 24.04 x86_64 only)
+- OBS build script: `scripts/build-obs-linux.sh` (Ubuntu 24.04 x86_64 only), plus the small OBS
+  patch in `scripts/obs-linux-patches/`
+- From macOS (or any Docker host): `npm run dist:linux:docker` (`scripts/build-linux-docker.sh`)
 - Electron packaging: `electron-builder.yml` (`linux` section), `npm run dist:linux`
 - CI: `.github/workflows/linux.yml` (ubuntu-24.04, OBS build cached on tag + script hash)
 - Provenance / license: `resources/obs/SOURCE.md`, `resources/obs/COPYING` in the package
@@ -27,14 +29,45 @@ npm run dist:linux                       # -> dist/LinTO-Live-<version>-x86_64.A
 `vendor/` and `dist/` are git-ignored. Delete `vendor/cache/obs-linux-build` after a successful
 build to reclaim ~5 GB (sources, CEF archive, build tree); rerunning the script reuses them.
 
+## Building from macOS (Docker)
+
+```bash
+npm run dist:linux:docker                # -> dist/LinTO-Live-<version>-x86_64.AppImage
+```
+
+`scripts/build-linux-docker.sh` does the same as above inside an Ubuntu 24.04 x86_64 container:
+an image with the OBS build dependencies and Node (`linto-live-linux-build`, ~3 GB in Docker's
+disk), then `build-obs-linux.sh` into `vendor/obs/linux` (bind mount), then `npm ci`, typecheck,
+unit tests and `dist:linux` on a copy of the repo in `vendor/cache/linux-work` (the Mac's
+`node_modules` is never touched). On Apple silicon everything runs under Rosetta: about an hour
+for the first OBS build, ~10 min for later runs (`SKIP_OBS=1` skips the OBS step).
+
+What can and cannot be checked under emulation (Docker Desktop's Rosetta, Apple silicon):
+
+- Works: the OBS build, `npm test`, the integration tests against the staged OBS
+  (`LINTO_LIVE_IT=1 LINTO_LIVE_OBS=$PWD/vendor/obs/linux/obs/bin/obs xvfb-run npm run test:it`, with
+  PulseAudio running and a non-monitor source such as `module-virtual-source`: OBS's
+  `pulse_input_capture` hides monitors), the app UI and the projector window under Xvfb.
+- Does not work: starting the `.AppImage` file itself (its ELF header carries the AppImage magic,
+  which the emulator's binfmt entry rejects: "Exec format error"; extract it with `unsquashfs -o
+  <offset>` instead), and the browser source: CEF's GPU process cannot start under Rosetta and
+  CEF then aborts OBS ("GPU process isn't usable. Goodbye.", even with `--disable-gpu`). The
+  caption overlay must be checked on real x86_64 hardware (checklist section 3).
+
 ## What `scripts/build-obs-linux.sh` does
 
 1. Installs OBS's own Ubuntu CI build dependencies (the list in
    `.github/scripts/utils.zsh/setup_ubuntu` + `.github/scripts/.Aptfile` at tag 32.1.0) plus
-   `patchelf`.
+   `patchelf` and `libnss3`/`libnspr4` (needed to link against CEF; GitHub's runners happen to
+   have them, a clean Ubuntu does not).
 2. Clones obs-studio at tag `32.1.0`, checks the commit is
    `5533a277e4400203b50114c993f89878d50a27b9`, fetches the `obs-browser` and `obs-websocket`
-   submodules, checks the `COPYING` checksum.
+   submodules, checks the `COPYING` checksum, applies `scripts/obs-linux-patches/*.patch`
+   (idempotent) and later ships them in `patches/` next to `COPYING`. The only patch:
+   `--minimize-to-tray` keeps OBS's main window hidden even without a system tray. Upstream only
+   hides it when a tray is available, so on GNOME without the AppIndicator extension (Fedora,
+   Debian...) or under Xvfb, OBS's main window would appear. The app also seeds
+   `SysTrayEnabled=false` on Linux, so no OBS icon shows up in the panel either.
 3. Downloads OBS's prebuilt CEF for Linux (`cef_binary_6533_linux_x86_64_v6.tar.xz`) and verifies
    the SHA-256 pinned in obs-studio's `CMakePresets.json` at that tag.
 4. Configures with the upstream `ubuntu` preset, overridden to: Release,
@@ -46,6 +79,8 @@ build to reclaim ~5 GB (sources, CEF archive, build tree); rerunning the script 
      `bin/../share/obs`), so the tree runs from anywhere, including the read-only AppImage mount.
    - The `/obs` prefix never exists on user machines, so OBS's compiled-in fallback paths cannot
      load a system-wide OBS's plugins.
+   - The debug info of OBS's prebuilt CEF binaries is stripped (`libcef.so`: 1.9 GB -> ~350 MB;
+     the staged tree is ~740 MB, the AppImage ~390 MB).
 5. Copies the Qt platform (`xcb` only, the app forces `QT_QPA_PLATFORM=xcb`), xcb-GL, image-format,
    icon-engine and input-context plugins into `lib/qt6/plugins` and writes `bin/qt.conf`.
 6. Bundles the dependency closure of every OBS binary/plugin into `lib/`, except libraries the host
@@ -83,9 +118,15 @@ a webcam or capture card and a microphone attached if available. Use the AppImag
 - [ ] `chmod +x LinTO-Live-*.AppImage && ./LinTO-Live-*.AppImage` opens the LinTO Live window
       (if Electron aborts with a sandbox / user-namespace error from Ubuntu's AppArmor policy,
       retry with `--no-sandbox` and report it: see "Known risks").
-- [ ] Log in, pick a session, start: no OBS window, no OBS tray dialog, no first-run wizard ever
-      appears; `ps aux | grep resources/obs/bin/obs` shows OBS running from
+- [ ] Log in, pick a session, start: no OBS window, no OBS tray icon or dialog, no first-run
+      wizard ever appears; `ps aux | grep resources/obs/bin/obs` shows OBS running from
       `/tmp/.mount_*/resources/obs/bin/obs`.
+- [ ] The LinTO Live tray icon (light screen with caption lines; a red dot while live) is visible
+      in the top bar, its menu works; the dock / taskbar shows the LinTO Live icon for the window.
+- [ ] Without a keyring (e.g. a session without gnome-keyring): logging in still works and
+      survives a restart (the app logs « No usable keyring (basic_text) » and stores the token
+      obfuscated only).
+- [ ] Closing the main window during a show minimises it (it stays in the taskbar).
 - [ ] Démarrer opens the output window (an OBS projector window, not fullscreen) for you to drag
       to the projector / capture screen. Close it, then Fenêtre › « Afficher la fenêtre de sortie »
       (Ctrl+1) reopens one. Arrêter leaves it open, black.
@@ -152,6 +193,10 @@ LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$PWD/../squashfs-root/resources/obs/bin/obs" npm
   standard Ubuntu 24.04 desktop; a minimal install may lack e.g. `libnss3` (CEF) or
   `libxcb-cursor0`. `ldd squashfs-root/resources/obs/bin/obs | grep 'not found'` and the same on
   `.../lib/obs-plugins/libcef.so` list what is missing.
+- **Browser source / CEF without a working GPU process** (VMs without 3D acceleration, broken GPU
+  drivers, x86 emulation): Chromium aborts the whole OBS process with « GPU process isn't usable.
+  Goodbye. » shortly after the overlay loads; the app then sees OBS restart in a loop. Seen under
+  Rosetta; look for that line in OBS's stderr / crash of OBS right after the scene is built.
 - **Wayland session**: the app forces `QT_QPA_PLATFORM=xcb`, so OBS runs through XWayland;
   projector placement on the right screen is only guaranteed on X11.
 - **Other distributions** are best effort: the tree is built on Ubuntu 24.04 (glibc 2.39) and

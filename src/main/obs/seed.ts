@@ -3,6 +3,12 @@ import { dirname, join } from 'node:path'
 
 export interface SeedOptions {
   canvas: { width: 1920; height: 1080; fps: 30 }
+  /**
+   * OBS's own tray icon (default on). macOS: needed, upstream OBS only starts hidden with it.
+   * Linux: off, it would show in the panel (Ubuntu) and offer to open or quit OBS; our patched OBS
+   * starts hidden without it (scripts/obs-linux-patches).
+   */
+  obsTrayIcon?: boolean
 }
 
 const GENERAL: [string, string][] = [
@@ -19,6 +25,7 @@ const generalSection = (): string => `[General]\n${GENERAL.map(([k, v]) => `${k}
 
 export function seedFiles(o: SeedOptions): Record<string, string> {
   const { width, height, fps } = o.canvas
+  const tray = o.obsTrayIcon ?? true
   return {
     'global.ini': generalSection(),
     'user.ini': `[General]
@@ -26,8 +33,8 @@ FirstRun=true
 ConfirmOnExit=false
 
 [BasicWindow]
-SysTrayEnabled=true
-SysTrayWhenStarted=true
+SysTrayEnabled=${tray}
+SysTrayWhenStarted=${tray}
 SaveProjectors=false
 `,
     'basic/profiles/LinTO Live/basic.ini': `[General]

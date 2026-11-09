@@ -127,9 +127,16 @@ export function trayMenuTemplate(s: ShellState, run: Run): Item[] {
   ]
 }
 
-/** File name (without extension) under resources/tray; "Template" lets macOS tint it for the menu bar. */
-export function trayIconName(phase: LiveState['phase']): 'trayTemplate' | 'trayLiveTemplate' {
-  return phase === 'live' ? 'trayLiveTemplate' : 'trayTemplate'
+export type TrayIconName = 'trayTemplate' | 'trayLiveTemplate' | 'trayLinux' | 'trayLinuxLive'
+
+/**
+ * File name (without extension) under resources/tray. macOS: "Template" lets it tint the icon for the
+ * menu bar. Linux panels never tint and are mostly dark: light icon, red on-air dot.
+ */
+export function trayIconName(phase: LiveState['phase'], platform: string): TrayIconName {
+  const live = phase === 'live'
+  if (platform === 'darwin') return live ? 'trayLiveTemplate' : 'trayTemplate'
+  return live ? 'trayLinuxLive' : 'trayLinux'
 }
 
 export function trayTooltip(s: ShellState): string {

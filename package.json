@@ -5,6 +5,7 @@
   "private": true,
   "description": "LinTO Live - drives a hidden OBS and shows LinTO live captions",
   "author": "LINAGORA",
+  "desktopName": "linto-live.desktop",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -15,7 +16,8 @@
     "fetch:obs:mac": "bash scripts/fetch-obs-macos.sh",
     "dist:mac": "test -d vendor/obs/macos/OBS.app || (echo 'Lance npm run fetch:obs:mac' && exit 1) && npm run build && electron-builder --mac --arm64",
     "build:obs:linux": "bash scripts/build-obs-linux.sh",
-    "dist:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never"
+    "dist:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never",
+    "dist:linux:docker": "bash scripts/build-linux-docker.sh"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.2",

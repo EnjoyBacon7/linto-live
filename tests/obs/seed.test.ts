@@ -31,6 +31,10 @@ describe('seedFiles', () => {
     expect(u).toContain('[BasicWindow]')
     for (const l of ['SysTrayEnabled=true', 'SysTrayWhenStarted=true', 'SaveProjectors=false']) expect(u).toContain(l)
   })
+  it('user.ini without the OBS tray icon (Linux)', () => {
+    const u = seedFiles({ ...o, obsTrayIcon: false })['user.ini']
+    for (const l of ['SysTrayEnabled=false', 'SysTrayWhenStarted=false', 'SaveProjectors=false']) expect(u).toContain(l)
+  })
   it('basic.ini', () => {
     const b = f['basic/profiles/LinTO Live/basic.ini']
     for (const l of ['BaseCX=1920', 'BaseCY=1080', 'OutputCX=1920', 'OutputCY=1080', 'FPSCommon=30', 'Mode=Simple', 'VBitrate=800', 'ABitrate=128'])

@@ -29,6 +29,14 @@ const videoKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'macos-avcap
 const audioKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'coreaudio_input_capture' : 'pulse_input_capture')
 const videoProp = (p: NodeJS.Platform): string => (p === 'darwin' ? 'device' : 'device_id')
 
+/** obs-websocket RequestStatus.InvalidResourceState: what audio requests answer for an input without audio. */
+const INVALID_RESOURCE_STATE = 604
+
+function ignoreNoAudio(e: unknown): void {
+  if ((e as { code?: unknown })?.code === INVALID_RESOURCE_STATE) return
+  throw e
+}
+
 export class ObsController {
   private platform: NodeJS.Platform = process.platform
   private videoItemId: number | null = null
@@ -72,11 +80,14 @@ export class ObsController {
     }
     for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_AUDIO]) {
       const isAudio = name === SRC_AUDIO
-      await this.client.call('SetInputAudioTracks', {
+      // Silencing a source that has no audio at all (Linux v4l2 camera) is already done.
+      const silence = (req: string, data: Record<string, unknown>): Promise<unknown> =>
+        isAudio ? this.client.call(req, data) : this.client.call(req, data).catch(ignoreNoAudio)
+      await silence('SetInputAudioTracks', {
         inputName: name,
         inputAudioTracks: isAudio ? { ...TRACKS_NONE, '1': true } : { ...TRACKS_NONE }
       })
-      if (!isAudio) await this.client.call('SetInputMute', { inputName: name, inputMuted: true })
+      if (!isAudio) await silence('SetInputMute', { inputName: name, inputMuted: true })
     }
   }
 

@@ -32,7 +32,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: vendor/obs/linux
-          key: obs-linux-${{ env.OBS_VERSION }}-ubuntu-24.04-x64-${{ hashFiles('scripts/build-obs-linux.sh') }}
+          key: obs-linux-${{ env.OBS_VERSION }}-ubuntu-24.04-x64-${{ hashFiles('scripts/build-obs-linux.sh', 'scripts/obs-linux-patches/**') }}
 
       - name: Free disk space for the OBS build
         if: steps.obs-cache.outputs.cache-hit != 'true'

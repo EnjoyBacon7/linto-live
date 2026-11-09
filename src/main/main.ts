@@ -48,6 +48,10 @@ function createWindow(settings: SettingsStore): BrowserWindow {
     minHeight: WINDOW_SIZE.minHeight,
     title: 'LinTO Live',
     ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
+    // Linux: the taskbar / Alt-Tab icon comes from the window (macOS uses the bundle's icon).
+    ...(process.platform === 'linux'
+      ? { icon: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), 'build', 'icon.png') }
+      : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -91,6 +95,13 @@ function send(channel: string, payload?: unknown): void {
 function main(): void {
   const platform = process.platform
   const paths = appPaths(app.getPath('userData'), platform)
+  // Linux without a usable keyring (no gnome-keyring / KWallet, or none unlocked): safeStorage falls
+  // back to 'basic_text' and refuses to encrypt, so logging in would fail. Use Chromium's fixed-key
+  // obfuscation instead, like Chrome does; settings.json stays 0600 in the user's home.
+  if (platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
+    console.warn(`No usable keyring (${safeStorage.getSelectedStorageBackend()}): the LinTO token is only obfuscated`)
+    safeStorage.setUsePlainTextEncryption(true)
+  }
   const settings = new SettingsStore(paths, {
     encrypt: (s) => safeStorage.encryptString(s),
     decrypt: (b) => safeStorage.decryptString(b)
@@ -155,7 +166,7 @@ function main(): void {
   }
   const trayDir = app.isPackaged ? join(process.resourcesPath, 'tray') : join(app.getAppPath(), 'resources', 'tray')
   const trayImage = (phase: LiveState['phase']): Electron.NativeImage => {
-    const file = join(trayDir, `${trayIconName(phase)}.png`)
+    const file = join(trayDir, `${trayIconName(phase, platform)}.png`)
     const img = nativeImage.createFromPath(file) // @2x picked up automatically
     if (img.isEmpty()) console.error('Tray icon missing:', file)
     if (platform === 'darwin') img.setTemplateImage(true)
@@ -311,11 +322,12 @@ function main(): void {
     ask: async () => (await show(QUIT_DIALOG)).response === 1,
     quit: () => app.quit(),
     shutdown: () => void shutdownCapped().finally(() => app.exit(0)),
-    // Closing the window during a show keeps it running; without a tray icon (some Linux desktops)
-    // the window is minimised instead, so it stays reachable.
+    // Closing the window during a show keeps it running. Linux: minimised, not hidden — a Tray object
+    // exists even where the desktop shows no tray (GNOME without the AppIndicator extension), and a
+    // hidden window would then be unreachable.
     hide: () => {
       if (!win || win.isDestroyed()) return
-      if (tray || platform === 'darwin') win.hide()
+      if (platform === 'darwin') win.hide()
       else win.minimize()
     }
   })
