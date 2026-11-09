@@ -5,16 +5,17 @@ import userEvent from '@testing-library/user-event'
 import { App } from '../../src/renderer/App'
 import { formatElapsed } from '../../src/renderer/main/useLive'
 import type { LintoLiveApi, LiveState, SetupData, StartResult } from '../../src/shared/ipc'
-import type { SessionSummary } from '../../src/shared/types'
+import type { SessionSummary, Watermark } from '../../src/shared/types'
 import { makeApi, withEvents } from './helpers'
 
 const fn = (x: unknown) => x as ReturnType<typeof vi.fn>
 
+const WM: Watermark = { display: false, pinned: false, content: 'Transcription by LinTO.ai $linto', frequency: 600, duration: 10 }
 const SESSIONS: SessionSummary[] = [
-  { id: 's1', name: 'Conférence', status: 'ready', canStream: true },
-  { id: 's2', name: 'Atelier', status: 'paused', canStream: true },
-  { id: 's3', name: 'Externe', status: 'on_schedule', canStream: false },
-  { id: 's4', name: 'Plénière', status: 'active', canStream: true }
+  { id: 's1', name: 'Conférence', status: 'ready', canStream: true, watermark: WM },
+  { id: 's2', name: 'Atelier', status: 'paused', canStream: true, watermark: WM },
+  { id: 's3', name: 'Externe', status: 'on_schedule', canStream: false, watermark: WM },
+  { id: 's4', name: 'Plénière', status: 'active', canStream: true, watermark: WM }
 ]
 
 const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<SetupData> = {}): SetupData => ({
@@ -23,6 +24,7 @@ const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<Set
   profiles: [{ id: 1, name: 'Français' }, { id: 2, name: 'Anglais' }],
   videoDevices: [{ id: 'v1', name: 'Capture HDMI' }, { id: 'v2', name: 'FaceTime HD' }],
   audioDevices: [{ id: 'a1', name: 'Micro USB' }],
+  watermarkEnabled: true,
   ...extra
 })
 
@@ -674,5 +676,86 @@ describe('Devices at launch', () => {
     await waitFor(() => expect(cam().selectedOptions[0]?.textContent).toBe('Capture HDMI'))
     act(() => emit('live-state', { ...IDLE, output: 'shown' }))
     expect(load).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Inspector: subtitles (LinTO Studio settings)', () => {
+  const box = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement
+  const btn = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
+
+  it('subtitle visibility and font size are saved locally', async () => {
+    setup()
+    await renderMain()
+    expect(box('Afficher le sous-titre').checked).toBe(true)
+    const size = screen.getByRole('spinbutton', { name: 'Taille de la police (px)' }) as HTMLInputElement
+    expect(size.value).toBe('48')
+    await userEvent.clear(size)
+    await userEvent.type(size, '6')
+    expect(fn(api.setup.save)).not.toHaveBeenCalledWith({ subtitleFontSize: 6 }) // out of range: not saved
+    await userEvent.type(size, '0')
+    expect(fn(api.setup.save)).toHaveBeenCalledWith({ subtitleFontSize: 60 })
+    await userEvent.click(box('Afficher le sous-titre'))
+    expect(fn(api.setup.save)).toHaveBeenCalledWith({ subtitlesVisible: false })
+    expect(screen.queryByRole('spinbutton', { name: 'Taille de la police (px)' })).toBeNull()
+  })
+
+  it('watermark controls need a session that exists on LinTO, and save on it', async () => {
+    setup()
+    await renderMain()
+    expect(box('Afficher le filigrane').disabled).toBe(true)
+    await userEvent.click(row('Conférence'))
+    expect(box('Afficher le filigrane').disabled).toBe(false)
+    expect(box('Épingler le filigrane').disabled).toBe(true) // only once displayed
+    await userEvent.click(box('Afficher le filigrane'))
+    expect(fn(api.sessions.setWatermark)).toHaveBeenLastCalledWith('s1', { ...WM, display: true })
+    expect(box('Afficher le filigrane').checked).toBe(true)
+    await userEvent.click(box('Épingler le filigrane'))
+    expect(fn(api.sessions.setWatermark)).toHaveBeenLastCalledWith('s1', { ...WM, display: true, pinned: true })
+  })
+
+  it('« Paramètres du filigrane… » edits text, frequency and duration', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    await userEvent.click(btn('Paramètres du filigrane…'))
+    const dialog = screen.getByRole('dialog', { name: 'Paramètres du filigrane' })
+    const text = within(dialog).getByLabelText('Texte') as HTMLInputElement
+    expect(text.value).toBe(WM.content)
+    await userEvent.clear(text)
+    await userEvent.type(text, 'Sous-titres $linto')
+    const freq = within(dialog).getByLabelText('Fréquence (secondes)')
+    await userEvent.clear(freq)
+    expect((within(dialog).getByRole('button', { name: 'Appliquer' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.type(freq, '120')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Appliquer' }))
+    expect(fn(api.sessions.setWatermark)).toHaveBeenLastCalledWith('s1', { ...WM, content: 'Sous-titres $linto', frequency: 120 })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a refused save is shown and the list re-read', async () => {
+    setup({ sessions: { list: vi.fn().mockResolvedValue(SESSIONS), setWatermark: vi.fn().mockRejectedValue(new Error(
+      "Error invoking remote method 'sessions:set-watermark': Error: Tu n'as pas le droit de modifier cette session.")) } })
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const calls = fn(api.sessions.list).mock.calls.length
+    await userEvent.click(box('Afficher le filigrane'))
+    expect(await screen.findByText("Tu n'as pas le droit de modifier cette session.")).toBeTruthy()
+    await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBeGreaterThan(calls))
+  })
+
+  it('no watermark controls when the instance does not offer them', async () => {
+    setup({}, setupData({}, { watermarkEnabled: false }))
+    await renderMain()
+    expect(screen.queryByRole('checkbox', { name: 'Afficher le filigrane' })).toBeNull()
+  })
+
+  it('« Effacer les sous-titres » only on air', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(IDLE) } })
+    await renderMain()
+    expect(btn('Effacer les sous-titres').disabled).toBe(true)
+    act(() => emit('live-state', live()))
+    await waitFor(() => expect(btn('Effacer les sous-titres').disabled).toBe(false))
+    await userEvent.click(btn('Effacer les sous-titres'))
+    expect(fn(api.live.clearSubtitles)).toHaveBeenCalled()
   })
 })

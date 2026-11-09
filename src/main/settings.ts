@@ -25,9 +25,23 @@ export function checkInstance(raw: string): string {
 
 export class SettingsStore {
   private data: Stored
+  /** Token held in memory only (persistToken false). */
+  private memToken: string | null = null
 
-  constructor(private p: AppPaths, private crypto: TokenCrypto) {
+  /**
+   * persistToken false (Linux without a real keyring, where safeStorage only obfuscates with a fixed
+   * key): the token is never written to disk; the user logs in again at each launch.
+   */
+  constructor(
+    private p: AppPaths,
+    private crypto: TokenCrypto,
+    private o: { persistToken?: boolean } = {}
+  ) {
     this.data = this.load()
+    if (this.o.persistToken === false && this.data.tokenEnc) {
+      delete this.data.tokenEnc
+      this.save()
+    }
   }
 
   private load(): Stored {
@@ -69,6 +83,7 @@ export class SettingsStore {
   }
 
   getToken(): string | null {
+    if (this.o.persistToken === false) return this.memToken
     if (!this.data.tokenEnc) return null
     try {
       return this.crypto.decrypt(Buffer.from(this.data.tokenEnc, 'base64'))
@@ -78,6 +93,10 @@ export class SettingsStore {
   }
 
   setToken(t: string | null): void {
+    if (this.o.persistToken === false) {
+      this.memToken = t
+      return
+    }
     if (t === null) delete this.data.tokenEnc
     else this.data.tokenEnc = this.crypto.encrypt(t).toString('base64')
     this.save()

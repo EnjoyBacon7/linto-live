@@ -36,6 +36,11 @@ describe('OverlayServer', () => {
     const base = new URL(url).origin
     expect((await fetch(base + '/overlay.js')).status).toBe(200)
     expect((await fetch(base + '/overlay.css')).status).toBe(200)
+    const logo = await fetch(base + '/img/linto.svg')
+    expect(logo.status).toBe(200)
+    expect(logo.headers.get('content-type')).toBe('image/svg+xml')
+    expect((await fetch(base + '/img/linagora.png')).headers.get('content-type')).toBe('image/png')
+    expect((await fetch(base + '/watermark.js')).headers.get('content-type')).toContain('text/javascript')
     expect((await fetch(base + '/server.ts')).status).toBe(404)
     expect((await fetch(base + '/..%2f..%2fserver.ts')).status).toBe(404)
   })
@@ -83,6 +88,19 @@ describe('OverlayServer', () => {
     srv.push({ type: 'final', text: 'x' })
     expect(JSON.parse(await p)).toEqual({ type: 'final', text: 'x' })
     ws.close()
+  })
+
+  it('replays the last style first, and a caption reset does not clear it', async () => {
+    srv = new OverlayServer({ pageDir })
+    const { url } = await srv.start()
+    const wm = { display: true, pinned: true, content: 'x', frequency: 5, duration: 2 }
+    srv.push({ type: 'style', visible: true, fontSize: 40, watermark: wm })
+    srv.push({ type: 'style', visible: false, fontSize: 60, watermark: wm })
+    srv.push({ type: 'final', text: 'a' })
+    srv.push({ type: 'reset' })
+    expect(await collect(new WebSocket(wsUrl(url)), 2)).toEqual([
+      { type: 'style', visible: false, fontSize: 60, watermark: wm }, { type: 'reset' }
+    ])
   })
 
   it('serves /layout.js as javascript', async () => {

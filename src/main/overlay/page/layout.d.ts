@@ -10,6 +10,8 @@ export class SubtitleModel {
   constructor(fits: (line: string) => boolean)
   partial(text: string): void
   final(text: string): void
+  /** New measuring function (font size changed): lays the shown text out again. */
+  setFits(fits: (line: string) => boolean): void
   reset(): void
   /** [upper, lower]; '' when absent. */
   lines(): [string, string]

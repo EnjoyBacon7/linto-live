@@ -4,14 +4,30 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { WebSocketServer, type WebSocket } from 'ws'
+import type { Watermark } from '../../shared/types'
 
-export type OverlayMessage = { type: 'reset' } | { type: 'partial' | 'final'; text: string }
+/** How the subtitle band looks: the app's local settings plus the on-air session's watermark. */
+export interface OverlayStyle {
+  /** Subtitle band shown at all. */
+  visible: boolean
+  /** Font size in px on the 1920×1080 canvas. */
+  fontSize: number
+  watermark: Watermark
+}
+
+export type OverlayMessage =
+  | { type: 'reset' }
+  | { type: 'partial' | 'final'; text: string }
+  | ({ type: 'style' } & OverlayStyle)
 
 const ASSETS: Record<string, { file: string; type: string }> = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/overlay.css': { file: 'overlay.css', type: 'text/css; charset=utf-8' },
   '/overlay.js': { file: 'overlay.js', type: 'text/javascript; charset=utf-8' },
-  '/layout.js': { file: 'layout.js', type: 'text/javascript; charset=utf-8' }
+  '/layout.js': { file: 'layout.js', type: 'text/javascript; charset=utf-8' },
+  '/watermark.js': { file: 'watermark.js', type: 'text/javascript; charset=utf-8' },
+  '/img/linto.svg': { file: 'img/linto.svg', type: 'image/svg+xml' },
+  '/img/linagora.png': { file: 'img/linagora.png', type: 'image/png' }
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -26,6 +42,8 @@ export class OverlayServer {
   // Replay state (bounded): last final since the last reset, and last partial after that final.
   private lastFinal: string | null = null
   private lastPartial: string | null = null
+  /** Last style message, replayed first to every new client (a caption reset does not clear it). */
+  private lastStyle: string | null = null
   private token = ''
 
   constructor(private opts: { pageDir: string }) {}
@@ -54,6 +72,7 @@ export class OverlayServer {
       if (origin !== undefined && origin !== `http://127.0.0.1:${port}`) return reject()
       if (!safeEqual(url.searchParams.get('k') ?? '', this.token)) return reject()
       wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+        if (this.lastStyle !== null) ws.send(this.lastStyle)
         ws.send(JSON.stringify({ type: 'reset' }))
         if (this.lastFinal !== null) ws.send(this.lastFinal)
         if (this.lastPartial !== null) ws.send(this.lastPartial)
@@ -70,7 +89,8 @@ export class OverlayServer {
 
   push(msg: OverlayMessage): void {
     const data = JSON.stringify(msg)
-    if (msg.type === 'reset') { this.lastFinal = null; this.lastPartial = null }
+    if (msg.type === 'style') this.lastStyle = data
+    else if (msg.type === 'reset') { this.lastFinal = null; this.lastPartial = null }
     else if (msg.type === 'final') { this.lastFinal = data; this.lastPartial = null }
     else this.lastPartial = data
     for (const c of this.wss?.clients ?? []) if (c.readyState === 1) c.send(data)

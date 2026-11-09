@@ -535,3 +535,40 @@
   font-size: 11px;
   color: var(--text-2);
 }
+
+/* ---------- Inspector: subtitles ---------- */
+
+.inspector-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 0;
+  border-top: 0.5px solid var(--separator);
+  border-bottom: 0.5px solid var(--separator);
+}
+
+.inspector-inline .field-input {
+  width: 72px;
+}
+
+.inspector-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.check.is-disabled {
+  color: var(--text-3);
+}

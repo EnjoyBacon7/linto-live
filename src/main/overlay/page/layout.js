@@ -68,6 +68,14 @@ export class SubtitleModel {
     this.current = EMPTY
   }
 
+  /** New measuring function (font size changed): lays the shown text out again from scratch. */
+  setFits(fits) {
+    this.fits = fits
+    const again = (l) => layoutText(EMPTY, l.words.join(' '), fits)
+    this.previous = again(this.previous)
+    this.current = again(this.current)
+  }
+
   reset() {
     this.current = EMPTY
     this.previous = EMPTY

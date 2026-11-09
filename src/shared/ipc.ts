@@ -1,6 +1,6 @@
 import type {
   AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionStatus, SessionSummary, Settings,
-  TranscriberProfile
+  TranscriberProfile, Watermark
 } from './types'
 
 export interface SetupData {
@@ -9,6 +9,8 @@ export interface SetupData {
   profiles: TranscriberProfile[]
   videoDevices: DeviceItem[]
   audioDevices: DeviceItem[]
+  /** The instance offers the watermark settings (VUE_APP_ENABLE_WATERMARK, as in LinTO Studio). */
+  watermarkEnabled: boolean
 }
 
 export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { ok: false; message: string }
@@ -55,13 +57,19 @@ export interface LintoLiveApi {
     status(): Promise<{ loggedIn: boolean }>
   }
   setup: { load(): Promise<SetupData>; save(s: Partial<Settings>): Promise<void> }
-  sessions: { list(): Promise<SessionSummary[]> }
+  sessions: {
+    list(): Promise<SessionSummary[]>
+    /** Saves the watermark on the LinTO session (as LinTO Studio does); the overlay follows if it is on air. */
+    setWatermark(sessionId: string, w: Watermark): Promise<void>
+  }
   live: {
     start(sessionName: string): Promise<StartResult>
     stop(): Promise<void>
     terminate(): Promise<void>
     /** Opens (another) OBS output window, even if one is already open. */
     showOutputWindow(): Promise<void>
+    /** Empties the subtitle band (« Effacer les sous-titres »). */
+    clearSubtitles(): Promise<void>
     /** Current LiveState (the 'live-state' event only carries changes). */
     getState(): Promise<LiveState>
   }
@@ -94,11 +102,13 @@ export const IPC = {
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
   sessionsList: 'sessions:list',
+  sessionsSetWatermark: 'sessions:set-watermark',
   liveStart: 'live:start',
   liveStop: 'live:stop',
   liveTerminate: 'live:terminate',
   liveShowOutput: 'live:show-output',
   liveGetState: 'live:get-state',
+  liveClearSubtitles: 'live:clear-subtitles',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
@@ -143,12 +153,16 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       status: () => call(IPC.authStatus)
     },
     setup: { load: () => call(IPC.setupLoad), save: (s) => call(IPC.setupSave, s) },
-    sessions: { list: () => call(IPC.sessionsList) },
+    sessions: {
+      list: () => call(IPC.sessionsList),
+      setWatermark: (id, w) => call(IPC.sessionsSetWatermark, id, w)
+    },
     live: {
       start: (name) => call(IPC.liveStart, name),
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput),
+      clearSubtitles: () => call(IPC.liveClearSubtitles),
       getState: () => call(IPC.liveGetState)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },

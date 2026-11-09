@@ -13,6 +13,18 @@ let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ls-')) })
 
 describe('SettingsStore', () => {
+  it('without a real keychain the token stays in memory only, and an old stored one is dropped', () => {
+    const p = appPaths(dir, 'linux')
+    new SettingsStore(p, crypto).setToken('OLD-TOKEN')
+    const s = new SettingsStore(p, crypto, { persistToken: false })
+    expect(s.getToken()).toBeNull()
+    expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('tokenEnc')
+    s.setToken('SECRET-TOKEN')
+    expect(s.getToken()).toBe('SECRET-TOKEN')
+    expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('tokenEnc')
+    s.setToken(null)
+    expect(s.getToken()).toBeNull()
+  })
   it('defaults when missing', () => {
     expect(new SettingsStore(appPaths(dir, 'linux'), crypto).get()).toEqual({ instance: 'https://studio.linto.ai' })
   })
