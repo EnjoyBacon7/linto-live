@@ -187,7 +187,7 @@ describe('notificationFor', () => {
   })
   it('no-op and other transitions: null', () => {
     expect(notificationFor(LIVE, LIVE)).toBeNull()
-    expect(notificationFor(LIVE, { ...LIVE, lastLine: 'Bonjour' })).toBeNull()
+    expect(notificationFor(LIVE, { ...LIVE, startedAt: 1 })).toBeNull()
     // A first start that never reached 'active' is not « the sound stopped ».
     expect(notificationFor({ ...LIVE, stream: 'starting' }, { ...LIVE, stream: 'error' }, 'off')).toBeNull()
     expect(notificationFor({ ...LIVE, captions: 'connecting' }, { ...LIVE, captions: 'offline' })).toBeNull()

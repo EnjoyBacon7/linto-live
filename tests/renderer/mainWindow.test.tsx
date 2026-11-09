@@ -418,7 +418,8 @@ describe('Stage, inspector and status bar', () => {
   it('status bar shows LinTO, captions and OBS states and the last line', async () => {
     setup()
     await renderMain()
-    act(() => emit('live-state', live({ stream: 'error', captions: 'connecting', lastLine: 'Bonjour à tous' })))
+    act(() => emit('live-state', live({ stream: 'error', captions: 'connecting' })))
+    act(() => emit('caption-line', 'Bonjour à tous'))
     const bar = screen.getByRole('status')
     expect(within(bar).getByText('LinTO reçoit le son')).toBeTruthy()
     expect(within(bar).getByText('Sous-titres')).toBeTruthy()

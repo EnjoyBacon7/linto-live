@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { LiveState } from '../../shared/ipc'
 import { StatusDot, type StatusDotProps } from '../ui/StatusDot'
 
@@ -25,6 +26,13 @@ function Cell({ label, item }: { label: string; item: Item }) {
   )
 }
 
+/** Last transcribed line, from its own event so captions only re-render this element. */
+function CaptionLine() {
+  const [line, setLine] = useState('')
+  useEffect(() => window.lintoLive.on('caption-line', setLine), [])
+  return <span className="statusbar-line selectable" title={line || undefined}>{line}</span>
+}
+
 /** Bottom status bar: LinTO audio, captions, OBS, then the last transcribed line. */
 export function StatusBar({ state, onAir }: { state: LiveState; onAir: boolean }) {
   return (
@@ -32,7 +40,7 @@ export function StatusBar({ state, onAir }: { state: LiveState; onAir: boolean }
       <Cell label="LinTO reçoit le son" item={stream(state)} />
       <Cell label="Sous-titres" item={captions(state, onAir)} />
       <Cell label="OBS" item={obs(state)} />
-      <span className="statusbar-line selectable" title={state.lastLine}>{state.lastLine ?? ''}</span>
+      <CaptionLine />
     </footer>
   )
 }

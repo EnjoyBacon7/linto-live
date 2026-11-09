@@ -181,9 +181,15 @@ describe('LiveController', () => {
     t.captions.emit('status', 'live')
     expect(t.last().captions).toBe('live')
 
+    const lines: string[] = []
+    t.live.on('caption-line', (l: string) => lines.push(l))
+    const nStates = t.states.length
+    t.captions.emit('partial', { segmentId: 1, text: 'Bonjour' })
     t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous' })
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour à tous' })
-    expect(t.last().lastLine).toBe('Bonjour à tous')
+    expect(lines).toEqual(['Bonjour', 'Bonjour à tous'])
+    expect(t.states.length).toBe(nStates) // captions never re-send the live state
+    expect(t.last()).not.toHaveProperty('lastLine')
 
     const previews: string[] = []
     t.live.on('preview', (d: string) => previews.push(d))
@@ -193,6 +199,7 @@ describe('LiveController', () => {
     t.overlay.push.mockClear()
     await t.live.stop()
     expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
+    expect(lines[lines.length - 1]).toBe('') // the status bar line is cleared
     const n = previews.length
     await vi.advanceTimersByTimeAsync(1000)
     expect(previews.length).toBeGreaterThan(n) // the preview keeps running while idle

@@ -13,7 +13,7 @@ describe('IPC constants', () => {
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus',
         'setupLoad', 'setupSave', 'sessionsList', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState',
-        'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand'
+        'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtCaptionLine'
       ].sort()
     )
   })
@@ -102,6 +102,7 @@ describe('createLintoLiveApi', () => {
     api.on('live-state', () => {})
     api.on('preview', () => {})
     api.on('auth-required', () => {})
-    expect(on.mock.calls.map((c) => c[0])).toEqual([IPC.evtLiveState, IPC.evtPreview, IPC.evtAuthRequired])
+    api.on('caption-line', () => {})
+    expect(on.mock.calls.map((c) => c[0])).toEqual([IPC.evtLiveState, IPC.evtPreview, IPC.evtAuthRequired, IPC.evtCaptionLine])
   })
 })

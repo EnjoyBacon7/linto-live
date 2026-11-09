@@ -201,6 +201,7 @@ function main(): void {
     if (n) notify(n)
     rebuildShell()
   })
+  live.on('caption-line', (line: string) => send(IPC.evtCaptionLine, line))
   live.on('preview', (d: string) => send(IPC.evtPreview, d))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   live.on('auth-required', () => {

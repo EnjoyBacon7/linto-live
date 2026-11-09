@@ -23,7 +23,6 @@ export interface LiveState {
   output: 'shown' | 'off'
   /** ms epoch when the current session went live (absent when not live). */
   startedAt?: number
-  lastLine?: string
   warning?: string
 }
 
@@ -71,6 +70,8 @@ export interface LintoLiveApi {
   on(evt: 'preview', cb: (dataUrl: string) => void): () => void
   on(evt: 'audio-level', cb: (db: number) => void): () => void
   on(evt: 'auth-required', cb: () => void): () => void
+  /** Last transcribed line for the status bar ('' when cleared); kept out of LiveState (one per partial). */
+  on(evt: 'caption-line', cb: (line: string) => void): () => void
   /** An app menu / tray command the renderer carries out (new-session, start, terminate, logout). */
   on(evt: 'command', cb: (c: AppCommand) => void): () => void
 }
@@ -95,17 +96,19 @@ export const IPC = {
   evtPreview: 'evt:preview',
   evtAudioLevel: 'evt:audio-level',
   evtAuthRequired: 'evt:auth-required',
-  evtCommand: 'evt:command'
+  evtCommand: 'evt:command',
+  evtCaptionLine: 'evt:caption-line'
 } as const
 
-export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command'
+export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command' | 'caption-line'
 
 export const EVENT_CHANNELS: Record<EventName, string> = {
   'live-state': IPC.evtLiveState,
   preview: IPC.evtPreview,
   'audio-level': IPC.evtAudioLevel,
   'auth-required': IPC.evtAuthRequired,
-  command: IPC.evtCommand
+  command: IPC.evtCommand,
+  'caption-line': IPC.evtCaptionLine
 }
 
 /** Minimal transport (ipcRenderer-shaped) so the bridge is testable without Electron. */

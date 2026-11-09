@@ -79,7 +79,7 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
- * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'().
+ * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'() 'caption-line'(text, '' = cleared).
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
  * The preview runs whenever OBS is attached. No request closes or lists projectors: the output window is
  * opened once per OBS run by the first show (Arrêter leaves it open, black) and on demand by showOutputWindow.
@@ -112,6 +112,7 @@ export class LiveController extends EventEmitter {
   /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
   private authLost = false
   private tail: Promise<unknown> = Promise.resolve()
+  private lastLine: string | undefined
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -144,9 +145,9 @@ export class LiveController extends EventEmitter {
         session: undefined,
         stream: 'off',
         captions: 'offline',
-        startedAt: undefined,
-        lastLine: undefined
+        startedAt: undefined
       })
+      this.setLine(undefined)
     })
     d.captions.on('status', (s: CaptionStatus) => {
       this.setState({ captions: s })
@@ -318,7 +319,14 @@ export class LiveController extends EventEmitter {
   private showCaption(type: 'partial' | 'final', text: string, lines: string[]): void {
     this.d.overlay.push({ type, text })
     const last = lines[lines.length - 1]
-    if (last !== undefined && last !== this.state.lastLine) this.setState({ lastLine: last })
+    if (last !== undefined) this.setLine(last)
+  }
+
+  /** The status bar line goes through its own 'caption-line' event: no LiveState round trip per partial. */
+  private setLine(line: string | undefined): void {
+    if (line === this.lastLine) return
+    this.lastLine = line
+    this.emit('caption-line', line ?? '')
   }
 
   private dropController(): void {
@@ -537,9 +545,9 @@ export class LiveController extends EventEmitter {
         session: { name: res.session.name, status: res.session.status },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : MSG_NO_STREAM,
-        startedAt: Date.now(),
-        lastLine: undefined
+        startedAt: Date.now()
       })
+      this.setLine(undefined)
       this.d.captions.open(res.session.id, res.channel.id)
 
       const c = this.ctl
@@ -574,9 +582,9 @@ export class LiveController extends EventEmitter {
       captions: 'offline',
       startedAt: undefined,
       warning: undefined,
-      lastLine: undefined,
       ...end
     })
+    this.setLine(undefined)
   }
 
   /** Stops the OBS stream and waits for OBS to report it stopped (StopStream is asynchronous). */
