@@ -84,8 +84,14 @@ a webcam or capture card and a microphone attached if available. Use the AppImag
       (if Electron aborts with a sandbox / user-namespace error from Ubuntu's AppArmor policy,
       retry with `--no-sandbox` and report it: see "Known risks").
 - [ ] Log in, pick a session, start: no OBS window, no OBS tray dialog, no first-run wizard ever
-      appears; the projector opens on the chosen output; `ps aux | grep resources/obs/bin/obs`
-      shows OBS running from `/tmp/.mount_*/resources/obs/bin/obs`.
+      appears; `ps aux | grep resources/obs/bin/obs` shows OBS running from
+      `/tmp/.mount_*/resources/obs/bin/obs`.
+- [ ] Démarrer opens the output window (an OBS projector window, not fullscreen) for you to drag
+      to the projector / capture screen. Close it, then Fenêtre › « Afficher la fenêtre de sortie »
+      (Ctrl+1) reopens one. Arrêter leaves it open, black.
+- [ ] Right-click the output window: OBS's menu offers « Plein écran » (fullscreen on a chosen
+      screen). Pick the screen it is on and note in the PR whether it goes fullscreen there, and
+      whether Échap / the same menu brings it back to a window.
 - [ ] `cat /proc/$(pgrep -f resources/obs/bin/obs | head -1)/maps | grep -c '/tmp/.mount_.*/resources/obs/lib/'`
       is > 0 and `... | grep -E 'libQt6Core|libavcodec|libobs'` only shows paths inside
       `/tmp/.mount_*/resources/obs/lib` (bundled libs are really used).
@@ -108,8 +114,14 @@ LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$PWD/../squashfs-root/resources/obs/bin/obs" npm
 
 ### 3. The browser source renders the overlay
 
-- [ ] During a live session with captions arriving (or with `scripts/overlay-demo.ts` feeding the
-      overlay), the projector / preview shows the caption text over the video.
+- [ ] During a live session with captions arriving, the output window / preview shows the caption
+      text over the video.
+- [ ] Without live captions, `npx tsx scripts/overlay-demo.ts` (from the repo clone of step 2)
+      prints an overlay URL and loops through the messages the app sends (`partial` / `final` text,
+      words corrected by later partials, a partial long enough to fill both lines, then `reset`).
+      Open that URL in a browser (or set it as the URL of the scene's browser source): the black
+      band shows the text on at most two lines, words already placed do not jump, and the band
+      disappears on `reset`.
 - [ ] A screenshot of the scene (app preview, or `GetSourceScreenshot` on scene `LinTO Live`) has
       non-black pixels in the caption area (bottom of the frame) while the video source is black /
       absent.

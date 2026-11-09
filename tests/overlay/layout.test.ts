@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { layoutText, SubtitleModel, type Layout } from '../../src/main/overlay/page/layout.js'
 
 const fits = (l: string): boolean => l.length <= 20
@@ -107,5 +109,18 @@ describe('SubtitleModel', () => {
     m.partial('   ')
     expect(m.lines()).toEqual(['', ''])
     expect(m.visible).toBe(false)
+  })
+})
+
+describe('caption measurement', () => {
+  it('measures with the font the band is drawn with (size and family stack)', () => {
+    const dir = join(__dirname, '../../src/main/overlay/page')
+    const css = readFileSync(join(dir, 'overlay.css'), 'utf8')
+    const js = readFileSync(join(dir, 'overlay.js'), 'utf8')
+    const band = /#band\s*\{([^}]*)\}/.exec(css)![1]!
+    const family = /font-family:\s*([^;]+);/.exec(band)![1]!.trim()
+    const size = /font-size:\s*([^;]+);/.exec(band)![1]!.trim()
+    const canvasFont = /ctx\.font\s*=\s*'([^']+)'/.exec(js)![1]
+    expect(canvasFont).toBe(`${size} ${family}`)
   })
 })

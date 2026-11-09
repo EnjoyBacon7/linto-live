@@ -6,7 +6,7 @@ const l1 = document.getElementById('l1')
 const l2 = document.getElementById('l2')
 
 const ctx = document.createElement('canvas').getContext('2d')
-ctx.font = '48px Arial'
+ctx.font = '48px Arial, sans-serif' // same stack as #band in overlay.css
 const model = new SubtitleModel((line) => ctx.measureText(line).width <= 1920 - 200)
 
 function render() {
