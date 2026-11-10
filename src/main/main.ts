@@ -22,6 +22,7 @@ import { obsExecutable } from './obs/locate'
 import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
+import { asLintoAction } from './linto/accessMessages'
 import { CaptionStream } from './linto/captions'
 import { EXPORT_FILTERS, exportFileName, exportTranscript } from './linto/transcriptExport'
 import { loadInstance, STUDIO_WATERMARK_DEFAULTS, type LintoUrls } from './linto/instance'
@@ -334,7 +335,7 @@ function main(): void {
     if (!orgId) return []
     await ensureUrls()
     try {
-      const list = toSessionSummaries(await api.listSessions(orgId), watermarkCfg)
+      const list = toSessionSummaries(await asLintoAction('list', () => api.listSessions(orgId)), watermarkCfg)
       live.syncWatermarks(list)
       return list
     } catch (e) {
@@ -360,13 +361,10 @@ function main(): void {
     if (!orgId || typeof sessionId !== 'string' || !sessionId) throw new Error('Aucune session choisie.')
     await ensureUrls()
     try {
-      const s = await api.getSession(orgId, sessionId)
-      await api.patchSessionMeta(orgId, sessionId, { ...(s.meta ?? {}), [WATERMARK_META_KEY]: w })
+      const s = await asLintoAction('read', () => api.getSession(orgId, sessionId))
+      await asLintoAction('modify', () => api.patchSessionMeta(orgId, sessionId, { ...(s.meta ?? {}), [WATERMARK_META_KEY]: w }))
     } catch (e) {
       if (e instanceof UnauthorizedError) live.reportUnauthorized()
-      else if (/LinTO HTTP 403/.test(String((e as Error)?.message))) {
-        throw new Error("Tu n'as pas le droit de modifier cette session (il faut être gestionnaire de réunion dans l'organisation).")
-      }
       throw e
     }
     live.watermarkChanged(sessionId, w)

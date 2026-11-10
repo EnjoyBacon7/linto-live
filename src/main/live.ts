@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
+  DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
   type Channel, type DeviceItem, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type Watermark, type WatermarkConfig
 } from '../shared/types'
@@ -11,12 +11,14 @@ import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
 import type { LintoApi } from './linto/api'
 import { type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
 import { resolveSession } from './linto/sessionResolver'
+import { lintoErrorMessage } from './linto/accessMessages'
 import { TranscriptLog } from './linto/transcript'
 import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
 import type { SettingsStore } from './settings'
 
-export const MSG_NO_STREAM = "Impossible d'envoyer l'audio : tu n'es pas propriétaire de cette session."
+export const MSG_NO_STREAM =
+  "Impossible d'envoyer l'audio : LinTO ne le permet qu'au propriétaire de la session et aux gestionnaires de réunion de l'organisation."
 export const MSG_STREAM_RETRY = 'Envoi audio interrompu — nouvelle tentative…'
 export const MSG_OBS_DOWN = "OBS s'est arrêté et n'a pas pu redémarrer."
 export const MSG_OBS_NOT_READY = "OBS n'est pas encore prêt, réessaie dans quelques secondes."
@@ -26,8 +28,15 @@ export const MSG_OVERLAY_FAILED = 'Sous-titres non affichés dans OBS : '
 export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
 export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
+export const MSG_NO_ORG = 'Choisis une organisation.'
+/** The caption socket was refused while the token is still valid: access to the session itself was lost. */
+export const MSG_CAPTIONS_FORBIDDEN =
+  "Sous-titres refusés : tu n'as plus accès à cette session sur LinTO (retiré de l'organisation ?). L'audio continue d'être envoyé."
+/** The caption socket was refused although LinTO still lets the user read the session: retried. */
+export const MSG_CAPTIONS_REFUSED = 'LinTO a refusé la connexion des sous-titres — nouvelle tentative…'
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
+export const msgDeleted = (name: string): string => `La session « ${name} » a été supprimée sur LinTO.`
 
 export const PREVIEW_MS = 50 // 20 fps: a 640 px JPEG screenshot costs ~3 ms in OBS and does not delay its rendering
 const STOP_WAIT_MS = 10_000
@@ -39,6 +48,8 @@ const RETRY_PROBE_FROM = 3
 const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
 /** Captions not live for this long during a show: hide the stale overlay box and probe the LinTO token. */
 const CAPTIONS_STALE_MS = 30_000
+/** Caption socket refused with a still valid token: wait this long before joining again. */
+const CAPTIONS_REFUSED_RETRY_MS = 30_000
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Structural slices of the real modules, so tests can inject fakes. */
@@ -128,6 +139,7 @@ export class LiveController extends EventEmitter {
   /** boot() is starting/attaching OBS: Démarrer must not revive (kill) it meanwhile. */
   private booting = false
   private captionsTimer: NodeJS.Timeout | null = null
+  private captionsRetryTimer: NodeJS.Timeout | null = null
   private captionsAuthLost = false
   /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
   private authLost = false
@@ -168,7 +180,8 @@ export class LiveController extends EventEmitter {
       this.sendTranscript(this.transcript.endPartial())
     })
     d.captions.on('status', (s: CaptionStatus) => {
-      this.setState({ captions: s })
+      const recovered = s === 'live' && this.state.warning === MSG_CAPTIONS_REFUSED
+      this.setState({ captions: s, ...(recovered ? { warning: undefined } : {}) })
       this.superviseCaptions()
     })
     d.captions.on('partial', (e: CaptionEvent) => {
@@ -179,7 +192,7 @@ export class LiveController extends EventEmitter {
       this.d.overlay.push({ type: 'final', text: e.text })
       this.sendTranscript(this.transcript.final(e))
     })
-    d.captions.on('authError', () => this.reportUnauthorized('captions'))
+    d.captions.on('authError', () => void this.captionsRefused())
   }
 
   getState(): LiveState {
@@ -238,6 +251,8 @@ export class LiveController extends EventEmitter {
         try {
           await this.d.api.terminateSession(cur.orgId, cur.session.id)
         } catch (e) {
+          // Deleted on LinTO meanwhile: there is nothing left to terminate, the show just ends.
+          if (e instanceof NotFoundError) return this.doStop()
           if (wasLive && cur === this.current) {
             // The session goes on: so does the show.
             this.setState({ phase: 'live' })
@@ -248,7 +263,7 @@ export class LiveController extends EventEmitter {
             this.reportUnauthorized()
             throw new Error(MSG_AUTH)
           }
-          throw e
+          throw new Error(lintoErrorMessage(e, 'terminate') ?? errMsg(e), { cause: e })
         }
       }
       await this.doStop()
@@ -531,49 +546,99 @@ export class LiveController extends EventEmitter {
     const cur = this.current
     if (!cur || this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost) return
     this.d.overlay.push({ type: 'reset' }) // hide the frozen box; the next caption restores it
-    try {
-      const { status } = await this.d.api.getSession(cur.orgId, cur.session.id)
-      if (cur !== this.current) return
-      if (status === 'terminated') {
-        void this.enqueue(() => this.stopTerminated(cur)).catch(() => {})
+    const p = await this.probeSession(cur)
+    if (cur !== this.current) return
+    switch (p.kind) {
+      case 'terminated':
+      case 'deleted':
+        void this.enqueue(() => this.stopGone(cur, p.kind as 'terminated' | 'deleted')).catch(() => {})
         return
-      }
-    } catch (e) {
-      if (cur !== this.current) return
-      if (e instanceof UnauthorizedError) {
+      case 'unauthorized':
         this.d.captions.close() // stop reconnecting with a dead token
         this.reportUnauthorized('captions')
         return
-      }
+      case 'forbidden':
+        this.captionsForbidden()
+        return
     }
-    if (cur === this.current) this.superviseCaptions() // still not live: probe again later
+    this.superviseCaptions() // still not live: probe again later
   }
 
-  /** True when LinTO says the session was terminated (elsewhere: web UI, another device); errors → false. */
-  private async sessionTerminated(cur: Current): Promise<boolean> {
+  /**
+   * The caption socket refused us. LinTO says « unauthorized » there for an expired token but also for a
+   * session the user can no longer see (removed from the organisation, private session) or a server error:
+   * the REST API tells them apart, so a valid login is not thrown away for nothing.
+   */
+  private async captionsRefused(): Promise<void> {
+    const cur = this.current
+    if (!cur) return this.reportUnauthorized('captions')
+    this.clearCaptionsTimer() // the probe below replaces the stale-captions one
+    this.setState({ captions: 'offline' })
+    const p = await this.probeSession(cur)
+    if (cur !== this.current || this.state.phase !== 'live') return
+    switch (p.kind) {
+      case 'unauthorized':
+      case 'unknown': // LinTO unreachable: the socket's verdict stands
+        this.reportUnauthorized('captions')
+        return
+      case 'terminated':
+      case 'deleted':
+        void this.enqueue(() => this.stopGone(cur, p.kind as 'terminated' | 'deleted')).catch(() => {})
+        return
+      case 'forbidden':
+        this.captionsForbidden()
+        return
+      case 'ok':
+        // The token is valid and the session readable: a refusal on LinTO's side, join again a bit later.
+        this.setState({ warning: MSG_CAPTIONS_REFUSED })
+        this.captionsRetryTimer = setTimeout(() => {
+          this.captionsRetryTimer = null
+          if (cur !== this.current || this.state.phase !== 'live' || this.captionsAuthLost) return
+          this.d.captions.open(cur.session.id, cur.channel.id)
+        }, CAPTIONS_REFUSED_RETRY_MS)
+    }
+  }
+
+  /** The user lost access to the session on air: captions cannot come back, the stream goes on. */
+  private captionsForbidden(): void {
+    this.captionsAuthLost = true // no more probing until the next start
+    this.clearCaptionsTimer()
+    this.d.captions.close()
+    this.setState({ captions: 'offline', warning: MSG_CAPTIONS_FORBIDDEN })
+  }
+
+  /** What LinTO says about the session on air (errors other than HTTP refusals → 'unknown'). */
+  private async probeSession(cur: Current): Promise<
+    | { kind: 'ok'; session: Session } | { kind: 'terminated' | 'deleted' | 'unauthorized' | 'forbidden' | 'unknown' }
+  > {
     try {
-      return (await this.d.api.getSession(cur.orgId, cur.session.id)).status === 'terminated'
-    } catch {
-      return false
+      const session = await this.d.api.getSession(cur.orgId, cur.session.id)
+      return session.status === 'terminated' ? { kind: 'terminated' } : { kind: 'ok', session }
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return { kind: 'unauthorized' }
+      if (e instanceof NotFoundError) return { kind: 'deleted' }
+      if (e instanceof ForbiddenError) return { kind: 'forbidden' }
+      return { kind: 'unknown' }
     }
   }
 
-  /** Runs inside the queue: the shown session was terminated elsewhere — end the show and say why. */
-  private async stopTerminated(cur: Current): Promise<void> {
+  /** Runs inside the queue: the shown session was terminated or deleted elsewhere — end the show and say why. */
+  private async stopGone(cur: Current, why: 'terminated' | 'deleted'): Promise<void> {
     if (cur !== this.current) return
-    await this.doStop(STOP_WAIT_MS, { phase: 'error', warning: msgTerminated(cur.session.name) })
+    const warning = why === 'terminated' ? msgTerminated(cur.session.name) : msgDeleted(cur.session.name)
+    await this.doStop(STOP_WAIT_MS, { phase: 'error', warning })
   }
 
   private clearCaptionsTimer(): void {
     if (this.captionsTimer) clearTimeout(this.captionsTimer)
+    if (this.captionsRetryTimer) clearTimeout(this.captionsRetryTimer)
     this.captionsTimer = null
+    this.captionsRetryTimer = null
   }
 
   private async doStart(rawName: string): Promise<StartResult> {
     const s = this.d.settings.get()
-    if (!s.orgId || s.profileId === undefined) {
-      return { ok: false, message: 'Choisis une organisation et un profil de transcription.' }
-    }
+    if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
     if (!this.ctl) {
       if (this.state.obs === 'restarting' || this.booting) return { ok: false, message: MSG_OBS_NOT_READY }
       if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
@@ -738,8 +803,17 @@ export class LiveController extends EventEmitter {
         const c = this.ctl
         const cur = this.current
         if (!c || !cur?.service || this.state.phase !== 'live') return
-        if (this.retryAttempt >= RETRY_PROBE_FROM && (await this.sessionTerminated(cur))) return this.stopTerminated(cur)
-        if (c !== this.ctl || cur !== this.current || this.state.phase !== 'live') return
+        if (this.retryAttempt >= RETRY_PROBE_FROM) {
+          const p = await this.probeSession(cur)
+          if (p.kind === 'terminated' || p.kind === 'deleted') return this.stopGone(cur, p.kind)
+          // LinTO may hand out new stream endpoints (transcriber redeployed): retry on the current ones.
+          if (p.kind === 'ok' && cur === this.current) {
+            const ch = p.session.channels.find((x) => x.id === cur.channel.id) ?? p.session.channels[0]
+            const fresh = ch ? toObsStreamService(ch.streamEndpoints ?? {}) : null
+            if (fresh) cur.service = fresh
+          }
+        }
+        if (c !== this.ctl || cur !== this.current || this.state.phase !== 'live' || !cur.service) return
         await this.startStreamSafe(c, cur.service)
       })
     }, delay)

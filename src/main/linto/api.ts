@@ -1,10 +1,43 @@
 import {
-  UnauthorizedError,
+  ForbiddenError, LintoHttpError, NotFoundError, UnauthorizedError,
   type AuthMethod, type Channel, type Organization, type Session, type SessionStatus, type TranscriberProfile
 } from '../../shared/types'
+import { orgRights } from '../../shared/rights'
 import type { LintoUrls } from './instance'
 
-export { UnauthorizedError }
+export { ForbiddenError, LintoHttpError, NotFoundError, UnauthorizedError }
+
+/**
+ * LinTO answers 401 with this message when a valid token asks for a resource of another organisation (or
+ * one that vanished): an access refusal, not an expired login — logging in again would not help.
+ */
+export const RESOURCE_DENIED_MESSAGE = 'You are not authorized to access this resource'
+
+/** The user id inside a LinTO token (`data.userId` of the JWT payload), or null. Not verified: a hint only. */
+export function tokenUserId(token: string | null): string | null {
+  const part = token?.split('.')[1]
+  if (!part) return null
+  try {
+    const payload = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'))
+    const id = payload?.data?.userId
+    return typeof id === 'string' && id ? id : null
+  } catch {
+    return null
+  }
+}
+
+/** LinTO's JSON error body: `{ message, code? }`. */
+function errorBody(text: string): { message?: string; code?: string } {
+  try {
+    const b = JSON.parse(text)
+    return {
+      ...(typeof b?.message === 'string' ? { message: b.message } : {}),
+      ...(typeof b?.code === 'string' ? { code: b.code } : {})
+    }
+  } catch {
+    return {}
+  }
+}
 
 const SEARCH_PAGE_SIZE = 50
 const SEARCH_MAX_PAGES = 20
@@ -43,8 +76,17 @@ export class LintoApi {
     const t = this.token()
     if (auth && t) headers.set('Authorization', `Bearer ${t}`)
     const res = await this.fetchFn(url, { ...init, headers })
-    if (res.status === 401) throw new UnauthorizedError()
-    if (!res.ok) throw new Error(`LinTO HTTP ${res.status}: ${await res.text().catch(() => '')}`)
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      const { message, code } = errorBody(text)
+      if (res.status === 401) {
+        if (auth && message === RESOURCE_DENIED_MESSAGE) throw new ForbiddenError(401, text, message, code)
+        throw new UnauthorizedError()
+      }
+      if (res.status === 403) throw new ForbiddenError(403, text, message, code)
+      if (res.status === 404) throw new NotFoundError(404, text, message, code)
+      throw new LintoHttpError(res.status, text, message, code)
+    }
     const text = await res.text()
     return text ? JSON.parse(text) : undefined
   }
@@ -60,9 +102,21 @@ export class LintoApi {
     return { token: r.auth_token, userId: r.user_id }
   }
 
+  /**
+   * The user's organisations. LinTO sends each one's members (with their role) and permissions: the user's
+   * rights there are derived from them when the token names the user.
+   */
   async organizations(): Promise<Organization[]> {
     const r = await this.request(`${this.urls.api}/organizations`)
-    return r.map((o: any) => ({ id: o._id, name: o.name }))
+    const me = tokenUserId(this.token())
+    return (Array.isArray(r) ? r : []).map((o: any) => {
+      const out: Organization = { id: o._id, name: o.name }
+      const member = me && Array.isArray(o.users) ? o.users.find((u: any) => u?.userId === me) : undefined
+      const role = typeof member?.role === 'number' ? member.role : undefined
+      const permissions = typeof o.permissions === 'number' ? o.permissions : undefined
+      if (role !== undefined || permissions !== undefined) out.rights = orgRights(role, permissions)
+      return out
+    })
   }
 
   async transcriberProfiles(orgId: string): Promise<TranscriberProfile[]> {

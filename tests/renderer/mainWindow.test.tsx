@@ -859,3 +859,67 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(fn(api.live.clearSubtitles)).toHaveBeenCalled()
   })
 })
+
+describe('organisation rights', () => {
+  const REASON = "Ton rôle dans l'organisation ne permet pas de créer, modifier ni terminer des sessions (il faut être gestionnaire de réunion)."
+  const member = () => setupData({}, {
+    organizations: [{ id: 'o1', name: 'Org', rights: { manageSessions: false, readProfiles: false, reason: REASON } }],
+    profiles: []
+  })
+
+  it('without the right: « Nouvelle session… » and Terminer are disabled and say why; menu commands explain', async () => {
+    setup({}, member())
+    await renderMain()
+    const newRow = await screen.findByRole('button', { name: 'Nouvelle session…' }) as HTMLButtonElement
+    await waitFor(() => expect(newRow.disabled).toBe(true))
+    expect(newRow.title).toBe(REASON)
+    act(() => emit('command', 'new-session'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByText(REASON)).toBeTruthy()
+
+    act(() => emit('live-state', live()))
+    const term = screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement
+    expect(term.disabled).toBe(true)
+    expect(term.title).toBe(REASON)
+    act(() => emit('command', 'terminate'))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('without the right: the watermark of a session cannot be changed', async () => {
+    setup({}, member())
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const box = screen.getByRole('checkbox', { name: 'Afficher le filigrane' }) as HTMLInputElement
+    expect(box.disabled).toBe(true)
+    expect(screen.getAllByText(REASON).length).toBeGreaterThan(0)
+  })
+
+  it('rights unknown (older LinTO): everything stays available', async () => {
+    setup()
+    await renderMain()
+    expect((screen.getByRole('button', { name: 'Nouvelle session…' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('no organisation: says so', async () => {
+    setup({}, setupData({ orgId: undefined }, { organizations: [] }), [])
+    render(<App />)
+    expect(await screen.findByText(/n’appartient à aucune organisation/)).toBeTruthy()
+  })
+
+  it('several organisations and none chosen: asks to pick one; Démarrer says why', async () => {
+    setup({}, setupData({ orgId: undefined }, { organizations: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }), [])
+    render(<App />)
+    expect(await screen.findByText(/Choisis une organisation dans le menu Compte/)).toBeTruthy()
+    expect(startBtn().title).toBe('Choisis une organisation.')
+  })
+
+  it('« Nouvelle session » without any transcriber profile: OK disabled and explained', async () => {
+    setup({}, setupData({}, { profiles: [] }))
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Conf')
+    const dlg = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    expect((within(dlg).getByRole('button', { name: 'OK' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(dlg).getByText(/Aucun profil de transcription disponible/)).toBeTruthy()
+  })
+})

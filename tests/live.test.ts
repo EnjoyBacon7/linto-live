@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
-  LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgTerminated,
+  LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
 import type { LiveState } from '../src/shared/ipc'
-import { UnauthorizedError, type Session, type Settings, type TranscriptUpdate } from '../src/shared/types'
+import {
+  ForbiddenError, NotFoundError, UnauthorizedError, type Session, type Settings, type TranscriptUpdate
+} from '../src/shared/types'
 
 const SRT_A = 'srt://linto:9000?streamid=a'
 const SRT_B = 'srt://linto:9000?streamid=b'
@@ -231,7 +233,7 @@ describe('LiveController', () => {
     expect(t.ctl().startStream).not.toHaveBeenCalled()
     expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
     expect(t.last()).toMatchObject({ phase: 'live', stream: 'unavailable', warning: MSG_NO_STREAM })
-    expect(MSG_NO_STREAM).toBe("Impossible d'envoyer l'audio : tu n'es pas propriétaire de cette session.")
+    expect(MSG_NO_STREAM).toMatch(/propriétaire de la session et aux gestionnaires de réunion/)
   })
 
   it('reapplies live state after obs restart', async () => {
@@ -295,8 +297,9 @@ describe('LiveController', () => {
     await t.live.start('Conf')
     const authReq = vi.fn()
     t.live.on('auth-required', authReq)
+    t.api.getSession.mockRejectedValueOnce(new UnauthorizedError()) // LinTO confirms: the token is dead
     t.captions.emit('authError')
-    expect(authReq).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(authReq).toHaveBeenCalledTimes(1))
     expect(t.last()).toMatchObject({ phase: 'live', captions: 'offline' })
     expect(t.ctl().stopStream).not.toHaveBeenCalled()
     expect(t.obs.stop).not.toHaveBeenCalled()
@@ -1050,5 +1053,136 @@ describe('LiveController final fixes', () => {
     await t.live.showOutputWindow()
     expect(t.last().warning).toBeUndefined()
     expect(t.last().output).toBe('shown')
+  })
+})
+
+describe('LiveController and LinTO access rights', () => {
+  const live = async (over: Parameters<typeof setup>[0] = {}) => {
+    const t = setup(over)
+    await t.live.boot()
+    await t.live.start('Conf')
+    const authReq = vi.fn()
+    t.live.on('auth-required', authReq)
+    return { t, authReq }
+  }
+
+  it('caption socket refused with a valid token: no re-login, warning, joins again after 30 s', async () => {
+    const { t, authReq } = await live()
+    t.captions.emit('authError')
+    await flush()
+    expect(authReq).not.toHaveBeenCalled()
+    expect(t.settings.setToken).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'live', captions: 'offline', warning: MSG_CAPTIONS_REFUSED })
+    expect(t.captions.open).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(t.captions.open).toHaveBeenCalledTimes(2)
+    t.captions.emit('status', 'live')
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it('caption socket refused and session refused (403): access lost, the stream goes on, no re-login', async () => {
+    const { t, authReq } = await live()
+    t.ctl().emitState('active')
+    t.api.getSession.mockRejectedValue(new ForbiddenError(403, '', 'Not allowed to do this'))
+    t.captions.emit('authError')
+    await flush()
+    expect(authReq).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'live', stream: 'active', captions: 'offline', warning: MSG_CAPTIONS_FORBIDDEN })
+    expect(t.captions.close).toHaveBeenCalled()
+    t.api.getSession.mockClear()
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(t.api.getSession).not.toHaveBeenCalled() // no more probing
+    expect(t.captions.open).toHaveBeenCalledTimes(1)
+  })
+
+  it('LinTO unreachable when the socket refuses: the socket is believed (re-login asked)', async () => {
+    const { t, authReq } = await live()
+    t.api.getSession.mockRejectedValueOnce(new Error('ECONNRESET'))
+    t.captions.emit('authError')
+    await flush()
+    expect(authReq).toHaveBeenCalledTimes(1)
+  })
+
+  it('caption socket refused because the session was deleted: the show ends and says so', async () => {
+    const { t, authReq } = await live()
+    t.api.getSession.mockRejectedValue(new NotFoundError(404, ''))
+    t.captions.emit('authError')
+    await flush()
+    await t.live.settled()
+    expect(authReq).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'error', stream: 'off', warning: msgDeleted('Conf') })
+  })
+
+  it('stale captions and a deleted session: the show ends', async () => {
+    const { t } = await live()
+    t.api.getSession.mockRejectedValue(new NotFoundError(404, ''))
+    t.captions.emit('status', 'offline')
+    await vi.advanceTimersByTimeAsync(30_000)
+    await t.live.settled()
+    expect(t.last()).toMatchObject({ phase: 'error', warning: msgDeleted('Conf') })
+  })
+
+  it('stale captions and access lost: warned once, probing stops', async () => {
+    const { t, authReq } = await live()
+    t.api.getSession.mockRejectedValue(new ForbiddenError(403, ''))
+    t.captions.emit('status', 'offline')
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(t.last()).toMatchObject({ phase: 'live', warning: MSG_CAPTIONS_FORBIDDEN })
+    t.api.getSession.mockClear()
+    t.captions.emit('status', 'offline')
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(t.api.getSession).not.toHaveBeenCalled()
+    expect(authReq).not.toHaveBeenCalled()
+  })
+
+  it('terminate refused (role): explained, the show and its stream go on', async () => {
+    const { t } = await live()
+    t.ctl().emitState('active')
+    t.api.terminateSession.mockRejectedValueOnce(new ForbiddenError(403, '', 'Not allowed to do this'))
+    await expect(t.live.terminate()).rejects.toThrow(/terminer cette session.*gestionnaire de réunion/)
+    expect(t.last().phase).toBe('live')
+    expect(t.ctl().startStream).toHaveBeenCalledTimes(2)
+  })
+
+  it('terminate on a session deleted meanwhile just ends the show', async () => {
+    const { t } = await live()
+    t.api.terminateSession.mockRejectedValueOnce(new NotFoundError(404, ''))
+    await t.live.terminate()
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+  })
+
+  it('a refused session creation is explained and nothing starts', async () => {
+    const t = setup({ sessions: [] })
+    await t.live.boot()
+    t.api.createSession.mockRejectedValueOnce(new ForbiddenError(403, '', 'Organization does not have the required permission'))
+    const r = await t.live.start('Nouvelle')
+    expect(r).toEqual({ ok: false, message: expect.stringMatching(/sessions ne sont pas activées/) })
+    expect(t.last().phase).toBe('idle')
+    expect(t.captions.open).not.toHaveBeenCalled()
+  })
+
+  it('without a transcriber profile an existing session still starts; without an org nothing does', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.settings.update({ profileId: undefined })
+    expect((await t.live.start('Conf')).ok).toBe(true)
+    await t.live.stop()
+    t.settings.update({ orgId: undefined })
+    expect(await t.live.start('Conf')).toEqual({ ok: false, message: MSG_NO_ORG })
+  })
+
+  it('stream retries pick up new stream endpoints handed out by LinTO', async () => {
+    const { t } = await live()
+    const c = t.ctl()
+    c.emitState('active')
+    c.startStream.mockRejectedValue(new Error('SRT refused'))
+    c.emitState('stopped')
+    await vi.advanceTimersByTimeAsync(2_000 + 5_000) // two retries on the old endpoint
+    t.api.getSession.mockResolvedValue(session({}, SRT_B))
+    c.startStream.mockResolvedValue(undefined)
+    await vi.advanceTimersByTimeAsync(10_000) // third retry probes the session first
+    await t.live.settled()
+    const last = c.startStream.mock.calls.at(-1)?.[0] as { server?: string } | undefined
+    expect(JSON.stringify(last)).toContain('streamid=b')
   })
 })

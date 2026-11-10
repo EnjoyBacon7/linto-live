@@ -30,7 +30,8 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
     if (p.profiles.length > 0 && !p.profiles.some((x) => x.id === profile)) setProfile(p.profileId ?? p.profiles[0]!.id)
   }, [p.profiles])
 
-  const ok = name.trim() !== '' && (p.profiles.length === 0 || profile !== undefined)
+  // A session cannot be created without a profile: none listed means the role or the organisation offers none.
+  const ok = name.trim() !== '' && profile !== undefined && p.profiles.some((x) => x.id === profile)
   const submit = (e?: FormEvent | KeyboardEvent): void => {
     e?.preventDefault()
     if (ok) p.onSubmit(name.trim(), profile)
@@ -54,8 +55,14 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
         <label className="field">
           <span className="field-label">Profil de transcription</span>
           <PopUp label="Profil de transcription" value={profile === undefined ? '' : String(profile)} placeholder="Choisir…"
-            options={p.profiles.map((x) => ({ value: String(x.id), label: x.name }))} onChange={(v) => setProfile(Number(v))} />
+            options={p.profiles.map((x) => ({ value: String(x.id), label: x.name }))} onChange={(v) => setProfile(Number(v))}
+            disabled={p.profiles.length === 0} />
         </label>
+        {p.profiles.length === 0 && (
+          <p className="sheet-detail" role="note">
+            Aucun profil de transcription disponible dans cette organisation : impossible d’y créer une session.
+          </p>
+        )}
       </form>
     </Sheet>
   )

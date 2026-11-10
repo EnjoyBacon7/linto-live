@@ -20,6 +20,8 @@ export interface ToolbarProps {
   canShowOutput: boolean
   onShowOutput(): void
   onTerminate(): void
+  /** Why Terminer is unavailable (the user may not terminate sessions here); absent = available. */
+  terminateBlocked?: string
 }
 
 function LivePill({ startedAt }: { startedAt?: number }) {
@@ -58,7 +60,8 @@ export function Toolbar(p: ToolbarProps) {
               {p.busy === 'stop' ? 'Arrêt…' : 'Arrêter'}
             </Button>
             {outputButton}
-            <Button size="large" variant="destructive" disabled={p.busy !== null} onClick={p.onTerminate}>
+            <Button size="large" variant="destructive" disabled={p.busy !== null || p.terminateBlocked !== undefined}
+              title={p.terminateBlocked} onClick={p.onTerminate}>
               {p.busy === 'terminate' ? 'Fin de session…' : 'Terminer…'}
             </Button>
           </>
