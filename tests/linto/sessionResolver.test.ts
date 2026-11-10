@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { resolveSession } from '../../src/main/linto/sessionResolver'
+import { lookupSession, resolveSession } from '../../src/main/linto/sessionResolver'
 import type { Session } from '../../src/shared/types'
 
 const ep = { srt: 'srt://h:1?streamid=abc' }
@@ -74,5 +74,25 @@ describe('resolveSession', () => {
     f.searchSessions.mockRejectedValue(new Error('Trop de sessions correspondent à ce nom.'))
     await expect(resolveSession(f.api, 'o', 'Conf', 1)).rejects.toThrow('Trop de sessions correspondent à ce nom.')
     expect(f.createSession).not.toHaveBeenCalled()
+  })
+})
+
+describe('lookupSession', () => {
+  it('none when no exact match (prefix matches do not count)', async () => {
+    expect(await lookupSession(fake([sess({ name: 'Conférence' })]).api, 'o', 'Conf')).toBe('none')
+    expect(await lookupSession(fake([]).api, 'o', '  ')).toBe('none')
+  })
+  it('usable when the session Démarrer would reuse has a stream endpoint', async () => {
+    const f = fake([sess({ name: 'Conf' })])
+    expect(await lookupSession(f.api, 'o', ' Conf ')).toBe('usable')
+    expect(f.searchSessions).toHaveBeenCalledWith('o', 'Conf')
+  })
+  it('forbidden when LinTO gives no stream endpoint (no rights)', async () => {
+    const other = sess({ name: 'Conf', channels: [{ id: 1, name: 'Conf' }] })
+    expect(await lookupSession(fake([other]).api, 'o', 'Conf')).toBe('forbidden')
+    expect(await lookupSession(fake([sess({ name: 'Conf', channels: [] })]).api, 'o', 'Conf')).toBe('forbidden')
+  })
+  it('terminated when only terminated sessions have that name', async () => {
+    expect(await lookupSession(fake([sess({ name: 'Conf', status: 'terminated' })]).api, 'o', 'Conf')).toBe('terminated')
   })
 })

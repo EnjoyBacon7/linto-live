@@ -11,8 +11,9 @@ export interface Session {
   /** Free-form session metadata (LinTO Studio keeps the watermark settings under `@watermark`). */
   meta?: Record<string, unknown>
 }
+/** Sessions the user can stream to (the others of the organisation are not listed). */
 export interface SessionSummary {
-  id: string; name: string; status: Exclude<SessionStatus, 'terminated'>; canStream: boolean; updatedAt?: string
+  id: string; name: string; status: Exclude<SessionStatus, 'terminated'>; updatedAt?: string
   /** The session's watermark, completed with the instance defaults. */
   watermark: Watermark
 }
@@ -35,6 +36,8 @@ export interface WatermarkConfig {
   frequency: number
   duration: number
 }
+/** An exact-name check before « Nouvelle session »: see lookupSession. */
+export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'terminated'
 export interface Organization { id: string; name: string }
 export interface TranscriberProfile { id: number; name: string; languages?: string[] }
 export interface AuthMethod { path: string; from: string; name: string }

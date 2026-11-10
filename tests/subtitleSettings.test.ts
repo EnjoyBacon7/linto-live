@@ -45,7 +45,7 @@ describe('session watermark', () => {
     expect(checkWatermark({ ...WM, evil: 1 })).toEqual(WM)
   })
   it('summaries carry the resolved watermark', () => {
-    const s: Session = { id: 's', name: 'S', status: 'ready', channels: [], meta: { [WATERMARK_META_KEY]: WM } }
+    const s: Session = { id: 's', name: 'S', status: 'ready', channels: [{ id: 1, name: 'c', streamEndpoints: { srt: 'srt://h:1' } }], meta: { [WATERMARK_META_KEY]: WM } }
     expect(toSessionSummaries([s], CFG)[0]!.watermark).toEqual(WM)
     expect(toSessionSummaries([{ ...s, meta: undefined }], CFG)[0]!.watermark.display).toBe(false)
   })
@@ -157,10 +157,10 @@ describe('LiveController subtitle style', () => {
     expect(t.styles().length).toBe(n)
     t.live.watermarkChanged('s1', WM)
     expect(t.styles().at(-1)!.watermark).toEqual(WM)
-    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', canStream: true, watermark: WM }])
+    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: WM }])
     expect(t.styles().length).toBe(n + 1) // unchanged: not sent again
     const pinned = { ...WM, pinned: true }
-    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', canStream: true, watermark: pinned }])
+    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: pinned }])
     expect(t.styles().at(-1)!.watermark).toEqual(pinned)
   })
 

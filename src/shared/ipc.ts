@@ -1,5 +1,5 @@
 import type {
-  AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionStatus, SessionSummary, Settings,
+  AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
   TranscriberProfile, Transcript, TranscriptUpdate, Watermark
 } from './types'
 
@@ -59,6 +59,8 @@ export interface LintoLiveApi {
   setup: { load(): Promise<SetupData>; save(s: Partial<Settings>): Promise<void> }
   sessions: {
     list(): Promise<SessionSummary[]>
+    /** Does a session with exactly this name exist in the organisation, and can the user stream to it? */
+    lookup(name: string): Promise<SessionLookup>
     /** Saves the watermark on the LinTO session (as LinTO Studio does); the overlay follows if it is on air. */
     setWatermark(sessionId: string, w: Watermark): Promise<void>
   }
@@ -98,6 +100,7 @@ export const IPC = {
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
   sessionsList: 'sessions:list',
+  sessionsLookup: 'sessions:lookup',
   sessionsSetWatermark: 'sessions:set-watermark',
   liveStart: 'live:start',
   liveStop: 'live:stop',
@@ -148,6 +151,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
     setup: { load: () => call(IPC.setupLoad), save: (s) => call(IPC.setupSave, s) },
     sessions: {
       list: () => call(IPC.sessionsList),
+      lookup: (name) => call(IPC.sessionsLookup, name),
       setWatermark: (id, w) => call(IPC.sessionsSetWatermark, id, w)
     },
     live: {

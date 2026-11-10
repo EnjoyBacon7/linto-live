@@ -63,8 +63,8 @@ describe('toSessionSummaries', () => {
     ])
     expect(r.map((s) => s.id)).toEqual(['act', 'new', 'old'])
   })
-  it('canStream false without endpoints or channels', () => {
+  it('leaves out sessions the user cannot stream to (no endpoints or no channel)', () => {
     const r = toSessionSummaries([mk('a', 'ready', undefined, {}), { id: 'b', name: 'b', status: 'ready', channels: [] }, mk('c', 'ready')])
-    expect(r.map((s) => s.canStream)).toEqual([false, false, true])
+    expect(r.map((s) => s.id)).toEqual(['c'])
   })
 })
