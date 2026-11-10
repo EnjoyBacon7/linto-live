@@ -427,20 +427,6 @@ describe('Stage, inspector and status bar', () => {
     expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v2' })
   })
 
-  it('status bar shows LinTO, captions and OBS states and the last line', async () => {
-    setup()
-    await renderMain()
-    act(() => emit('live-state', live({ stream: 'error', captions: 'connecting' })))
-    act(() => emit('caption-line', 'Bonjour à tous'))
-    const bar = screen.getByRole('status')
-    expect(within(bar).getByText('LinTO reçoit le son')).toBeTruthy()
-    expect(within(bar).getByText('Sous-titres')).toBeTruthy()
-    expect(within(bar).getByText('OBS')).toBeTruthy()
-    expect(within(bar).getByText('Bonjour à tous')).toBeTruthy()
-    expect(bar.querySelector('.dot-bad')).toBeTruthy()
-    expect(bar.querySelector('.dot-warn')).toBeTruthy()
-  })
-
   it('shows the warning carried by live-state, also while idle, and clears it', async () => {
     setup()
     await renderMain()

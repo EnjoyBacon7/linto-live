@@ -476,48 +476,6 @@
   background: var(--bad);
 }
 
-/* ---------- Status bar ---------- */
-
-.statusbar {
-  flex: none;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 14px;
-  border-top: 0.5px solid var(--separator);
-  background: var(--bg-toolbar);
-  font-size: 11px;
-  color: var(--text-2);
-}
-
-.statusbar-cell {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-
-.statusbar-cell .dot {
-  width: 7px;
-  height: 7px;
-}
-
-.statusbar-value {
-  color: var(--text);
-}
-
-.statusbar-line {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-  color: var(--text);
-}
-
 /* ---------- Sheets ---------- */
 
 .sheet-form {

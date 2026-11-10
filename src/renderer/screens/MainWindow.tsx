@@ -10,9 +10,8 @@ import { ConfirmSheet } from '../main/ConfirmSheet'
 import { Inspector, type WatermarkTarget } from '../main/Inspector'
 import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
-import { NO_STREAM_REASON, STATUS, Sidebar } from '../main/Sidebar'
+import { NO_STREAM_REASON, Sidebar } from '../main/Sidebar'
 import { Stage } from '../main/Stage'
-import { StatusBar } from '../main/StatusBar'
 import { Toolbar, type Busy } from '../main/Toolbar'
 import { isOnAir } from '../main/useLive'
 import { Login } from './Login'
@@ -139,8 +138,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const idle = state.phase === 'idle' || state.phase === 'error'
   const canStart = idle && busy === null && startHint === undefined
   const caption = onAir && reused !== null ? (reused ? 'réutilisée' : 'nouvelle')
-    : sel?.pending ? 'nouvelle'
-    : summary ? STATUS[summary.status].label.toLowerCase() : null
+    : sel?.pending ? 'nouvelle' : null
   const watermarkTarget: WatermarkTarget = sel?.pending ? { pending: true }
     : summary ? { watermark: summary.watermark } : null
   const profile = !sel ? null
@@ -352,7 +350,6 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />
         </div>
-        <StatusBar state={state} onAir={onAir} />
       </div>
 
       <NewSessionSheet
