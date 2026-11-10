@@ -16,6 +16,8 @@ export interface ToolbarProps {
   startHint?: string
   onStart(): void
   onStop(): void
+  /** OBS is attached: the output window (projector) can be opened, on or off air. */
+  canShowOutput: boolean
   onShowOutput(): void
   onTerminate(): void
 }
@@ -32,6 +34,10 @@ function LivePill({ startedAt }: { startedAt?: number }) {
 
 /** Unified title bar/toolbar of the content area: session name + main actions. Draggable, controls excluded. */
 export function Toolbar(p: ToolbarProps) {
+  const outputButton = (
+    <Button size="large" className="btn-icon" aria-label="Afficher la fenêtre de sortie" title="Afficher la fenêtre de sortie"
+      icon={<DisplayIcon />} disabled={!p.canShowOutput} onClick={p.onShowOutput} />
+  )
   return (
     <div className="toolbar drag" role="toolbar" aria-label="Barre d'outils">
       <div className="toolbar-title">
@@ -51,17 +57,19 @@ export function Toolbar(p: ToolbarProps) {
             <Button size="large" icon={<StopIcon size={12} />} disabled={p.busy !== null} onClick={p.onStop}>
               {p.busy === 'stop' ? 'Arrêt…' : 'Arrêter'}
             </Button>
-            <Button size="large" className="btn-icon" aria-label="Afficher la fenêtre de sortie" title="Afficher la fenêtre de sortie"
-              icon={<DisplayIcon />} onClick={p.onShowOutput} />
+            {outputButton}
             <Button size="large" variant="destructive" disabled={p.busy !== null} onClick={p.onTerminate}>
               {p.busy === 'terminate' ? 'Fin de session…' : 'Terminer…'}
             </Button>
           </>
         ) : (
-          <Button size="large" variant="primary" icon={<PlayIcon size={12} />} disabled={!p.canStart || p.busy !== null}
-            title={p.canStart ? undefined : p.startHint} onClick={p.onStart}>
-            {p.busy === 'start' ? 'Démarrage…' : 'Démarrer'}
-          </Button>
+          <>
+            {outputButton}
+            <Button size="large" variant="primary" icon={<PlayIcon size={12} />} disabled={!p.canStart || p.busy !== null}
+              title={p.canStart ? undefined : p.startHint} onClick={p.onStart}>
+              {p.busy === 'start' ? 'Démarrage…' : 'Démarrer'}
+            </Button>
+          </>
         )}
       </div>
     </div>

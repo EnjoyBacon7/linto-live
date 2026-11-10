@@ -93,7 +93,7 @@ function setup(meta?: Record<string, unknown>) {
   const ctl = {
     ensureScene: vi.fn(async () => {}), listVideoDevices: vi.fn(async () => []), listAudioDevices: vi.fn(async () => []),
     setVideoDevice: vi.fn(async () => {}), setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
-    audioLevel$: vi.fn(() => () => {}), startStream: vi.fn(async () => {}),
+    audioLevel$: vi.fn(() => () => {}), screenshot: vi.fn(async () => ''), startStream: vi.fn(async () => {}),
     stopStream: vi.fn(async () => true), streamState$: vi.fn(() => () => {}), openOutputWindow: vi.fn(async () => {}),
     showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {})
   }
