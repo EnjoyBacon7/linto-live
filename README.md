@@ -113,6 +113,22 @@ La barre d'état en bas indique si LinTO reçoit bien le son. L'icône LinTO Liv
 menus (macOS) ou la zone de notification (Linux) signale quand un direct est en cours. Quitter
 l'application pendant un direct revient à cliquer sur Arrêter.
 
+### Droits LinTO nécessaires
+
+Ce que l'application permet dépend du rôle du compte dans l'organisation LinTO ; ce qui n'est pas
+permis est grisé, avec la raison au survol :
+
+| Action | Rôle minimum | Autre condition |
+|---|---|---|
+| Voir les sessions, recevoir les sous-titres | Membre | les sessions privées des autres ne sont visibles qu'à partir de Gestionnaire de réunion |
+| Envoyer le son à une session | — | être propriétaire de la session, ou Gestionnaire de réunion |
+| Lister les profils de transcription | Réunion rapide | |
+| Créer une session, régler son filigrane, la terminer | Gestionnaire de réunion | l'organisation doit avoir l'option « Sessions » activée |
+
+Si l'accès à une session est perdu en plein direct (compte retiré de l'organisation), l'envoi du
+son continue mais les sous-titres s'arrêtent, avec un message : il ne s'agit pas d'une
+déconnexion, se reconnecter n'y changerait rien.
+
 ## Désinstallation
 
 Menu **LinTO Live › Désinstaller LinTO Live…** (macOS) ou **Fichier › Désinstaller LinTO Live…**

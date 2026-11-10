@@ -27,6 +27,8 @@ export interface SidebarProps {
   onLogout(): void
   /** On air: logging out and changing organisation are refused (the show needs both). */
   onAir: boolean
+  /** Why « Nouvelle session… » is unavailable (the user's role or the organisation forbids it); absent = available. */
+  newSessionBlocked?: string
 }
 
 const hostOf = (u: string): string => {
@@ -101,7 +103,8 @@ export function Sidebar(p: SidebarProps) {
             )}
           </>
         )}
-        <button type="button" className="sidebar-row sidebar-new" onClick={p.onNew}>
+        <button type="button" className="sidebar-row sidebar-new" onClick={p.onNew}
+          disabled={p.newSessionBlocked !== undefined} title={p.newSessionBlocked}>
           <PlusIcon size={12} className="sidebar-row-icon" />
           <span className="sidebar-row-name">Nouvelle session…</span>
         </button>

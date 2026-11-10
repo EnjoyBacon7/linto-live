@@ -23,6 +23,8 @@ export interface InspectorProps {
   watermark?: WatermarkTarget
   onWatermarkChange?(patch: Partial<Watermark>): void
   onWatermarkSettings?(): void
+  /** Why the watermark cannot be changed (it is stored on the LinTO session); absent = it can. */
+  watermarkBlocked?: string
 }
 
 function Check({ label, checked, disabled, onChange }: {
@@ -65,6 +67,7 @@ export function Inspector(p: InspectorProps) {
   const opts = (items: { id: string; name: string }[] = []) => items.map((d) => ({ value: d.id, label: d.name }))
   const shown = settings?.subtitlesVisible !== false
   const wm = p.watermark && 'watermark' in p.watermark ? p.watermark.watermark : null
+  const wmEditable = !!wm && p.watermarkBlocked === undefined
   return (
     <aside className="inspector" aria-label="Réglages">
       <section className="inspector-group">
@@ -94,13 +97,14 @@ export function Inspector(p: InspectorProps) {
               onChange={(v) => onChange({ subtitleFontSize: v })} />
             {data?.watermarkEnabled && (
               <div className="inspector-subgroup">
-                <Check label="Afficher le filigrane" checked={wm?.display ?? false} disabled={!wm}
+                <Check label="Afficher le filigrane" checked={wm?.display ?? false} disabled={!wmEditable}
                   onChange={(v) => p.onWatermarkChange?.({ display: v })} />
-                <Check label="Épingler le filigrane" checked={wm?.pinned ?? false} disabled={!wm?.display}
+                <Check label="Épingler le filigrane" checked={wm?.pinned ?? false} disabled={!wmEditable || !wm?.display}
                   onChange={(v) => p.onWatermarkChange?.({ pinned: v })} />
-                <Button className="inspector-control" disabled={!wm} onClick={() => p.onWatermarkSettings?.()}>
+                <Button className="inspector-control" disabled={!wmEditable} onClick={() => p.onWatermarkSettings?.()}>
                   Paramètres du filigrane…
                 </Button>
+                {wm && p.watermarkBlocked && <p className="inspector-note">{p.watermarkBlocked}</p>}
                 {p.watermark && 'pending' in p.watermark && (
                   <p className="inspector-note">Réglable une fois la session créée sur LinTO (au démarrage).</p>
                 )}

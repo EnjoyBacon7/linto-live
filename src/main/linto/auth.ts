@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import { UnauthorizedError, type AuthMethod, type SavedLogin } from '../../shared/types'
+import { LintoHttpError, UnauthorizedError, type AuthMethod, type SavedLogin } from '../../shared/types'
 import type { LintoApi } from './api'
 import type { LintoUrls } from './instance'
 import { denyAllPermissions } from '../security'
@@ -26,11 +26,17 @@ export class InvalidCredentialsError extends Error {
   }
 }
 
+export const MSG_ACCOUNT_DISABLED = 'Ton compte LinTO est désactivé : contacte un administrateur pour le réactiver.'
+export const MSG_EMAIL_NOT_VERIFIED = "Ton adresse e-mail n'est pas encore vérifiée : ouvre le lien reçu par e-mail, puis reconnecte-toi."
+
 export async function loginWithPassword(api: LintoApi, email: string, password: string): Promise<string> {
   try {
     return (await api.loginLocal(email, password)).token
   } catch (e) {
     if (e instanceof UnauthorizedError) throw new InvalidCredentialsError()
+    // LinTO: 423 DisabledUser (suspended account), 403 EmailNotVerified.
+    if (e instanceof LintoHttpError && e.status === 423) throw new Error(MSG_ACCOUNT_DISABLED, { cause: e })
+    if (e instanceof LintoHttpError && e.status === 403) throw new Error(MSG_EMAIL_NOT_VERIFIED, { cause: e })
     throw e
   }
 }

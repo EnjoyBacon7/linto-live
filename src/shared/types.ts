@@ -1,3 +1,5 @@
+import type { OrgRights } from './rights'
+
 export interface StreamEndpoints {
   srt?: string
   rtmp?: string
@@ -38,13 +40,44 @@ export interface WatermarkConfig {
 }
 /** An exact-name check before « Nouvelle session »: see lookupSession. */
 export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'terminated'
-export interface Organization { id: string; name: string }
+/** `rights`: what the user may do there (absent when LinTO did not say: then LinTO alone decides). */
+export interface Organization { id: string; name: string; rights?: OrgRights }
 export interface TranscriberProfile { id: number; name: string; languages?: string[] }
 export interface AuthMethod { path: string; from: string; name: string }
+/** LinTO rejected the token (expired, revoked…): logging in again is the fix. */
 export class UnauthorizedError extends Error {
   constructor(message = 'Unauthorized') {
     super(message)
     this.name = 'UnauthorizedError'
+  }
+}
+
+/** A LinTO HTTP call failed with a status other than 401. `serverMessage` / `code`: LinTO's JSON error body. */
+export class LintoHttpError extends Error {
+  constructor(
+    readonly status: number,
+    body: string,
+    readonly serverMessage?: string,
+    readonly code?: string
+  ) {
+    super(`LinTO HTTP ${status}: ${body}`)
+    this.name = 'LintoHttpError'
+  }
+}
+
+/** The token is valid but LinTO refuses the action (role, organisation permission, resource of another organisation). */
+export class ForbiddenError extends LintoHttpError {
+  constructor(status: number, body: string, serverMessage?: string, code?: string) {
+    super(status, body, serverMessage, code)
+    this.name = 'ForbiddenError'
+  }
+}
+
+/** The organisation or session no longer exists (deleted on LinTO). */
+export class NotFoundError extends LintoHttpError {
+  constructor(status: number, body: string, serverMessage?: string, code?: string) {
+    super(status, body, serverMessage, code)
+    this.name = 'NotFoundError'
   }
 }
 

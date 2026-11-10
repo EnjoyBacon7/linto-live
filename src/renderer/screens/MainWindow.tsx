@@ -131,7 +131,16 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
 
   // ---- Derived ----
   const summary = sel && !sel.pending ? sessions?.find((s) => s.name === sel.name) : undefined
-  const startHint = !sel ? 'Choisis une session.'
+  const orgs = data?.organizations ?? []
+  const org = orgs.find((o) => o.id === settings?.orgId)
+  /** Why session management (create, watermark, terminate) is refused here; undefined = allowed or unknown. */
+  const manageBlocked = org?.rights && !org.rights.manageSessions ? (org.rights.reason ?? 'Action non autorisée dans cette organisation.') : undefined
+  /** Logged in but in no organisation (never added, or removed from the last one). */
+  const noOrg = data !== null && orgs.length === 0 && !loadError
+  /** Several organisations and none chosen (e.g. the saved one is gone): nothing can be listed yet. */
+  const pickOrg = !noOrg && data !== null && !settings?.orgId && orgs.length > 1
+  const startHint = !settings?.orgId ? 'Choisis une organisation.'
+    : !sel ? 'Choisis une session.'
     : !settings?.audioDeviceId ? 'Choisis un micro.' : undefined
   // 'error' = the last start failed: retrying is allowed. Any other phase means a show is starting/running.
   const idle = state.phase === 'idle' || state.phase === 'error'
@@ -179,7 +188,11 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     }
   }
   // Buttons cannot reach a sheet's background, but menu/tray commands can: never replace an open sheet.
-  const askTerminate = (): void => { if (onAir && !busyRef.current && !sheetRef.current) setSheet({ kind: 'terminate' }) }
+  const askTerminate = (): void => {
+    if (!onAir || busyRef.current || sheetRef.current) return
+    if (manageBlocked) { setError(manageBlocked); return } // menu / tray: the button is disabled
+    setSheet({ kind: 'terminate' })
+  }
   const terminate = async (): Promise<void> => {
     setSheet(null)
     if (busyRef.current) return
@@ -199,7 +212,11 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const showOutput = (): void => {
     window.lintoLive.live.showOutputWindow().catch((e) => setError(ipcErrorMessage(e)))
   }
-  const openNew = (): void => { if (!busyRef.current && !sheetRef.current) setSheet({ kind: 'new' }) }
+  const openNew = (): void => {
+    if (busyRef.current || sheetRef.current) return
+    if (manageBlocked) { setError(manageBlocked); return } // menu / tray: the row is disabled
+    setSheet({ kind: 'new' })
+  }
   const logout = async (): Promise<void> => {
     if (onAir) return
     try {
@@ -260,7 +277,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   }
   /** Saved on the LinTO session (like LinTO Studio); shown at once, rolled back by a refresh on failure. */
   const saveWatermark = (patch: Partial<Watermark>): void => {
-    if (!summary) return
+    if (!summary || manageBlocked) return
     const w: Watermark = { ...summary.watermark, ...patch }
     const id = summary.id
     setSessions((list) => list?.map((x) => (x.id === id ? { ...x, watermark: w } : x)) ?? list)
@@ -314,6 +331,14 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         </Banner>
       )}
       {state.warning && <Banner tone="warn">{state.warning}</Banner>}
+      {noOrg && (
+        <Banner tone="warn" action={<Button onClick={() => void loadSetup()}>Réessayer</Button>}>
+          Ton compte n’appartient à aucune organisation LinTO : demande à un administrateur de t’y ajouter.
+        </Banner>
+      )}
+      {pickOrg && (
+        <Banner tone="warn">Choisis une organisation dans le menu Compte (en bas de la barre latérale).</Banner>
+      )}
       {loadError && (
         <Banner tone="bad" action={<Button onClick={() => void loadSetup()}>Réessayer</Button>}>
           <span className="selectable">{loadError}</span>
@@ -328,7 +353,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       )}
     </>
   )
-  const hasBanner = (authRequired && onAir) || !!state.warning || !!loadError || !!error
+  const hasBanner = (authRequired && onAir) || !!state.warning || !!loadError || !!error || noOrg || pickOrg
 
   return (
     <div className="main-window">
@@ -346,6 +371,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         onSwitchOrg={(id) => void switchOrg(id)}
         onLogout={() => void logout()}
         onAir={onAir}
+        {...(manageBlocked ? { newSessionBlocked: manageBlocked } : {})}
       />
       <div className="content">
         <Toolbar
@@ -361,12 +387,14 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           canShowOutput={state.obs === 'running'}
           onShowOutput={showOutput}
           onTerminate={askTerminate}
+          {...(manageBlocked ? { terminateBlocked: manageBlocked } : {})}
         />
         <div className="content-body">
           <Stage onAir={onAir} hasCamera={!!settings?.videoDeviceId} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
+            {...(manageBlocked ? { watermarkBlocked: manageBlocked } : {})}
             onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />
         </div>
       </div>
