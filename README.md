@@ -97,7 +97,9 @@ Conseils :
    affichage des sous-titres et du filigrane.
    Avec une caméra, son aperçu s'affiche en haut du centre de la fenêtre. En dessous, la
    transcription au fil de la parole, avec tout ce qui a été dit depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter
-   dans le texte suspend le défilement ; « Revenir au direct » le reprend.
+   dans le texte suspend le défilement ; « Revenir au direct » le reprend. Comme sur LinTO Studio,
+   chaque segment porte son heure et la langue détectée (là où elle change). Après Arrêter,
+   **Exporter…** (en bas) enregistre la transcription en texte, SRT, WebVTT ou JSON.
 4. Ouvrir la **fenêtre de sortie** (bouton écran de la barre d'outils, ou menu Fenêtre ›
    **Afficher la fenêtre de sortie**, ⌘1 / Ctrl+1), avant ou pendant le direct : elle ne s'ouvre
    jamais seule. La glisser sur l'écran de la salle ; clic droit › « Plein écran » pour la passer en

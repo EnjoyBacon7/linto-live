@@ -26,6 +26,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       clearSubtitles: vi.fn().mockResolvedValue(undefined),
       getState: vi.fn().mockResolvedValue({ phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }),
       getTranscript: vi.fn().mockResolvedValue({ finals: [], partial: null }),
+      exportTranscript: vi.fn().mockResolvedValue({ saved: true }),
       ...over.live
     },
     preview: { subscribe: vi.fn().mockResolvedValue(undefined), unsubscribe: vi.fn().mockResolvedValue(undefined), ...over.preview },

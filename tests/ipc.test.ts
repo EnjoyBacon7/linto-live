@@ -14,7 +14,7 @@ describe('IPC constants', () => {
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
         'setupLoad', 'setupSave', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
-        'liveGetTranscript', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
+        'liveGetTranscript', 'liveExportTranscript', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
       ].sort()
     )
   })
@@ -61,6 +61,7 @@ describe('createLintoLiveApi', () => {
     await api.live.showOutputWindow()
     await api.live.getState()
     await api.live.getTranscript()
+    await api.live.exportTranscript('srt')
     await api.app.uninstall()
     await api.app.reportShellState({ loggedIn: true, sessionName: 'S', canStart: true })
     await api.preview.subscribe()
@@ -83,6 +84,7 @@ describe('createLintoLiveApi', () => {
       ['live:show-output'],
       ['live:get-state'],
       ['live:get-transcript'],
+      ['live:export-transcript', 'srt'],
       [IPC.appUninstall],
       ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }],
       ['preview:subscribe'],

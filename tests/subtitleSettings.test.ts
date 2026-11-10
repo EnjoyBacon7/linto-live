@@ -179,6 +179,6 @@ describe('LiveController subtitle style', () => {
     t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
     t.live.clearSubtitles()
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'reset' })
-    expect(t.live.getTranscript().finals).toEqual([{ id: 1, text: 'Bonjour' }])
+    expect(t.live.getTranscript().finals).toMatchObject([{ id: 1, text: 'Bonjour' }])
   })
 })

@@ -610,14 +610,15 @@ export class LiveController extends EventEmitter {
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
       this.pushStyle()
       this.d.overlay.push({ type: 'reset' })
+      const startedAt = Date.now()
       this.setState({
         phase: 'live',
         session: { name: res.session.name, status: res.session.status },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : MSG_NO_STREAM,
-        startedAt: Date.now()
+        startedAt
       })
-      this.sendTranscript(this.transcript.reset())
+      this.sendTranscript(this.transcript.reset(res.session.name, startedAt))
       this.d.captions.open(res.session.id, res.channel.id)
 
       const c = this.ctl

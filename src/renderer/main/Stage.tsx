@@ -1,6 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { applyTranscriptUpdate } from '../../shared/transcript'
-import type { Transcript as TranscriptData, TranscriptSegment } from '../../shared/types'
+import { applyTranscriptUpdate, clockTime, segmentLabels } from '../../shared/transcript'
+import type { Transcript as TranscriptData, TranscriptExportFormat, TranscriptSegment } from '../../shared/types'
+import { ipcErrorMessage } from '../ipcError'
+import { PopUp, type PopUpOption } from '../ui/PopUp'
 
 export interface StageProps {
   /** A show is on air (changes the empty-state wording only). */
@@ -53,14 +55,64 @@ function CameraPreview() {
   )
 }
 
-/** A speaker label where the speaker changes (LinTO only names them when the session diarizes). */
+/**
+ * One segment as on LinTO Studio: time and language in a side column, the speaker above the text where it
+ * changes (LinTO only names speakers when the session diarizes).
+ */
 function Segment({ s, prev, partial }: { s: TranscriptSegment; prev?: TranscriptSegment; partial?: boolean }) {
-  const speaker = s.locutor && s.locutor !== prev?.locutor ? s.locutor : null
+  const l = segmentLabels(s, prev)
+  const time = clockTime(s.at)
   return (
-    <>
-      {speaker && <p className="transcript-speaker">{speaker}</p>}
-      <p className={partial ? 'transcript-segment is-partial' : 'transcript-segment'}>{s.text}</p>
-    </>
+    <div className={l.speaker || l.lang ? 'transcript-turn is-new-turn' : 'transcript-turn'}>
+      <div className="transcript-meta">
+        {l.time && <time className="transcript-time" dateTime={new Date(s.at).toISOString()}>{time}</time>}
+        {l.lang && <span className="transcript-lang">{s.lang}</span>}
+      </div>
+      <div className="transcript-content">
+        {l.speaker && <p className="transcript-speaker">{s.locutor}</p>}
+        <p className={partial ? 'transcript-segment is-partial' : 'transcript-segment'}>{s.text}</p>
+      </div>
+    </div>
+  )
+}
+
+const EXPORT_OPTIONS: PopUpOption[] = [
+  { value: 'txt', label: 'Texte (.txt)' },
+  { value: 'srt', label: 'Sous-titres SubRip (.srt)' },
+  { value: 'vtt', label: 'Sous-titres WebVTT (.vtt)' },
+  { value: 'json', label: 'JSON (.json)' }
+]
+
+/** Once the show has ended: « Exporter » the transcript (native save dialog in main). */
+function ExportBar({ count }: { count: number }) {
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<{ error: boolean; text: string } | null>(null)
+  const run = async (format: string): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setNote(null)
+    try {
+      const r = await window.lintoLive.live.exportTranscript(format as TranscriptExportFormat)
+      if (r.saved) setNote({ error: false, text: 'Transcription exportée.' })
+    } catch (e) {
+      setNote({ error: true, text: ipcErrorMessage(e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="transcript-export">
+      <span className="transcript-export-label">
+        Transcription terminée · {count} segment{count > 1 ? 's' : ''}
+      </span>
+      {note && (
+        <span className={note.error ? 'transcript-export-note is-error' : 'transcript-export-note'} role="status">
+          {note.text}
+        </span>
+      )}
+      <PopUp label="Exporter la transcription" value="" placeholder="Exporter…" options={EXPORT_OPTIONS}
+        disabled={busy} onChange={(v) => void run(v)} />
+    </div>
   )
 }
 
@@ -115,6 +167,7 @@ export function Stage({ onAir, hasCamera, banners }: StageProps) {
           <button type="button" className="transcript-resume" onClick={resume}>Revenir au direct</button>
         )}
       </div>
+      {!onAir && t.finals.length > 0 && <ExportBar count={t.finals.length} />}
     </section>
   )
 }
