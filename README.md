@@ -97,7 +97,9 @@ Conseils :
    affichage des sous-titres et du filigrane.
    Le centre de la fenêtre affiche la transcription au fil de la parole, avec tout ce qui a été dit
    depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter
-   dans le texte suspend le défilement ; « Revenir au direct » le reprend.
+   dans le texte suspend le défilement ; « Revenir au direct » le reprend. Comme sur LinTO Studio,
+   chaque segment porte son heure et la langue détectée (là où elle change). Après Arrêter,
+   **Exporter…** (en bas) enregistre la transcription en texte, SRT, WebVTT ou JSON.
 4. **Démarrer** (⌘↩ / Ctrl+Entrée) : une **fenêtre de sortie** s'ouvre. La glisser sur l'écran de la
    salle ; clic droit › « Plein écran » pour la passer en plein écran sur cet écran.
    Si elle a été fermée : menu Fenêtre › **Afficher la fenêtre de sortie** (⌘1 / Ctrl+1).

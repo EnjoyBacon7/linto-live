@@ -3,14 +3,17 @@ import {
   shell, Tray
 } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
-import { UnauthorizedError, type Settings, type SessionLookup, type SessionSummary, type TranscriptUpdate, type WatermarkConfig } from '../shared/types'
+import {
+  TRANSCRIPT_EXPORT_FORMATS, UnauthorizedError, type Settings, type SessionLookup, type SessionSummary, type TranscriptExportFormat,
+  type TranscriptUpdate, type WatermarkConfig
+} from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -20,6 +23,7 @@ import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
 import { CaptionStream } from './linto/captions'
+import { EXPORT_FILTERS, exportFileName, exportTranscript } from './linto/transcriptExport'
 import { loadInstance, STUDIO_WATERMARK_DEFAULTS, type LintoUrls } from './linto/instance'
 import { checkWatermark, WATERMARK_META_KEY } from './linto/watermark'
 import {
@@ -381,6 +385,21 @@ function main(): void {
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   ipcMain.handle(IPC.liveGetState, () => live.getState())
   ipcMain.handle(IPC.liveGetTranscript, () => live.getTranscript())
+  ipcMain.handle(IPC.liveExportTranscript, async (_e, raw: unknown): Promise<{ saved: boolean }> => {
+    if (!(TRANSCRIPT_EXPORT_FORMATS as readonly unknown[]).includes(raw)) throw new Error('Format d’export inconnu.')
+    const format = raw as TranscriptExportFormat
+    const t = live.getTranscript()
+    if (t.finals.length === 0) throw new Error('Rien à exporter : la transcription est vide.')
+    const opts = {
+      title: 'Exporter la transcription',
+      defaultPath: join(app.getPath('documents'), exportFileName(t, format)),
+      filters: [EXPORT_FILTERS[format]]
+    }
+    const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts)
+    if (r.canceled || !r.filePath) return { saved: false }
+    await writeFile(r.filePath, exportTranscript(t, format), 'utf8')
+    return { saved: true }
+  })
   ipcMain.handle(IPC.liveClearSubtitles, () => live.clearSubtitles())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)

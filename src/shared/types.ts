@@ -75,12 +75,28 @@ export const DEFAULT_SUBTITLE_FONT_SIZE = 48
 export const SUBTITLE_FONT_SIZE_MIN = 12
 export const SUBTITLE_FONT_SIZE_MAX = 96
 
-/** One transcribed segment of the session on air (`locutor`: the speaker, when LinTO diarizes). */
-export interface TranscriptSegment { id: number; text: string; locutor?: string }
-/** Finalized segments (oldest first) and the segment still being transcribed. */
-export interface Transcript { finals: TranscriptSegment[]; partial: TranscriptSegment | null }
+/**
+ * One transcribed segment of the session on air. `at` / `endAt`: when it was said (ms epoch, from LinTO's
+ * `astart` + `start`/`end` as on LinTO Studio, else when it reached the app); `lang`: the language LinTO
+ * detected (e.g. 'fr-FR'); `locutor`: the speaker, when LinTO diarizes.
+ */
+export interface TranscriptSegment { id: number; text: string; at: number; endAt?: number; lang?: string; locutor?: string }
+/**
+ * Finalized segments (oldest first) and the segment still being transcribed; `sessionName` / `startedAt`
+ * (ms epoch): the show they belong to (absent before the first one).
+ */
+export interface Transcript {
+  finals: TranscriptSegment[]
+  partial: TranscriptSegment | null
+  sessionName?: string
+  startedAt?: number
+}
 /** Change to the transcript: a segment finalized, the partial changed (null = none), or a new show began. */
 export type TranscriptUpdate =
   | { kind: 'final'; segment: TranscriptSegment }
   | { kind: 'partial'; segment: TranscriptSegment | null }
-  | { kind: 'reset' }
+  | { kind: 'reset'; sessionName?: string; startedAt?: number }
+
+/** Export formats of the transcript (« Exporter » once the show has ended). */
+export const TRANSCRIPT_EXPORT_FORMATS = ['txt', 'srt', 'vtt', 'json'] as const
+export type TranscriptExportFormat = (typeof TRANSCRIPT_EXPORT_FORMATS)[number]

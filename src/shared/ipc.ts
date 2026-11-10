@@ -1,6 +1,6 @@
 import type {
   AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
-  TranscriberProfile, Transcript, TranscriptUpdate, Watermark
+  TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, Watermark
 } from './types'
 
 export interface SetupData {
@@ -76,6 +76,8 @@ export interface LintoLiveApi {
     getState(): Promise<LiveState>
     /** Transcript of the show on air or of the last one (the 'transcript' event only carries changes). */
     getTranscript(): Promise<Transcript>
+    /** Saves the finalized transcript where the user picks (save dialog); false if they cancelled. */
+    exportTranscript(format: TranscriptExportFormat): Promise<{ saved: boolean }>
   }
   app: {
     uninstall(): Promise<void>
@@ -109,6 +111,7 @@ export const IPC = {
   liveGetState: 'live:get-state',
   liveClearSubtitles: 'live:clear-subtitles',
   liveGetTranscript: 'live:get-transcript',
+  liveExportTranscript: 'live:export-transcript',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   evtLiveState: 'evt:live-state',
@@ -161,7 +164,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       showOutputWindow: () => call(IPC.liveShowOutput),
       clearSubtitles: () => call(IPC.liveClearSubtitles),
       getState: () => call(IPC.liveGetState),
-      getTranscript: () => call(IPC.liveGetTranscript)
+      getTranscript: () => call(IPC.liveGetTranscript),
+      exportTranscript: (format) => call(IPC.liveExportTranscript, format)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {

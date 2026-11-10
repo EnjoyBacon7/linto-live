@@ -2,7 +2,19 @@ import { EventEmitter } from 'node:events'
 import { io as realIo } from 'socket.io-client'
 import type { LintoUrls } from './instance'
 
-export interface CaptionEvent { segmentId: number; text: string; locutor?: string | null }
+/**
+ * A LinTO caption. `astart`: the channel's absolute start (ISO date); `start` / `end`: the segment's bounds
+ * in s from `astart`; `lang`: the language detected (e.g. 'fr-FR').
+ */
+export interface CaptionEvent {
+  segmentId: number
+  text: string
+  locutor?: string | null
+  lang?: string | null
+  astart?: string | null
+  start?: number | null
+  end?: number | null
+}
 
 type IoFn = typeof realIo
 type Socket = ReturnType<IoFn>

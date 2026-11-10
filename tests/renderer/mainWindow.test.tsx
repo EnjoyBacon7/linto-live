@@ -435,21 +435,49 @@ describe('Switch while live', () => {
 describe('Stage, inspector and status bar', () => {
   it('shows the transcript fetched on mount, then follows the transcript events', async () => {
     setup()
-    fn(api.live.getTranscript).mockResolvedValue({ finals: [{ id: 1, text: 'Bonjour à tous', locutor: 'Alice' }], partial: null })
+    const at = new Date(2026, 10, 10, 14, 3, 12).getTime()
+    fn(api.live.getTranscript).mockResolvedValue({
+      finals: [{ id: 1, text: 'Bonjour à tous', at, endAt: at + 1000, lang: 'fr-FR', locutor: 'Alice' }], partial: null
+    })
     await renderMain()
     const log = await screen.findByRole('log')
     expect(within(log).getByText('Bonjour à tous')).toBeTruthy()
     expect(within(log).getByText('Alice')).toBeTruthy()
-    act(() => emit('transcript', { kind: 'partial', segment: { id: 2, text: 'bienvenue', locutor: 'Alice' } }))
+    // As on LinTO Studio: the time and the language next to the turn.
+    expect(within(log).getByText('14:03:12')).toBeTruthy()
+    expect(within(log).getByText('fr-FR')).toBeTruthy()
+    act(() => emit('transcript', { kind: 'partial', segment: { id: 2, text: 'bienvenue', at: at + 2000, lang: 'fr-FR', locutor: 'Alice' } }))
     expect(within(log).getByText('bienvenue').className).toContain('is-partial')
     expect(within(log).getAllByText('Alice')).toHaveLength(1) // same speaker: no second label
-    act(() => emit('transcript', { kind: 'final', segment: { id: 2, text: 'bienvenue à la conférence', locutor: 'Bob' } }))
+    expect(within(log).getAllByText('fr-FR')).toHaveLength(1) // same language: no second tag
+    expect(within(log).queryByText('14:03:14')).toBeNull() // same speaker, no pause: no second time
+    act(() => emit('transcript', { kind: 'final', segment: { id: 2, text: 'bienvenue à la conférence', at: at + 2000, lang: 'fr-FR', locutor: 'Bob' } }))
+    expect(within(log).getByText('14:03:14')).toBeTruthy()
     expect(within(log).queryByText('bienvenue')).toBeNull()
     expect(within(log).getByText('bienvenue à la conférence').className).not.toContain('is-partial')
     expect(within(log).getByText('Bob')).toBeTruthy()
     act(() => emit('transcript', { kind: 'reset' }))
     expect(screen.queryByRole('log')).toBeNull()
     expect(screen.getByText('La transcription s’affichera ici au démarrage du direct.')).toBeTruthy()
+  })
+
+  it('offers the export once the show has ended, not while on air', async () => {
+    setup()
+    fn(api.live.getTranscript).mockResolvedValue({ finals: [{ id: 1, text: 'Bonjour', at: Date.now() }], partial: null })
+    await renderMain()
+    await screen.findByRole('log')
+    const pick = screen.getByLabelText('Exporter la transcription')
+    expect(screen.getByText('Transcription terminée · 1 segment')).toBeTruthy()
+    await userEvent.selectOptions(pick, 'srt')
+    expect(api.live.exportTranscript).toHaveBeenCalledWith('srt')
+    expect(await screen.findByText('Transcription exportée.')).toBeTruthy()
+
+    fn(api.live.exportTranscript).mockRejectedValueOnce(new Error("Error invoking remote method 'live:export-transcript': Error: Disque plein"))
+    await userEvent.selectOptions(screen.getByLabelText('Exporter la transcription'), 'txt')
+    expect(await screen.findByText('Disque plein')).toBeTruthy()
+
+    act(() => emit('live-state', live()))
+    expect(screen.queryByLabelText('Exporter la transcription')).toBeNull()
   })
 
   it('on air with nothing said yet, waits for words', async () => {

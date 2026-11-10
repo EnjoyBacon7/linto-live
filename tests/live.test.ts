@@ -183,23 +183,28 @@ describe('LiveController', () => {
     const updates: TranscriptUpdate[] = []
     t.live.on('transcript', (u: TranscriptUpdate) => updates.push(u))
     const nStates = t.states.length
-    t.captions.emit('partial', { segmentId: 1, text: 'Bonjour' })
-    t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous', locutor: 'Alice' })
+    const astart = '2026-11-10T09:00:00.000Z'
+    const at = Date.parse(astart) + 12_000
+    t.captions.emit('partial', { segmentId: 1, text: 'Bonjour', astart, start: 12, lang: 'fr-FR' })
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous', locutor: 'Alice', astart, start: 12, end: 14.5, lang: 'fr-FR' })
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour à tous' })
+    const final = { id: 1, text: 'Bonjour à tous', at, endAt: at + 2500, lang: 'fr-FR', locutor: 'Alice' }
     expect(updates).toEqual([
-      { kind: 'partial', segment: { id: 1, text: 'Bonjour' } },
-      { kind: 'final', segment: { id: 1, text: 'Bonjour à tous', locutor: 'Alice' } }
+      { kind: 'partial', segment: { id: 1, text: 'Bonjour', at, lang: 'fr-FR' } },
+      { kind: 'final', segment: final }
     ])
     expect(t.states.length).toBe(nStates) // captions never re-send the live state
 
     t.overlay.push.mockClear()
+    const show = { sessionName: 'Conf', startedAt: t.last().startedAt }
     await t.live.stop()
     expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
     // The transcript outlives the show, until the next start.
-    expect(t.live.getTranscript()).toEqual({ finals: [{ id: 1, text: 'Bonjour à tous', locutor: 'Alice' }], partial: null })
+    expect(t.live.getTranscript()).toEqual({ finals: [final], partial: null, ...show })
     await t.live.start('Conf')
-    expect(updates.at(-1)).toEqual({ kind: 'reset' })
-    expect(t.live.getTranscript()).toEqual({ finals: [], partial: null })
+    const restarted = { sessionName: 'Conf', startedAt: t.last().startedAt }
+    expect(updates.at(-1)).toEqual({ kind: 'reset', ...restarted })
+    expect(t.live.getTranscript()).toEqual({ finals: [], partial: null, ...restarted })
   })
 
   it('terminated returns message and starts nothing', async () => {
@@ -545,7 +550,7 @@ describe('LiveController', () => {
       expect(t.last()).toMatchObject({ phase: 'live', session: { name: 'Conf' } })
       await vi.advanceTimersByTimeAsync(2_000)
       expect(c.startStream).toHaveBeenCalledTimes(2)
-      expect(t.live.getTranscript().finals).toEqual([{ id: 1, text: 'Bonjour' }])
+      expect(t.live.getTranscript().finals).toMatchObject([{ id: 1, text: 'Bonjour' }])
     })
 
     it('shutdown waits at most 3 s for the stream to stop', async () => {
@@ -659,10 +664,10 @@ describe('LiveController final fixes', () => {
       t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
       t.captions.emit('partial', { segmentId: 2, text: 'et bien' })
       t.captions.emit('partial', { segmentId: 3, text: '   ' }) // blank: ignored
-      expect(t.live.getTranscript().partial).toEqual({ id: 2, text: 'et bien' })
+      expect(t.live.getTranscript().partial).toMatchObject({ id: 2, text: 'et bien' })
       await t.live.stop()
       expect(updates.at(-1)).toEqual({ kind: 'partial', segment: null })
-      expect(t.live.getTranscript()).toEqual({ finals: [{ id: 1, text: 'Bonjour' }], partial: null })
+      expect(t.live.getTranscript()).toMatchObject({ finals: [{ id: 1, text: 'Bonjour' }], partial: null })
     })
   })
 
