@@ -516,6 +516,25 @@ describe('Stage, inspector and status bar', () => {
     expect(screen.queryByLabelText('Exporter la transcription')).toBeNull()
   })
 
+  it('shows the last show’s transcript only while its session is selected', async () => {
+    setup({}, setupData({ lastSessionName: 'Conférence' }))
+    fn(api.live.getTranscript).mockResolvedValue({
+      finals: [{ id: 1, text: 'Bonjour', at: Date.now() }], partial: null, sessionName: 'Conférence', startedAt: Date.now()
+    })
+    await renderMain()
+    await waitFor(() => expect(row('Conférence').getAttribute('aria-selected')).toBe('true'))
+    expect(within(await screen.findByRole('log')).getByText('Bonjour')).toBeTruthy()
+
+    await userEvent.click(row('Atelier'))
+    expect(screen.queryByRole('log')).toBeNull()
+    expect(screen.getByText('La transcription s’affichera ici au démarrage du direct.')).toBeTruthy()
+    expect(screen.queryByLabelText('Exporter la transcription')).toBeNull() // it would export Conférence's
+
+    await userEvent.click(row('Conférence'))
+    expect(within(screen.getByRole('log')).getByText('Bonjour')).toBeTruthy()
+    expect(screen.getByLabelText('Exporter la transcription')).toBeTruthy()
+  })
+
   it('on air with nothing said yet, waits for words', async () => {
     setup()
     await renderMain()
