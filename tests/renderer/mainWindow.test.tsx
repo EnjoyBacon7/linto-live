@@ -12,10 +12,10 @@ const fn = (x: unknown) => x as ReturnType<typeof vi.fn>
 
 const WM: Watermark = { display: false, pinned: false, content: 'Transcription by LinTO.ai $linto', frequency: 600, duration: 10 }
 const SESSIONS: SessionSummary[] = [
-  { id: 's1', name: 'Conférence', status: 'ready', canStream: true, watermark: WM },
-  { id: 's2', name: 'Atelier', status: 'paused', canStream: true, watermark: WM },
-  { id: 's3', name: 'Externe', status: 'on_schedule', canStream: false, watermark: WM },
-  { id: 's4', name: 'Plénière', status: 'active', canStream: true, watermark: WM }
+  { id: 's1', name: 'Conférence', status: 'ready', watermark: WM },
+  { id: 's2', name: 'Atelier', status: 'paused', watermark: WM },
+  { id: 's3', name: 'Externe', status: 'on_schedule', watermark: WM },
+  { id: 's4', name: 'Plénière', status: 'active', watermark: WM }
 ]
 
 const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<SetupData> = {}): SetupData => ({
@@ -38,7 +38,10 @@ let api: LintoLiveApi
 let emit: (evt: string, payload?: unknown) => void
 
 function setup(over: Parameters<typeof makeApi>[0] = {}, data: SetupData = setupData(), sessions: SessionSummary[] = SESSIONS) {
-  api = makeApi({ setup: { load: vi.fn().mockResolvedValue(data) }, sessions: { list: vi.fn().mockResolvedValue(sessions) }, ...over })
+  api = makeApi({
+    setup: { load: vi.fn().mockResolvedValue(data) }, ...over,
+    sessions: { list: vi.fn().mockResolvedValue(sessions), ...over.sessions }
+  })
   emit = withEvents(api)
   window.lintoLive = api
   return api
@@ -56,30 +59,20 @@ beforeEach(() => { vi.useRealTimers() })
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('Sidebar', () => {
-  it('lists the sessions with a status (title) and dims the ones LinTO Live cannot stream to', async () => {
+  it('lists the sessions with a status (title)', async () => {
     setup()
     await renderMain()
     expect(row('Conférence').getAttribute('title')).toBe('Prête')
     expect(row('Atelier').getAttribute('title')).toBe('En pause')
     expect(row('Plénière').getAttribute('title')).toBe('En direct')
     const ext = row('Externe')
-    expect(ext.getAttribute('title')).toBe(
-      'LinTO Live ne peut pas envoyer le son à cette session (droits insuffisants ou pas d\'entrée audio)')
-    expect(ext.className).toContain('is-dimmed')
+    expect(ext.getAttribute('title')).toBe('Planifiée')
+    expect(ext.className).not.toContain('is-dimmed')
     expect(ext.querySelector('.dot-idle')).toBeTruthy()
     expect(row('Plénière').querySelector('.dot-live')).toBeTruthy()
     expect(row('Conférence').querySelector('.dot-ok')).toBeTruthy()
     expect(row('Atelier').querySelector('.dot-warn')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Nouvelle session…' })).toBeTruthy()
-  })
-
-  it('a session that cannot be streamed to is selectable but Démarrer stays disabled', async () => {
-    setup()
-    await renderMain()
-    await userEvent.click(row('Externe'))
-    expect(row('Externe').getAttribute('aria-selected')).toBe('true')
-    expect(within(toolbar()).getByText('Externe')).toBeTruthy()
-    expect(startBtn().disabled).toBe(true)
   })
 
   it('shows an empty state', async () => {
@@ -211,11 +204,15 @@ describe('Nouvelle session…', () => {
     expect(saveOrder).toBeLessThan(fn(api.live.start).mock.invocationCallOrder[0]!)
   })
 
-  it('typing an existing name selects that session instead', async () => {
-    setup()
+  it('typing an existing name says so, then selects that session on « Utiliser »', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('usable') } })
     await renderMain()
     await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
     await userEvent.type(screen.getByLabelText('Nom'), 'Atelier{Enter}')
+    expect(api.sessions.lookup).toHaveBeenCalledWith('Atelier')
+    const d = await screen.findByRole('dialog', { name: 'La session « Atelier » existe déjà.' })
+    expect(within(d).getByText('Utiliser cette session ?')).toBeTruthy()
+    await userEvent.click(within(d).getByRole('button', { name: 'Utiliser' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(screen.getAllByRole('option', { name: 'Atelier' })).toHaveLength(1)
     expect(row('Atelier').getAttribute('aria-selected')).toBe('true')
@@ -223,6 +220,41 @@ describe('Nouvelle session…', () => {
     await userEvent.click(startBtn())
     expect(api.live.start).toHaveBeenCalledWith('Atelier')
     expect(fn(api.setup.save).mock.calls.some(([p]) => 'profileId' in (p as object))).toBe(false)
+  })
+
+  it('Annuler on « existe déjà » selects nothing', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('usable') } })
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Atelier{Enter}')
+    await userEvent.click(await screen.findByRole('button', { name: 'Annuler' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(row('Atelier').getAttribute('aria-selected')).toBe('false')
+  })
+
+  it('refuses the name of a session the user has no rights on (not listed)', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('forbidden') } })
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Privée{Enter}')
+    const d = await screen.findByRole('dialog', { name: 'La session « Privée » existe déjà.' })
+    expect(within(d).getByText("Tu n'as pas les droits suffisants pour l'utiliser. Choisis un autre nom.")).toBeTruthy()
+    expect(within(d).queryByRole('button', { name: 'Utiliser' })).toBeNull()
+    await userEvent.click(within(d).getByRole('button', { name: 'OK' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('option', { name: 'Privée' })).toBeNull()
+    expect(api.live.start).not.toHaveBeenCalled()
+  })
+
+  it('refuses the name of a terminated session', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('terminated') } })
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Ancienne{Enter}')
+    const d = await screen.findByRole('dialog', { name: 'La session « Ancienne » existe déjà.' })
+    expect(within(d).getByText('Elle est terminée et ne peut pas être reprise. Choisis un autre nom.')).toBeTruthy()
+    await userEvent.click(within(d).getByRole('button', { name: 'OK' }))
+    expect(screen.queryByRole('option', { name: 'Ancienne' })).toBeNull()
   })
 
   it('OK is disabled without a name; Escape cancels', async () => {
@@ -367,12 +399,17 @@ describe('Switch while live', () => {
     expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('does not offer to switch to a session that cannot be streamed to', async () => {
-    setup()
+  it('an existing name typed while live offers to switch to it', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('usable') } })
     await renderMain()
     act(() => emit('live-state', live()))
-    await userEvent.click(row('Externe'))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Atelier{Enter}')
+    const d = await screen.findByRole('dialog', { name: 'La session « Atelier » existe déjà.' })
+    expect(within(d).getByText('Basculer le direct sur cette session ?')).toBeTruthy()
+    await userEvent.click(within(d).getByRole('button', { name: 'Basculer' }))
+    expect(api.live.start).toHaveBeenCalledWith('Atelier')
+    expect(fn(api.setup.save).mock.calls.some(([p]) => 'profileId' in (p as object))).toBe(false)
   })
 
   it('a new session typed while live asks to switch, saving its profile first', async () => {

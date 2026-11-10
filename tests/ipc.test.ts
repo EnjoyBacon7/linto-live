@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
-        'setupLoad', 'setupSave', 'sessionsList', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
+        'setupLoad', 'setupSave', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
         'appUninstall', 'shellState', 'evtLiveState', 'evtPreview', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtCaptionLine',
         'previewSubscribe', 'previewUnsubscribe'
       ].sort()
@@ -54,6 +54,7 @@ describe('createLintoLiveApi', () => {
     await api.setup.load()
     await api.setup.save({ instance: 'i' })
     await api.sessions.list()
+    await api.sessions.lookup('S')
     await api.live.start('S')
     await api.live.stop()
     await api.live.terminate()
@@ -74,6 +75,7 @@ describe('createLintoLiveApi', () => {
       [IPC.setupLoad],
       [IPC.setupSave, { instance: 'i' }],
       [IPC.sessionsList],
+      ['sessions:lookup', 'S'],
       [IPC.liveStart, 'S'],
       [IPC.liveStop],
       [IPC.liveTerminate],

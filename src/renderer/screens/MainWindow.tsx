@@ -10,7 +10,7 @@ import { ConfirmSheet } from '../main/ConfirmSheet'
 import { Inspector, type WatermarkTarget } from '../main/Inspector'
 import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
-import { NO_STREAM_REASON, Sidebar } from '../main/Sidebar'
+import { Sidebar } from '../main/Sidebar'
 import { Stage } from '../main/Stage'
 import { Toolbar, type Busy } from '../main/Toolbar'
 import { isOnAir } from '../main/useLive'
@@ -43,6 +43,8 @@ type SheetState =
   | { kind: 'switch'; target: Selection }
   | { kind: 'login' }
   | { kind: 'watermark' }
+  /** « Nouvelle session » hit an existing session: `usable` offers to use it, otherwise the name is refused. */
+  | { kind: 'exists'; name: string; usable: boolean; terminated?: boolean }
   | null
 
 const REFRESH_MS = 30_000
@@ -129,11 +131,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
 
   // ---- Derived ----
   const summary = sel && !sel.pending ? sessions?.find((s) => s.name === sel.name) : undefined
-  const canStream = !!sel && (!!sel.pending || (summary?.canStream ?? true))
   const startHint = !sel ? 'Choisis une session.'
     : !settings?.videoDeviceId ? 'Choisis une caméra.'
-    : !settings.audioDeviceId ? 'Choisis un micro.'
-    : !canStream ? NO_STREAM_REASON : undefined
+    : !settings.audioDeviceId ? 'Choisis un micro.' : undefined
   // 'error' = the last start failed: retrying is allowed. Any other phase means a show is starting/running.
   const idle = state.phase === 'idle' || state.phase === 'error'
   const canStart = idle && busy === null && startHint === undefined
@@ -216,24 +216,43 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       return
     }
     // On air: clicking another session offers to switch the show to it.
-    if (busyRef.current || s.name === liveName || !s.canStream) return
+    if (busyRef.current || s.name === liveName) return
     setSheet({ kind: 'switch', target: { name: s.name } })
   }
-  const submitNew = (name: string, profileId: number | undefined): void => {
-    const existing = sessions?.find((s) => s.name === name)
-    const target: Selection = existing ? { name } : { name, pending: { profileId } }
-    if (!onAir) {
+  /** Asks LinTO about the name first: an existing session (listed or not, e.g. someone else's) is never re-created. */
+  const lookingUp = useRef(false)
+  const submitNew = async (name: string, profileId: number | undefined): Promise<void> => {
+    if (lookingUp.current) return
+    if (name === liveName) { setSheet(null); return }
+    lookingUp.current = true
+    let found: Awaited<ReturnType<typeof window.lintoLive.sessions.lookup>>
+    try {
+      found = await window.lintoLive.sessions.lookup(name)
+    } catch (e) {
       setSheet(null)
-      setReused(null)
-      setSel(target)
+      setError(ipcErrorMessage(e))
+      return
+    } finally {
+      lookingUp.current = false
+    }
+    if (sheetRef.current?.kind !== 'new') return // cancelled meanwhile
+    if (found !== 'none') {
+      setSheet({ kind: 'exists', name, usable: found === 'usable', terminated: found === 'terminated' })
       return
     }
-    if (existing && (name === liveName || !existing.canStream)) {
-      setSheet(null)
-      if (name !== liveName) setError(NO_STREAM_REASON)
-      return
-    }
-    setSheet({ kind: 'switch', target })
+    const target: Selection = { name, pending: { profileId } }
+    if (onAir) { setSheet({ kind: 'switch', target }); return }
+    setSheet(null)
+    setReused(null)
+    setSel(target)
+  }
+  /** « Utiliser » on the « existe déjà » sheet: select it, or switch the show to it when on air. */
+  const pickExisting = (name: string): void => {
+    setSheet(null)
+    if (onAir) { void startSession({ name }); return }
+    setReused(null)
+    setSel({ name })
+    if (!sessions?.some((s) => s.name === name)) void refresh()
   }
 
   const saveSettings = (patch: Partial<Settings>): void => {
@@ -359,7 +378,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         profiles={data?.profiles ?? []}
         profileId={settings?.profileId}
         onOrgChange={(id) => void switchOrg(id)}
-        onSubmit={submitNew}
+        onSubmit={(n, p) => void submitNew(n, p)}
         onCancel={() => setSheet(null)}
       />
       <ConfirmSheet
@@ -377,6 +396,29 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         onConfirm={() => { if (sheet?.kind === 'switch') { const t = sheet.target; setSheet(null); void startSession(t) } }}
         onCancel={() => setSheet(null)}
       />
+      {sheet?.kind === 'exists' && sheet.usable ? (
+        <ConfirmSheet
+          open
+          message={`La session « ${sheet.name} » existe déjà.`}
+          detail={onAir ? 'Basculer le direct sur cette session ?' : 'Utiliser cette session ?'}
+          confirmLabel={onAir ? 'Basculer' : 'Utiliser'}
+          onConfirm={() => pickExisting(sheet.name)}
+          onCancel={() => setSheet(null)}
+        />
+      ) : (
+        <Sheet
+          title={sheet?.kind === 'exists' ? `La session « ${sheet.name} » existe déjà.` : ''}
+          open={sheet?.kind === 'exists'}
+          onClose={() => setSheet(null)}
+          footer={<Button size="large" variant="primary" onClick={() => setSheet(null)}>OK</Button>}
+        >
+          <p className="sheet-detail">
+            {sheet?.kind === 'exists' && sheet.terminated
+              ? 'Elle est terminée et ne peut pas être reprise. Choisis un autre nom.'
+              : "Tu n'as pas les droits suffisants pour l'utiliser. Choisis un autre nom."}
+          </p>
+        </Sheet>
+      )}
       <WatermarkSheet
         open={sheet?.kind === 'watermark' && !!summary}
         watermark={summary?.watermark ?? null}

@@ -52,14 +52,17 @@ export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
   }
 }
 
-/** Sidebar entries: `active` first, then most recently updated. */
+/**
+ * Sidebar entries: `active` first, then most recently updated. Only sessions the user can stream to:
+ * LinTO lists every session of the organisation but hands stream endpoints only to those with the right.
+ */
 export function toSessionSummaries(sessions: Session[], watermark?: WatermarkConfig): SessionSummary[] {
   return sessions
     .filter((s): s is Session & { status: SessionSummary['status'] } => s.status !== 'terminated')
+    .filter((s) => toObsStreamService(s.channels[0]?.streamEndpoints ?? {}) !== null)
     .map((s): SessionSummary => {
       const out: SessionSummary = {
         id: s.id, name: s.name, status: s.status,
-        canStream: toObsStreamService(s.channels[0]?.streamEndpoints ?? {}) !== null,
         watermark: resolveWatermark(s.meta, watermark)
       }
       if (s.updatedAt) out.updatedAt = s.updatedAt

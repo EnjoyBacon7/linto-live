@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
-import { UnauthorizedError, type Settings, type SessionSummary, type WatermarkConfig } from '../shared/types'
+import { UnauthorizedError, type Settings, type SessionLookup, type SessionSummary, type WatermarkConfig } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -18,6 +18,7 @@ import { ObsController } from './obs/controller'
 import { obsExecutable } from './obs/locate'
 import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
+import { lookupSession } from './linto/sessionResolver'
 import { CaptionStream } from './linto/captions'
 import { loadInstance, STUDIO_WATERMARK_DEFAULTS, type LintoUrls } from './linto/instance'
 import { checkWatermark, WATERMARK_META_KEY } from './linto/watermark'
@@ -332,6 +333,17 @@ function main(): void {
       const list = toSessionSummaries(await api.listSessions(orgId), watermarkCfg)
       live.syncWatermarks(list)
       return list
+    } catch (e) {
+      if (e instanceof UnauthorizedError) live.reportUnauthorized()
+      throw e
+    }
+  })
+  ipcMain.handle(IPC.sessionsLookup, async (_e, name: unknown): Promise<SessionLookup> => {
+    const orgId = settings.get().orgId
+    if (!orgId || typeof name !== 'string') return 'none'
+    await ensureUrls()
+    try {
+      return await lookupSession(api, orgId, name)
     } catch (e) {
       if (e instanceof UnauthorizedError) live.reportUnauthorized()
       throw e

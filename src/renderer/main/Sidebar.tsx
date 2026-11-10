@@ -4,9 +4,6 @@ import { Button } from '../ui/Button'
 import { StatusDot, type StatusDotProps } from '../ui/StatusDot'
 import { CheckIcon, EllipsisIcon, PlusIcon, SignOutIcon } from '../ui/icons'
 
-export const NO_STREAM_REASON =
-  "LinTO Live ne peut pas envoyer le son à cette session (droits insuffisants ou pas d'entrée audio)"
-
 export const STATUS: Record<SessionSummary['status'], { label: string; tone: StatusDotProps['tone'] }> = {
   active: { label: 'En direct', tone: 'live' },
   ready: { label: 'Prête', tone: 'ok' },
@@ -81,7 +78,7 @@ export function Sidebar(p: SidebarProps) {
                 const selected = hasSelection(s.name)
                 // Roving tab stop: the selected row, else the first row (the selection may not be listed).
                 const tabStop = selected || (p.pendingName === null && i === 0 && !p.sessions?.some((x) => hasSelection(x.name)))
-                const cls = ['sidebar-row', selected ? 'is-selected' : '', s.canStream ? '' : 'is-dimmed'].filter(Boolean).join(' ')
+                const cls = ['sidebar-row', selected ? 'is-selected' : ''].filter(Boolean).join(' ')
                 return (
                   <li
                     key={s.id}
@@ -89,7 +86,7 @@ export function Sidebar(p: SidebarProps) {
                     aria-selected={selected}
                     tabIndex={tabStop ? 0 : -1}
                     className={cls}
-                    title={s.canStream ? STATUS[s.status].label : NO_STREAM_REASON}
+                    title={STATUS[s.status].label}
                     onClick={() => p.onSelect(s)}
                     onKeyDown={(e) => activate(e, () => p.onSelect(s))}
                   >
