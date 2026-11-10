@@ -3,6 +3,9 @@
 Application de bureau qui affiche en salle (second écran, vidéoprojecteur en HDMI) la vidéo d'une
 caméra ou d'une carte de capture avec les **sous-titres LinTO en temps réel** incrustés.
 
+Sans caméra, c'est aussi un simple client LinTO : on envoie le son d'un micro et on lit la
+transcription qui défile, avec son historique, dans la fenêtre principale.
+
 On se connecte à LinTO, on choisit une session, une caméra et un micro, et on clique sur
 **Démarrer** : le son part vers LinTO pour la transcription, et une fenêtre de sortie affiche la
 vidéo sous-titrée. Tout le travail vidéo est fait par un OBS Studio embarqué et invisible (sa
@@ -89,9 +92,12 @@ Conseils :
 2. **Choisir une session** dans la barre latérale, ou en créer une avec **Nouvelle session…**
    (⌘N / Ctrl+N) : nom, organisation, profil de transcription. Un nom déjà utilisé reprend la
    session existante au lieu d'en créer une deuxième.
-3. **Régler** dans le panneau de droite : **caméra** (ou carte de capture), **micro** (c'est ce son
-   qui est transcrit), taille des sous-titres, affichage des sous-titres et du filigrane.
-   L'aperçu au centre montre l'image de sortie.
+3. **Régler** dans le panneau de droite : **caméra** (ou carte de capture, facultative : « Aucune »
+   pour n'envoyer que le son), **micro** (c'est ce son qui est transcrit), taille des sous-titres,
+   affichage des sous-titres et du filigrane.
+   Le centre de la fenêtre affiche la transcription au fil de la parole, avec tout ce qui a été dit
+   depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter
+   dans le texte suspend le défilement ; « Revenir au direct » le reprend.
 4. **Démarrer** (⌘↩ / Ctrl+Entrée) : une **fenêtre de sortie** s'ouvre. La glisser sur l'écran de la
    salle ; clic droit › « Plein écran » pour la passer en plein écran sur cet écran.
    Si elle a été fermée : menu Fenêtre › **Afficher la fenêtre de sortie** (⌘1 / Ctrl+1).

@@ -71,3 +71,13 @@ export interface DeviceItem { id: string; name: string }
 export const DEFAULT_SUBTITLE_FONT_SIZE = 48
 export const SUBTITLE_FONT_SIZE_MIN = 12
 export const SUBTITLE_FONT_SIZE_MAX = 96
+
+/** One transcribed segment of the session on air (`locutor`: the speaker, when LinTO diarizes). */
+export interface TranscriptSegment { id: number; text: string; locutor?: string }
+/** Finalized segments (oldest first) and the segment still being transcribed. */
+export interface Transcript { finals: TranscriptSegment[]; partial: TranscriptSegment | null }
+/** Change to the transcript: a segment finalized, the partial changed (null = none), or a new show began. */
+export type TranscriptUpdate =
+  | { kind: 'final'; segment: TranscriptSegment }
+  | { kind: 'partial'; segment: TranscriptSegment | null }
+  | { kind: 'reset' }

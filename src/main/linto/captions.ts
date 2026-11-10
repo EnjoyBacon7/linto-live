@@ -3,55 +3,6 @@ import { io as realIo } from 'socket.io-client'
 import type { LintoUrls } from './instance'
 
 export interface CaptionEvent { segmentId: number; text: string; locutor?: string | null }
-export interface CaptionView { lines: string[]; partial: boolean }
-
-function wrap(text: string, max: number): string[] {
-  const lines: string[] = []
-  let cur = ''
-  for (let word of text.split(/\s+/).filter(Boolean)) {
-    while (word.length > max) {
-      if (cur) { lines.push(cur); cur = '' }
-      lines.push(word.slice(0, max))
-      word = word.slice(max)
-    }
-    if (!cur) cur = word
-    else if (cur.length + 1 + word.length <= max) cur += ' ' + word
-    else { lines.push(cur); cur = word }
-  }
-  if (cur) lines.push(cur)
-  return lines
-}
-
-export class CaptionBuffer {
-  private finals = ''
-  private pending: CaptionEvent | null = null
-
-  constructor(private maxCharsPerLine = 64, private maxLines = 2) {}
-
-  /** Length of retained finalized text (bounded). */
-  get size(): number { return this.finals.length }
-
-  partial(e: CaptionEvent): CaptionView {
-    if (e.text.trim()) this.pending = e
-    return this.view()
-  }
-
-  final(e: CaptionEvent): CaptionView {
-    if (e.text.trim()) {
-      this.pending = null
-      this.finals = this.finals ? `${this.finals} ${e.text.trim()}` : e.text.trim()
-      // Trim at greedy-wrap line boundaries: output of the last lines is unchanged.
-      const lines = wrap(this.finals, this.maxCharsPerLine)
-      if (lines.length > this.maxLines) this.finals = lines.slice(-this.maxLines).join(' ')
-    }
-    return this.view()
-  }
-
-  private view(): CaptionView {
-    const text = [this.finals, this.pending?.text.trim() ?? ''].filter(Boolean).join(' ')
-    return { lines: wrap(text, this.maxCharsPerLine).slice(-this.maxLines), partial: this.pending !== null }
-  }
-}
 
 type IoFn = typeof realIo
 type Socket = ReturnType<IoFn>

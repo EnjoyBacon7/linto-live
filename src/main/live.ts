@@ -2,14 +2,16 @@ import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
   DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
-  type Channel, type DeviceItem, type Session, type SessionSummary, type Settings, type Watermark, type WatermarkConfig
+  type Channel, type DeviceItem, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
+  type Watermark, type WatermarkConfig
 } from '../shared/types'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import type { ObsController, StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
 import type { LintoApi } from './linto/api'
-import { CaptionBuffer, type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
+import { type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
 import { resolveSession } from './linto/sessionResolver'
+import { TranscriptLog } from './linto/transcript'
 import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
 import type { SettingsStore } from './settings'
@@ -27,7 +29,6 @@ export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
 
-export const PREVIEW_MS = 50 // 20 fps: a 640 px JPEG screenshot costs ~3 ms in OBS and does not delay its rendering
 const STOP_WAIT_MS = 10_000
 const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
@@ -50,7 +51,7 @@ export interface LiveObsProcess {
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
-  | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
+  | 'audioLevel$' | 'startStream' | 'stopStream' | 'streamState$'
   | 'openOutputWindow' | 'showLive' | 'showPause' | 'resetProjectorState' | 'disconnect'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
@@ -93,10 +94,10 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
- * Events: 'state'(LiveState) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'() 'caption-line'(text, '' = cleared).
+ * Events: 'state'(LiveState) 'transcript'(TranscriptUpdate) 'audio-level'(dB) 'auth-required'().
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
- * The preview runs while OBS is attached, the renderer shows it (setPreviewSubscribed) and the window is
- * visible (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists projectors: the output window is
+ * The transcript of the last show is kept until the next start (getTranscript). Audio levels are only
+ * forwarded while the window is visible (setWindowVisible). No request closes or lists projectors: the output window is
  * opened once per OBS run by the first show (Arrêter leaves it open, black) and on demand by showOutputWindow.
  */
 export class LiveController extends EventEmitter {
@@ -105,7 +106,6 @@ export class LiveController extends EventEmitter {
   private unsubs: (() => void)[] = []
   private overlayUrl: string | null = null
   private current: Current | null = null
-  private buffer = new CaptionBuffer()
   /** Watermark of the session on air (null when off air: no watermark then). */
   private watermark: Watermark | null = null
   /** An output window was opened during the current OBS run. */
@@ -115,9 +115,6 @@ export class LiveController extends EventEmitter {
   private stopWaiters: (() => void)[] = []
   private retryTimer: NodeJS.Timeout | null = null
   private retryAttempt = 0
-  private previewTimer: NodeJS.Timeout | null = null
-  private previewBusy = false
-  private previewSubscribed = false
   private windowVisible = true
   private intentionalObsStop = false
   private shuttingDown = false
@@ -131,7 +128,7 @@ export class LiveController extends EventEmitter {
   /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
   private authLost = false
   private tail: Promise<unknown> = Promise.resolve()
-  private lastLine: string | undefined
+  private transcript = new TranscriptLog()
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -147,14 +144,12 @@ export class LiveController extends EventEmitter {
     d.obs.on('exit', () => {
       if (this.intentionalObsStop || this.shuttingDown) return
       this.dropController()
-      this.stopPreview()
       // OBS gave up: the show cannot continue. Tear it down like Arrêter (nothing left to stop in OBS)
       // so the UI is not stuck on a live session; the error phase and warning tell what happened.
       this.clearCaptionsTimer()
       if (this.current) {
         this.d.captions.close()
         this.current = null
-        this.buffer = new CaptionBuffer()
         this.d.overlay.push({ type: 'reset' })
       }
       this.setState({
@@ -166,19 +161,30 @@ export class LiveController extends EventEmitter {
         captions: 'offline',
         startedAt: undefined
       })
-      this.setLine(undefined)
+      this.sendTranscript(this.transcript.endPartial())
     })
     d.captions.on('status', (s: CaptionStatus) => {
       this.setState({ captions: s })
       this.superviseCaptions()
     })
-    d.captions.on('partial', (e: CaptionEvent) => this.showCaption('partial', e.text, this.buffer.partial(e).lines))
-    d.captions.on('final', (e: CaptionEvent) => this.showCaption('final', e.text, this.buffer.final(e).lines))
+    d.captions.on('partial', (e: CaptionEvent) => {
+      this.d.overlay.push({ type: 'partial', text: e.text })
+      this.sendTranscript(this.transcript.partial(e))
+    })
+    d.captions.on('final', (e: CaptionEvent) => {
+      this.d.overlay.push({ type: 'final', text: e.text })
+      this.sendTranscript(this.transcript.final(e))
+    })
     d.captions.on('authError', () => this.reportUnauthorized('captions'))
   }
 
   getState(): LiveState {
     return { ...this.state }
+  }
+
+  /** Transcript of the show on air, or of the last one (kept until the next start). */
+  getTranscript(): Transcript {
+    return this.transcript.snapshot()
   }
 
   /** Resolves once every queued operation has finished. */
@@ -260,7 +266,6 @@ export class LiveController extends EventEmitter {
     this.restartGen++
     this.clearRetry()
     this.clearCaptionsTimer()
-    this.stopPreview()
     await this.settled()
     const c = this.ctl
     this.dropController()
@@ -270,16 +275,9 @@ export class LiveController extends EventEmitter {
     this.setState({ obs: 'down' })
   }
 
-  /** The renderer shows (or stops showing) the preview. */
-  setPreviewSubscribed(on: boolean): void {
-    this.previewSubscribed = on
-    this.updatePreview()
-  }
-
   /** The main window was shown/restored (true) or hidden/minimised (false). */
   setWindowVisible(on: boolean): void {
     this.windowVisible = on
-    this.updatePreview()
   }
 
   /** After a successful re-login: re-open captions on the session being shown. */
@@ -311,11 +309,9 @@ export class LiveController extends EventEmitter {
     this.emit('auth-required')
   }
 
-  /** « Effacer les sous-titres »: empties the band (it comes back with the next words). */
+  /** « Effacer les sous-titres »: empties the band (it comes back with the next words); the transcript stays. */
   clearSubtitles(): void {
-    this.buffer = new CaptionBuffer()
     this.d.overlay.push({ type: 'reset' })
-    this.setLine(undefined)
   }
 
   /** A session's watermark was saved or re-read from LinTO: the overlay follows if that session is on air. */
@@ -351,7 +347,12 @@ export class LiveController extends EventEmitter {
       if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined) this.pushStyle()
       const c = this.ctl
       if (!c) return
-      if (patch.videoDeviceId && patch.videoDeviceId !== before.videoDeviceId) await c.setVideoDevice(patch.videoDeviceId)
+      // '' = no camera (the plain LinTO client): the video source is emptied.
+      if (patch.videoDeviceId !== undefined && patch.videoDeviceId !== before.videoDeviceId) {
+        await c.setVideoDevice(patch.videoDeviceId)
+        // A camera chosen during a show started without one: open the output window it skipped.
+        if (patch.videoDeviceId && this.state.phase === 'live' && !this.outputOpened) await this.openOutput(c)
+      }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
     })
   }
@@ -382,17 +383,9 @@ export class LiveController extends EventEmitter {
     })
   }
 
-  private showCaption(type: 'partial' | 'final', text: string, lines: string[]): void {
-    this.d.overlay.push({ type, text })
-    const last = lines[lines.length - 1]
-    if (last !== undefined) this.setLine(last)
-  }
-
-  /** The status bar line goes through its own 'caption-line' event: no LiveState round trip per partial. */
-  private setLine(line: string | undefined): void {
-    if (line === this.lastLine) return
-    this.lastLine = line
-    this.emit('caption-line', line ?? '')
+  /** The transcript goes through its own event: no LiveState round trip per partial. */
+  private sendTranscript(u: TranscriptUpdate | null): void {
+    if (u) this.emit('transcript', u)
   }
 
   private dropController(): void {
@@ -403,7 +396,6 @@ export class LiveController extends EventEmitter {
     this.outputOpened = false // a new OBS run has no projector open
     this.streamRunning = false
     this.clearRetry()
-    this.stopPreview()
     this.flushStopWaiters()
     if (this.state.output !== 'off') this.setState({ output: 'off' })
   }
@@ -443,14 +435,16 @@ export class LiveController extends EventEmitter {
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
-    this.updatePreview()
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
 
-  /** Program scene, the output window if none was opened during this OBS run, then the stream. */
+  /**
+   * Program scene, the output window if none was opened during this OBS run, then the stream. Without a
+   * camera (plain LinTO client) no output window opens: the transcript is read in the main window.
+   */
   private async applyShow(c: LiveObsController, cur: Current): Promise<void> {
     await c.showLive().catch(() => {})
-    if (!this.outputOpened) await this.openOutput(c)
+    if (!this.outputOpened && this.d.settings.get().videoDeviceId) await this.openOutput(c)
     if (cur.service) await this.startStreamSafe(c, cur.service)
   }
 
@@ -580,7 +574,7 @@ export class LiveController extends EventEmitter {
       if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
     }
 
-    // Resolve first: a failure here must leave a running show (preview, stream supervision) untouched.
+    // Resolve first: a failure here must leave a running show (transcript, stream supervision) untouched.
     let res: Awaited<ReturnType<typeof resolveSession>>
     try {
       res = await resolveSession(this.d.api, s.orgId, rawName, s.profileId)
@@ -608,7 +602,6 @@ export class LiveController extends EventEmitter {
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
       const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
       this.current = cur
-      this.buffer = new CaptionBuffer()
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
       this.pushStyle()
       this.d.overlay.push({ type: 'reset' })
@@ -619,7 +612,7 @@ export class LiveController extends EventEmitter {
         warning: cur.service ? undefined : MSG_NO_STREAM,
         startedAt: Date.now()
       })
-      this.setLine(undefined)
+      this.sendTranscript(this.transcript.reset())
       this.d.captions.open(res.session.id, res.channel.id)
 
       const c = this.ctl
@@ -645,7 +638,6 @@ export class LiveController extends EventEmitter {
     await this.stopStreamAndWait(streamWaitMs)
     await this.ctl?.showPause().catch(() => {})
     this.current = null
-    this.buffer = new CaptionBuffer()
     this.watermark = null
     this.pushStyle()
     this.d.overlay.push({ type: 'reset' })
@@ -658,7 +650,7 @@ export class LiveController extends EventEmitter {
       warning: undefined,
       ...end
     })
-    this.setLine(undefined)
+    this.sendTranscript(this.transcript.endPartial())
   }
 
   /** Stops the OBS stream and waits for OBS to report it stopped (StopStream is asynchronous). */
@@ -750,35 +742,5 @@ export class LiveController extends EventEmitter {
   private clearRetry(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = null
-  }
-
-  /** Polls OBS screenshots only when someone can see them. */
-  private updatePreview(): void {
-    if (this.ctl && this.previewSubscribed && this.windowVisible) {
-      if (!this.previewTimer) this.startPreview()
-    } else {
-      this.stopPreview()
-    }
-  }
-
-  private startPreview(): void {
-    this.stopPreview()
-    this.previewTimer = setInterval(() => {
-      const c = this.ctl
-      if (!c) return this.stopPreview()
-      if (this.previewBusy) return
-      this.previewBusy = true
-      c.screenshot()
-        .then((img) => {
-          if (c === this.ctl) this.emit('preview', img)
-        })
-        .catch(() => {})
-        .finally(() => (this.previewBusy = false))
-    }, PREVIEW_MS)
-  }
-
-  private stopPreview(): void {
-    if (this.previewTimer) clearInterval(this.previewTimer)
-    this.previewTimer = null
   }
 }

@@ -1,6 +1,6 @@
 import type {
   AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionStatus, SessionSummary, Settings,
-  TranscriberProfile, Watermark
+  TranscriberProfile, Transcript, TranscriptUpdate, Watermark
 } from './types'
 
 export interface SetupData {
@@ -39,7 +39,7 @@ export interface ShellReport {
   loggedIn: boolean
   /** Selected (or on-air) session. */
   sessionName?: string
-  /** Démarrer is currently possible (session, camera and micro chosen, nothing in progress). */
+  /** Démarrer is currently possible (session and micro chosen, nothing in progress). */
   canStart: boolean
 }
 
@@ -72,22 +72,18 @@ export interface LintoLiveApi {
     clearSubtitles(): Promise<void>
     /** Current LiveState (the 'live-state' event only carries changes). */
     getState(): Promise<LiveState>
+    /** Transcript of the show on air or of the last one (the 'transcript' event only carries changes). */
+    getTranscript(): Promise<Transcript>
   }
   app: {
     uninstall(): Promise<void>
     reportShellState(s: ShellReport): Promise<void>
   }
-  /** The 'preview' event only flows while subscribed (and the window is visible): OBS screenshots cost CPU. */
-  preview: {
-    subscribe(): Promise<void>
-    unsubscribe(): Promise<void>
-  }
   on(evt: 'live-state', cb: (s: LiveState) => void): () => void
-  on(evt: 'preview', cb: (dataUrl: string) => void): () => void
   on(evt: 'audio-level', cb: (db: number) => void): () => void
   on(evt: 'auth-required', cb: () => void): () => void
-  /** Last transcribed line for the status bar ('' when cleared); kept out of LiveState (one per partial). */
-  on(evt: 'caption-line', cb: (line: string) => void): () => void
+  /** Transcript changes; kept out of LiveState (one per partial). */
+  on(evt: 'transcript', cb: (u: TranscriptUpdate) => void): () => void
   /** An app menu / tray command the renderer carries out (new-session, start, terminate, logout). */
   on(evt: 'command', cb: (c: AppCommand) => void): () => void
 }
@@ -109,27 +105,24 @@ export const IPC = {
   liveShowOutput: 'live:show-output',
   liveGetState: 'live:get-state',
   liveClearSubtitles: 'live:clear-subtitles',
+  liveGetTranscript: 'live:get-transcript',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
-  previewSubscribe: 'preview:subscribe',
-  previewUnsubscribe: 'preview:unsubscribe',
   evtLiveState: 'evt:live-state',
-  evtPreview: 'evt:preview',
   evtAudioLevel: 'evt:audio-level',
   evtAuthRequired: 'evt:auth-required',
   evtCommand: 'evt:command',
-  evtCaptionLine: 'evt:caption-line'
+  evtTranscript: 'evt:transcript'
 } as const
 
-export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command' | 'caption-line'
+export type EventName = 'live-state' | 'audio-level' | 'auth-required' | 'command' | 'transcript'
 
 export const EVENT_CHANNELS: Record<EventName, string> = {
   'live-state': IPC.evtLiveState,
-  preview: IPC.evtPreview,
   'audio-level': IPC.evtAudioLevel,
   'auth-required': IPC.evtAuthRequired,
   command: IPC.evtCommand,
-  'caption-line': IPC.evtCaptionLine
+  transcript: IPC.evtTranscript
 }
 
 /** Minimal transport (ipcRenderer-shaped) so the bridge is testable without Electron. */
@@ -163,10 +156,10 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput),
       clearSubtitles: () => call(IPC.liveClearSubtitles),
-      getState: () => call(IPC.liveGetState)
+      getState: () => call(IPC.liveGetState),
+      getTranscript: () => call(IPC.liveGetTranscript)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
-    preview: { subscribe: () => call(IPC.previewSubscribe), unsubscribe: () => call(IPC.previewUnsubscribe) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {
       const channel = EVENT_CHANNELS[evt]
       const wrapper = (_e: unknown, ...args: unknown[]): void => (cb as (...a: unknown[]) => void)(...args)

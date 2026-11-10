@@ -142,15 +142,22 @@ describe('Sidebar', () => {
 })
 
 describe('Démarrer', () => {
-  it('is disabled without a session, a camera or a micro', async () => {
-    setup({}, setupData({ videoDeviceId: undefined }))
+  it('is disabled without a session or a micro; the camera is optional', async () => {
+    setup({}, setupData({ videoDeviceId: undefined, audioDeviceId: undefined }))
     await renderMain()
     expect(startBtn().disabled).toBe(true)
     await userEvent.click(row('Conférence'))
     expect(startBtn().disabled).toBe(true)
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v1')
-    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v1' })
+    expect((screen.getByLabelText('Caméra') as HTMLSelectElement).value).toBe('') // « Aucune »
+    await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
     expect(startBtn().disabled).toBe(false)
+  })
+
+  it('the camera can be set back to « Aucune »', async () => {
+    setup()
+    await renderMain()
+    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
+    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: '' })
   })
 
   it('starts an existing session and shows « réutilisée », then refreshes the list', async () => {
@@ -389,24 +396,30 @@ describe('Switch while live', () => {
 })
 
 describe('Stage, inspector and status bar', () => {
-  it('asks to choose a camera, then shows the OBS preview', async () => {
-    setup({}, setupData({ videoDeviceId: undefined }))
+  it('shows the transcript fetched on mount, then follows the transcript events', async () => {
+    setup()
+    fn(api.live.getTranscript).mockResolvedValue({ finals: [{ id: 1, text: 'Bonjour à tous', locutor: 'Alice' }], partial: null })
     await renderMain()
-    expect(screen.getByText('Choisis une caméra')).toBeTruthy()
-    expect(api.preview.subscribe).not.toHaveBeenCalled() // no camera: no preview polling
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
-    expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
-    act(() => emit('preview', 'data:image/jpeg;base64,AAA'))
-    expect((screen.getByRole('img', { name: 'Aperçu de la sortie OBS' }) as HTMLImageElement).src).toBe('data:image/jpeg;base64,AAA')
+    const log = await screen.findByRole('log')
+    expect(within(log).getByText('Bonjour à tous')).toBeTruthy()
+    expect(within(log).getByText('Alice')).toBeTruthy()
+    act(() => emit('transcript', { kind: 'partial', segment: { id: 2, text: 'bienvenue', locutor: 'Alice' } }))
+    expect(within(log).getByText('bienvenue').className).toContain('is-partial')
+    expect(within(log).getAllByText('Alice')).toHaveLength(1) // same speaker: no second label
+    act(() => emit('transcript', { kind: 'final', segment: { id: 2, text: 'bienvenue à la conférence', locutor: 'Bob' } }))
+    expect(within(log).queryByText('bienvenue')).toBeNull()
+    expect(within(log).getByText('bienvenue à la conférence').className).not.toContain('is-partial')
+    expect(within(log).getByText('Bob')).toBeTruthy()
+    act(() => emit('transcript', { kind: 'reset' }))
+    expect(screen.queryByRole('log')).toBeNull()
+    expect(screen.getByText('La transcription s’affichera ici au démarrage du direct.')).toBeTruthy()
   })
 
-  it('the preview subscription is dropped when the main window unmounts', async () => {
+  it('on air with nothing said yet, waits for words', async () => {
     setup()
     await renderMain()
-    expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
-    expect(api.preview.unsubscribe).not.toHaveBeenCalled()
-    cleanup()
-    expect(api.preview.unsubscribe).toHaveBeenCalledTimes(1)
+    act(() => emit('live-state', live()))
+    expect(screen.getByText('En attente de paroles…')).toBeTruthy()
   })
 
   it('micro change is saved; the level meter follows audio-level', async () => {
@@ -427,16 +440,14 @@ describe('Stage, inspector and status bar', () => {
     expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v2' })
   })
 
-  it('status bar shows LinTO, captions and OBS states and the last line', async () => {
+  it('status bar shows LinTO, captions and OBS states', async () => {
     setup()
     await renderMain()
     act(() => emit('live-state', live({ stream: 'error', captions: 'connecting' })))
-    act(() => emit('caption-line', 'Bonjour à tous'))
     const bar = screen.getByRole('status')
     expect(within(bar).getByText('LinTO reçoit le son')).toBeTruthy()
     expect(within(bar).getByText('Sous-titres')).toBeTruthy()
     expect(within(bar).getByText('OBS')).toBeTruthy()
-    expect(within(bar).getByText('Bonjour à tous')).toBeTruthy()
     expect(bar.querySelector('.dot-bad')).toBeTruthy()
     expect(bar.querySelector('.dot-warn')).toBeTruthy()
   })

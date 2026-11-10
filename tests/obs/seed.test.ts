@@ -29,11 +29,11 @@ describe('seedFiles', () => {
     const u = f['user.ini']
     expect(u).toContain('[General]\nFirstRun=true\nConfirmOnExit=false')
     expect(u).toContain('[BasicWindow]')
-    for (const l of ['SysTrayEnabled=true', 'SysTrayWhenStarted=true', 'SaveProjectors=false']) expect(u).toContain(l)
+    for (const l of ['SysTrayEnabled=true', 'SysTrayWhenStarted=true', 'SaveProjectors=false', 'ProjectorAlwaysOnTop=true']) expect(u).toContain(l)
   })
   it('user.ini without the OBS tray icon (Linux)', () => {
     const u = seedFiles({ ...o, platform: 'linux' })['user.ini']
-    for (const l of ['SysTrayEnabled=false', 'SysTrayWhenStarted=false', 'SaveProjectors=false']) expect(u).toContain(l)
+    for (const l of ['SysTrayEnabled=false', 'SysTrayWhenStarted=false', 'SaveProjectors=false', 'ProjectorAlwaysOnTop=true']) expect(u).toContain(l)
   })
   it('basic.ini: full HD canvas (projector), small cheap stream (LinTO only uses the audio)', () => {
     const b = f['basic/profiles/LinTO Live/basic.ini']
