@@ -1,7 +1,7 @@
 {
   "name": "linto-live",
   "productName": "LinTO Live",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "LinTO Live - drives a hidden OBS and shows LinTO live captions",
   "author": "LINAGORA",
