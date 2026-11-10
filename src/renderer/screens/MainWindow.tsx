@@ -363,7 +363,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           onTerminate={askTerminate}
         />
         <div className="content-body">
-          <Stage onAir={onAir} hasCamera={!!settings?.videoDeviceId} banners={hasBanner ? banners : null} />
+          <Stage onAir={onAir} hasCamera={!!settings?.videoDeviceId} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}

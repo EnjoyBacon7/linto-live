@@ -9,6 +9,8 @@ export interface StageProps {
   onAir: boolean
   /** A camera is chosen: its preview (the OBS program output) shows above the transcript. */
   hasCamera: boolean
+  /** Session selected in the sidebar (null: none). The transcript shows only if it belongs to it. */
+  sessionName: string | null
   banners: ReactNode
 }
 
@@ -122,8 +124,11 @@ const Finals = memo(function Finals({ finals }: { finals: TranscriptSegment[] })
 })
 
 /** Centre: banners on top, the camera preview (when a camera is chosen), then the live transcript with its history. */
-export function Stage({ onAir, hasCamera, banners }: StageProps) {
-  const t = useTranscript()
+export function Stage({ onAir, hasCamera, sessionName, banners }: StageProps) {
+  const live = useTranscript()
+  // Main keeps the transcript of one show only: another session selected has nothing to show here yet.
+  const mine = onAir || sessionName === null || live.sessionName === undefined || live.sessionName === sessionName
+  const t = mine ? live : EMPTY
   const scroller = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
   const followingRef = useRef(true)
