@@ -97,7 +97,9 @@ export class ObsController {
     const { propertyItems } = await this.client.call('GetInputPropertiesListPropertyItems', { inputName, propertyName })
     return (propertyItems as { itemName: string; itemValue: unknown; itemEnabled?: boolean }[])
       .filter((i) => i.itemEnabled !== false)
-      .map((i) => ({ name: i.itemName, id: String(i.itemValue) }))
+      .map((i) => ({ name: (i.itemName ?? '').trim(), id: i.itemValue == null ? '' : String(i.itemValue) }))
+      // OBS lists a blank placeholder item (no value): it would show as an empty slot next to « Aucune ».
+      .filter((d) => d.id !== '' && d.name !== '')
   }
 
   listVideoDevices(): Promise<DeviceItem[]> {

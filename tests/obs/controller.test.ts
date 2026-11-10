@@ -145,6 +145,19 @@ describe('ObsController', () => {
     expect(of(f.calls, 'GetInputPropertiesListPropertyItems')[0].data).toEqual({ inputName: SRC_VIDEO, propertyName: 'device' })
   })
 
+  it('drops OBS\'s blank placeholder item (empty value), which would show as an empty slot', async () => {
+    const f = fakeClient({
+      items: [
+        { itemName: '', itemValue: '' },
+        { itemName: 'Cam A', itemValue: 'a' },
+        { itemName: ' ', itemValue: null }
+      ]
+    })
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    expect(await c.listVideoDevices()).toEqual([{ name: 'Cam A', id: 'a' }])
+  })
+
   it('uses device_id on linux and for audio', async () => {
     const f = fakeClient()
     const c = new ObsController(f.client)
