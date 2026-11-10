@@ -460,7 +460,7 @@ function main(): void {
     const { response } = await show({
       type: 'warning',
       message: 'Supprimer LinTO Live et toutes ses données ?',
-      detail: uninstallConfirmDetail(plan, platform),
+      detail: uninstallConfirmDetail(plan, platform, process.env.FLATPAK_ID !== undefined),
       buttons: ['Annuler', 'Désinstaller'],
       defaultId: 0,
       cancelId: 0

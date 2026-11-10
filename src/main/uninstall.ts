@@ -105,11 +105,15 @@ export function uninstallTargets(o: UninstallInput): UninstallPlan {
 
 /**
  * Detail of the confirmation dialog. On Linux without an AppImage, the app was installed by the .deb
- * package (/opt, root-owned): only its data can be removed from inside, the package goes through apt.
+ * package (/opt, root-owned) or as a Flatpak: only its data can be removed from inside, the package goes
+ * through apt or flatpak.
  */
-export function uninstallConfirmDetail(t: UninstallPlan, platform: NodeJS.Platform): string {
+export function uninstallConfirmDetail(t: UninstallPlan, platform: NodeJS.Platform, flatpak = false): string {
   const base = 'Cette action est définitive.'
   if (platform !== 'linux' || t.trash) return base
+  if (flatpak) {
+    return `${base} Ses données seront effacées ; l'application elle-même, installée en Flatpak, se retire ensuite avec « flatpak uninstall --delete-data ai.linto.live ».`
+  }
   return `${base} Ses données seront effacées ; l'application elle-même, installée par un paquet système, se retire ensuite avec « sudo apt remove linto-live ».`
 }
 

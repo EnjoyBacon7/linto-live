@@ -5,6 +5,9 @@
 #
 #   bash scripts/build-linux-docker.sh
 #
+# No Flatpak here (flatpak-builder needs bubblewrap, not available in an unprivileged container):
+# the Flatpak is built by CI (.github/workflows/linux.yml) or natively with `npm run dist:linux`.
+#
 # - OBS is built by scripts/build-obs-linux.sh into vendor/obs/linux (bind mount; its work tree
 #   vendor/cache/obs-linux-build is reused by later runs: delete it to reclaim ~5 GB).
 # - npm ci / electron-builder run on a copy of the repository in vendor/cache/linux-work (git-ignored),
@@ -56,7 +59,7 @@ docker run --rm --platform linux/amd64 -v "$ROOT":/src:ro -v "$WORK_HOST":/work 
   npm run typecheck
   npm test
   rm -rf dist
-  npm run dist:linux
+  npm run dist:linux:nopak
   cp dist/*.AppImage dist/*.deb /out/
   ls -la /out/*.AppImage /out/*.deb
 '

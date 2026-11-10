@@ -59,6 +59,8 @@ linux:
       arch: x64
     - target: deb
       arch: x64
+    - target: flatpak
+      arch: x64
   maintainer: EnjoyBacon7 <59032058+EnjoyBacon7@users.noreply.github.com>
   category: AudioVideo
   synopsis: LinTO live captions over a hidden OBS
@@ -74,6 +76,31 @@ linux:
       to: icon.png
 appImage:
   artifactName: LinTO-Live-${version}-x86_64.${ext}
+# Single-file bundle (flatpak install --user ./LinTO-Live-<version>-x86_64.flatpak), any distribution
+# with Flatpak. The bundled OBS's host libraries (libva, PulseAudio, PipeWire, EGL/GL, ...) come from
+# the Freedesktop runtime, which is fetched from Flathub at install time. OBS's CEF runs without its
+# own sandbox (obs-browser: no_sandbox on Linux), so nothing beyond these permissions is needed.
+flatpak:
+  artifactName: LinTO-Live-${version}-x86_64.${ext}
+  runtime: org.freedesktop.Platform
+  runtimeVersion: '25.08'
+  sdk: org.freedesktop.Sdk
+  base: org.electronjs.Electron2.BaseApp
+  baseVersion: '25.08'
+  finishArgs:
+    - --share=ipc
+    - --share=network
+    # The bundled OBS always runs on X11 (QT_QPA_PLATFORM=xcb, XWayland under Wayland).
+    - --socket=x11
+    - --socket=pulseaudio
+    # GPU (OBS rendering, captions browser) and V4L2 cameras / capture cards.
+    - --device=all
+    # Transcript export anywhere the user picks.
+    - --filesystem=home
+    - --talk-name=org.freedesktop.Notifications
+    - --talk-name=org.kde.StatusNotifierWatcher
+    # safeStorage (LinTO token) through the desktop keyring.
+    - --talk-name=org.freedesktop.secrets
 # Installed in /opt/LinTO Live by apt (Ubuntu 24.04+, Debian 13+), which also installs the host
 # libraries below: no manual step, unlike the AppImage (libfuse2). Replaces electron-builder's
 # default list, so Electron's own needs come first; then what the bundled OBS (and its CEF) links

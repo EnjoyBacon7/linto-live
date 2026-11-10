@@ -38,5 +38,12 @@ export function obsEnv(
     if (kept.length > 0) env.LD_LIBRARY_PATH = kept.join(':')
     else delete env.LD_LIBRARY_PATH
   }
+  // Flatpak: zypak-wrapper (Electron's sandbox shim) preloads its own library into Electron; OBS
+  // and its CEF must start without it.
+  if (env.LD_PRELOAD !== undefined) {
+    const kept = env.LD_PRELOAD.split(/[: ]/).filter((l) => l !== '' && !/zypak/.test(l))
+    if (kept.length > 0) env.LD_PRELOAD = kept.join(':')
+    else delete env.LD_PRELOAD
+  }
   return env
 }
