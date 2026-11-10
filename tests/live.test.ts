@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, msgTerminated,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -35,6 +35,7 @@ function fakeController(log: string[]) {
     setAudioDevice: vi.fn(async () => {}),
     setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}),
+    screenshot: vi.fn(async () => 'data:image/jpg;base64,AAAA'),
     startStream: vi.fn(async (s: { streamServiceSettings: { server: string } }) => {
       log.push(`startStream:${s.streamServiceSettings.server}`)
     }),
@@ -169,10 +170,10 @@ describe('LiveController', () => {
       streamServiceSettings: { server: SRT_A, key: '' }
     })
     expect(t.ctl().showLive).toHaveBeenCalled()
-    expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
+    expect(t.ctl().openOutputWindow).not.toHaveBeenCalled() // the projector is the user's to open
     expect(t.settings.get().lastSessionName).toBe('Conf')
     expect(t.settings.get().orgId).toBe('org1')
-    expect(t.last()).toMatchObject({ phase: 'live', output: 'shown', session: { name: 'Conf', status: 'active' } })
+    expect(t.last()).toMatchObject({ phase: 'live', output: 'off', session: { name: 'Conf', status: 'active' } })
     expect(t.last().warning).toBeUndefined()
 
     t.ctl().emitState('active')
@@ -224,7 +225,6 @@ describe('LiveController', () => {
     expect(r).toEqual({ ok: true, reused: true, canStream: false })
     expect(t.ctl().startStream).not.toHaveBeenCalled()
     expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
-    expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     expect(t.last()).toMatchObject({ phase: 'live', stream: 'unavailable', warning: MSG_NO_STREAM })
     expect(MSG_NO_STREAM).toBe("Impossible d'envoyer l'audio : tu n'es pas propriétaire de cette session.")
   })
@@ -233,6 +233,7 @@ describe('LiveController', () => {
     const t = setup()
     await t.live.boot()
     await t.live.start('Conf')
+    await t.live.showOutputWindow()
     const first = t.ctl()
     t.obs.emit('restarting', 1)
     expect(t.last().obs).toBe('restarting')
@@ -249,8 +250,8 @@ describe('LiveController', () => {
     expect(c.setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
     expect(c.startStream).toHaveBeenCalledWith({ streamServiceType: 'rtmp_custom', streamServiceSettings: { server: SRT_A, key: '' } })
     expect(c.showLive).toHaveBeenCalled()
-    expect(c.openOutputWindow).toHaveBeenCalledTimes(1)
-    expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
+    expect(c.openOutputWindow).not.toHaveBeenCalled() // the restart closed the projector: reopened on demand
+    expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'off' })
     // old controller events are ignored (the only warning is the crash-restart notice, no stream retry)
     first.emitState('stopped')
     expect(t.last().warning).toBe(MSG_OBS_RESTARTED)
@@ -291,9 +292,8 @@ describe('LiveController', () => {
     t.live.on('auth-required', authReq)
     t.captions.emit('authError')
     expect(authReq).toHaveBeenCalledTimes(1)
-    expect(t.last()).toMatchObject({ phase: 'live', captions: 'offline', output: 'shown' })
+    expect(t.last()).toMatchObject({ phase: 'live', captions: 'offline' })
     expect(t.ctl().stopStream).not.toHaveBeenCalled()
-    expect(t.ctl().showPause).not.toHaveBeenCalled()
     expect(t.obs.stop).not.toHaveBeenCalled()
     expect(t.settings.setToken).not.toHaveBeenCalled()
   })
@@ -325,12 +325,13 @@ describe('LiveController', () => {
     const t = setup()
     await t.live.boot()
     await t.live.start('Conf')
+    await t.live.showOutputWindow()
     await t.live.stop()
     expect(t.api.terminateSession).not.toHaveBeenCalled()
     expect(t.ctl().stopStream).toHaveBeenCalled()
-    expect(t.ctl().showPause).toHaveBeenCalled()
+    expect(t.ctl().showPause).not.toHaveBeenCalled() // the projector keeps showing the camera
     expect(t.captions.close).toHaveBeenCalled()
-    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off', output: 'shown' }) // window kept open, black
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off', output: 'shown' }) // window kept open
     expect(t.last().warning).toBeUndefined()
   })
 
@@ -346,7 +347,7 @@ describe('LiveController', () => {
     expect(t.log.indexOf('stopStream')).toBeGreaterThanOrEqual(0)
     expect(t.log.indexOf('stopStream')).toBeLessThan(t.log.indexOf('terminateSession'))
     expect(t.log.indexOf('terminateSession')).toBeLessThan(t.log.indexOf('captions.close'))
-    expect(t.log).toContain('showPause')
+    expect(t.log).not.toContain('showPause')
     expect(t.last().phase).toBe('idle')
     // no false stream error / retry on the way
     expect(t.states.slice(states).some((s) => s.stream === 'error' || s.warning === MSG_STREAM_RETRY)).toBe(false)
@@ -502,10 +503,9 @@ describe('LiveController', () => {
       t.obs.emit('restarting', 1)
       t.obs.emit('ready', { port: 1, password: 'x' })
       await t.live.settled()
-      expect(t.last()).toMatchObject({ obs: 'running', phase: 'live', output: 'shown' })
+      expect(t.last()).toMatchObject({ obs: 'running', phase: 'live' })
       expect(t.last().warning).toBe(MSG_OVERLAY_FAILED + 'no browser source')
       expect(t.ctl().startStream).toHaveBeenCalled()
-      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     })
 
     it('ensureScene failure sets obs down with a warning', async () => {
@@ -569,18 +569,20 @@ describe('LiveController final fixes', () => {
   describe('output window', () => {
     const opened = (t: ReturnType<typeof setup>): number => t.log.filter((l) => l === 'output-window').length
 
-    it('the first start opens the window once; stop then start does not open a second one', async () => {
+    it('only opens on demand, off or on air; stop keeps it on the camera', async () => {
       const t = setup()
       await t.live.boot()
-      expect(opened(t)).toBe(0)
       await t.live.start('Conf')
-      expect(opened(t)).toBe(1)
-      expect(t.last().output).toBe('shown')
+      expect(opened(t)).toBe(0) // Démarrer never opens it
       await t.live.stop()
-      expect(t.ctl().showPause).toHaveBeenCalled() // kept open, black
-      await t.live.start('Conf')
+      await t.live.showOutputWindow() // idle: opens (placed on the second screen before the show)
       expect(opened(t)).toBe(1)
-      expect(t.last()).toMatchObject({ phase: 'live', output: 'shown' })
+      expect(t.last()).toMatchObject({ phase: 'idle', output: 'shown' })
+      await t.live.start('Conf')
+      await t.live.stop()
+      expect(opened(t)).toBe(1)
+      expect(t.ctl().showPause).not.toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'idle', output: 'shown' })
       expect(t.obs.stop).not.toHaveBeenCalled()
     })
 
@@ -588,6 +590,7 @@ describe('LiveController final fixes', () => {
       const t = setup()
       await t.live.boot()
       await t.live.start('Conf')
+      await t.live.showOutputWindow()
       await t.live.showOutputWindow()
       expect(opened(t)).toBe(2)
       expect(t.last().output).toBe('shown')
@@ -604,34 +607,27 @@ describe('LiveController final fixes', () => {
       expect(t.last().output).toBe('off')
     })
 
-    it('after an OBS restart the next live show opens the window again', async () => {
+    it('an OBS restart marks the window closed; nothing reopens it by itself', async () => {
       const t = setup()
       await t.live.boot()
-      await t.live.start('Conf')
-      await t.live.stop()
+      await t.live.showOutputWindow()
       t.obs.emit('restarting', 1)
       expect(t.last().output).toBe('off')
       t.obs.emit('ready', { port: 4300, password: 'p' })
       await t.live.settled()
-      expect(opened(t)).toBe(1) // idle: nothing reopened by the attach
-      await t.live.start('Conf')
-      expect(opened(t)).toBe(2)
-      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
-      expect(t.last().output).toBe('shown')
-    })
-
-    it('a failure to open the window is reported and retried on the next start', async () => {
-      const t = setup()
-      await t.live.boot()
-      t.ctl().openOutputWindow.mockRejectedValueOnce(new Error('nope'))
-      const r = await t.live.start('Conf')
-      expect(r.ok).toBe(true)
-      expect(t.ctl().startStream).toHaveBeenCalled()
-      expect(t.last()).toMatchObject({ phase: 'live', output: 'off', warning: 'Fenêtre de sortie : nope' })
-      await t.live.stop()
       await t.live.start('Conf')
       expect(opened(t)).toBe(1)
-      expect(t.last().output).toBe('shown')
+      expect(t.last().output).toBe('off')
+    })
+
+    it('a failure to open the window is reported, the show goes on', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf')
+      t.ctl().openOutputWindow.mockRejectedValueOnce(new Error('nope'))
+      await t.live.showOutputWindow()
+      expect(t.ctl().startStream).toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'live', output: 'off', warning: 'Fenêtre de sortie : nope' })
     })
 
     it('startedAt is set when the session goes live and cleared on stop', async () => {
@@ -681,16 +677,15 @@ describe('LiveController final fixes', () => {
       expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     })
 
-    it('choosing a camera during the show opens the output window once', async () => {
+    it('choosing a camera during the show does not open the output window', async () => {
       const t = setup()
       await t.live.saveSettings({ videoDeviceId: '' })
       await t.live.boot()
       await t.live.start('Conf')
       await t.live.saveSettings({ videoDeviceId: 'cam' })
-      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
-      expect(t.last().output).toBe('shown')
-      await t.live.saveSettings({ videoDeviceId: 'cam2' })
-      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
+      expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('cam')
+      expect(t.ctl().openOutputWindow).not.toHaveBeenCalled()
+      expect(t.last().output).toBe('off')
     })
   })
 
@@ -699,6 +694,46 @@ describe('LiveController final fixes', () => {
     await t.live.boot()
     await t.live.saveSettings({ videoDeviceId: '' })
     expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('')
+  })
+
+  describe('camera preview only while someone looks at it', () => {
+    it('no screenshots until the renderer subscribes; none after it unsubscribes', async () => {
+      const t = setup()
+      await t.live.boot()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).not.toHaveBeenCalled()
+      const previews: string[] = []
+      t.live.on('preview', (d: string) => previews.push(d))
+      t.live.setPreviewSubscribed(true)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
+      t.live.setPreviewSubscribed(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('a subscription made before OBS is attached starts the preview on attach; it stops when OBS exits', async () => {
+      const t = setup()
+      t.live.setPreviewSubscribed(true)
+      await t.live.boot()
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+      t.obs.emit('exit', null)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
+
+    it('pauses while the window is hidden or minimised, resumes when shown', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.live.setPreviewSubscribed(true)
+      t.live.setWindowVisible(false)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(t.ctl().screenshot).not.toHaveBeenCalled()
+      t.live.setWindowVisible(true)
+      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
+      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('audio level only while someone looks at it', () => {
@@ -741,8 +776,7 @@ describe('LiveController final fixes', () => {
       expect(t.obs.start).toHaveBeenCalledTimes(2)
       expect(t.controllerFactory).toHaveBeenCalledTimes(2) // the queued 'ready' does not attach twice
       expect(t.ctl().startStream).toHaveBeenCalledTimes(1)
-      expect(t.log.filter((l) => l === 'output-window')).toHaveLength(2)
-      expect(t.last()).toMatchObject({ phase: 'live', obs: 'running', output: 'shown' })
+      expect(t.last()).toMatchObject({ phase: 'live', obs: 'running' })
       expect(t.last().warning).toBeUndefined()
     })
 
@@ -882,7 +916,6 @@ describe('LiveController final fixes', () => {
       await t.live.settled()
       expect(t.ctl().stopStream).toHaveBeenCalled()
       expect(t.captions.close).toHaveBeenCalled()
-      expect(t.ctl().showPause).toHaveBeenCalled()
       expect(t.last()).toMatchObject({ phase: 'error', stream: 'off', warning: msgTerminated('Conf') })
       expect(t.last()).not.toHaveProperty('session')
       expect(t.api.terminateSession).not.toHaveBeenCalled()
@@ -1007,7 +1040,7 @@ describe('LiveController final fixes', () => {
     const t = setup()
     await t.live.boot()
     t.ctl().openOutputWindow.mockRejectedValueOnce(new Error('boom'))
-    await t.live.start('Conf')
+    await t.live.showOutputWindow()
     expect(t.last().warning).toBe(MSG_OUTPUT_FAILED + 'boom')
     await t.live.showOutputWindow()
     expect(t.last().warning).toBeUndefined()

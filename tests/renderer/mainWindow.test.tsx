@@ -327,6 +327,18 @@ describe('Live toolbar', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Afficher la fenêtre de sortie' }))
     expect(api.live.showOutputWindow).toHaveBeenCalledTimes(1)
   })
+
+  it('« Afficher la fenêtre de sortie » is there off air too, once OBS runs', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', { ...IDLE, obs: 'down' }))
+    const btn = () => screen.getByRole('button', { name: 'Afficher la fenêtre de sortie' }) as HTMLButtonElement
+    expect(btn().disabled).toBe(true)
+    act(() => emit('live-state', IDLE))
+    expect(btn().disabled).toBe(false)
+    await userEvent.click(btn())
+    expect(api.live.showOutputWindow).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('Terminer…', () => {
@@ -433,6 +445,30 @@ describe('Switch while live', () => {
 })
 
 describe('Stage, inspector and status bar', () => {
+  it('shows the camera preview above the transcript once a camera is chosen', async () => {
+    setup({}, setupData({ videoDeviceId: undefined }))
+    await renderMain()
+    expect(screen.queryByText('Aperçu en attente…')).toBeNull()
+    expect(api.preview.subscribe).not.toHaveBeenCalled() // no camera: no screenshot polling
+    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Aperçu en attente…')).toBeTruthy()
+    act(() => emit('preview', 'data:image/jpeg;base64,AAA'))
+    expect((screen.getByRole('img', { name: 'Aperçu de la caméra' }) as HTMLImageElement).src).toBe('data:image/jpeg;base64,AAA')
+    expect(screen.getByText('La transcription s’affichera ici au démarrage du direct.')).toBeTruthy() // transcript still there
+    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
+    expect(api.preview.unsubscribe).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('img', { name: 'Aperçu de la caméra' })).toBeNull()
+  })
+
+  it('the preview subscription is dropped when the main window unmounts', async () => {
+    setup()
+    await renderMain()
+    expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
+    cleanup()
+    expect(api.preview.unsubscribe).toHaveBeenCalledTimes(1)
+  })
+
   it('shows the transcript fetched on mount, then follows the transcript events', async () => {
     setup()
     fn(api.live.getTranscript).mockResolvedValue({ finals: [{ id: 1, text: 'Bonjour à tous', locutor: 'Alice' }], partial: null })

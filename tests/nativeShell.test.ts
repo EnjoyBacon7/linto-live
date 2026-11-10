@@ -62,12 +62,12 @@ describe('appMenuTemplate', () => {
     expect(item(t, 'Terminer la session…').accelerator).toBeUndefined()
   })
 
-  it('idle without a session: Démarrer disabled, live-only items disabled', () => {
+  it('idle without a session: Démarrer and live-only items disabled, output window available', () => {
     const t = appMenuTemplate(shell({ canStart: false }), vi.fn())
     expect(item(t, 'Démarrer').enabled).toBe(false)
     expect(item(t, 'Arrêter').enabled).toBe(false)
     expect(item(t, 'Terminer la session…').enabled).toBe(false)
-    expect(item(t, 'Afficher la fenêtre de sortie').enabled).toBe(false)
+    expect(item(t, 'Afficher la fenêtre de sortie').enabled).not.toBe(false) // set up the second screen before the show
     expect(item(t, 'Nouvelle session…').enabled).toBe(true)
     expect(item(t, 'Se déconnecter').enabled).toBe(true)
   })
@@ -83,7 +83,7 @@ describe('appMenuTemplate', () => {
     expect(item(t, 'Démarrer').enabled).toBe(false)
     expect(item(t, 'Arrêter').enabled).toBe(true)
     expect(item(t, 'Terminer la session…').enabled).toBe(true)
-    expect(item(t, 'Afficher la fenêtre de sortie').enabled).toBe(true)
+    expect(item(t, 'Afficher la fenêtre de sortie').enabled).not.toBe(false)
     expect(item(t, 'Se déconnecter').enabled).toBe(false) // the show on air keeps its account
   })
 
@@ -140,11 +140,12 @@ describe('tray', () => {
     expect(t[1]!.type).toBe('separator')
     expect(t[5]!.type).toBe('separator')
     expect(item(t, 'Démarrer').enabled).toBe(true)
-    expect(item(t, 'Afficher la fenêtre de sortie').enabled).toBe(false)
+    expect(item(t, 'Afficher la fenêtre de sortie').enabled).not.toBe(false)
     click(item(t, 'Démarrer'))
+    click(item(t, 'Afficher la fenêtre de sortie'))
     click(item(t, 'Afficher LinTO Live'))
     click(item(t, 'Quitter LinTO Live'))
-    expect(run.mock.calls).toEqual([['start'], ['show-window'], ['quit']])
+    expect(run.mock.calls).toEqual([['start'], ['show-output'], ['show-window'], ['quit']])
   })
 
   it('live: status line, Arrêter instead of Démarrer, output enabled', () => {
