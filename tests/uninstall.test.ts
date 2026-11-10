@@ -165,4 +165,9 @@ describe('uninstallConfirmDetail', () => {
     const d = uninstallConfirmDetail({ remove: [], trash: null }, 'linux')
     expect(d).toContain('sudo apt remove linto-live')
   })
+  it('linux Flatpak install: tells how to remove the Flatpak', () => {
+    const d = uninstallConfirmDetail({ remove: [], trash: null }, 'linux', true)
+    expect(d).toContain('flatpak uninstall --delete-data ai.linto.live')
+    expect(d).not.toContain('apt')
+  })
 })

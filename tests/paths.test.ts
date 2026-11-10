@@ -53,4 +53,14 @@ describe('obsEnv', () => {
     const env = obsEnv(appPaths(U, 'linux'), 'linux', { LD_LIBRARY_PATH: '/a:/b' })
     expect(env.LD_LIBRARY_PATH).toBe('/a:/b')
   })
+  it('linux inside the Flatpak: drops zypak from LD_PRELOAD, keeps the rest', () => {
+    const base = { LD_PRELOAD: 'libzypak-preload-host.so:/opt/x/libfoo.so' }
+    const env = obsEnv(appPaths(U, 'linux'), 'linux', base)
+    expect(env.LD_PRELOAD).toBe('/opt/x/libfoo.so')
+    expect(base.LD_PRELOAD).toBe('libzypak-preload-host.so:/opt/x/libfoo.so')
+  })
+  it('linux inside the Flatpak: removes LD_PRELOAD when only zypak was preloaded', () => {
+    const env = obsEnv(appPaths(U, 'linux'), 'linux', { LD_PRELOAD: 'libzypak-preload-host.so' })
+    expect('LD_PRELOAD' in env).toBe(false)
+  })
 })

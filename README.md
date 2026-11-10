@@ -53,6 +53,16 @@ sudo apt install ./LinTO-Live-<version>-amd64.deb
 `apt` installe en même temps tout ce dont l'application a besoin : rien d'autre à faire.
 LinTO Live apparaît ensuite dans le menu des applications.
 
+**Toute distribution avec Flatpak**
+
+Le runtime Freedesktop est téléchargé depuis Flathub à l'installation :
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user ./LinTO-Live-<version>-x86_64.flatpak
+flatpak run ai.linto.live
+```
+
 **Autres distributions (Arch…) : AppImage**
 
 Un seul fichier, rien n'est installé sur le système :
@@ -136,7 +146,8 @@ Menu **LinTO Live › Désinstaller LinTO Live…** (macOS) ou **Fichier › Dé
 configuration, cookies, cache) et se met à la corbeille.
 
 Avec le paquet `.deb`, l'application elle-même se retire ensuite avec
-`sudo apt remove linto-live` (la désinstallation intégrée efface les données, pas le paquet).
+`sudo apt remove linto-live` (la désinstallation intégrée efface les données, pas le paquet) ;
+avec le Flatpak, `flatpak uninstall --delete-data ai.linto.live`.
 
 Données concernées, si besoin de les retirer à la main :
 
@@ -165,7 +176,10 @@ Paquets :
   → `dist/LinTO-Live-<version>-arm64.dmg`
 - Linux, depuis n'importe quel hôte Docker : `npm run dist:linux:docker`
   → `dist/LinTO-Live-<version>-x86_64.AppImage` et `dist/LinTO-Live-<version>-amd64.deb`
-- Linux, sur Ubuntu 24.04 : voir [`docs/linux-build.md`](docs/linux-build.md)
+- Linux, sur Ubuntu 24.04 : voir [`docs/linux-build.md`](docs/linux-build.md) ; `npm run dist:linux`
+  construit aussi le Flatpak (`flatpak` et `flatpak-builder` requis, pas dans le build Docker)
+- Versions : pousser un tag `v<version>` (égal à celui de `package.json`) ; la CI construit les
+  quatre paquets et publie la version GitHub avec les notes du `CHANGELOG.md`
 
 ## OBS Studio
 

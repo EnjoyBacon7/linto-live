@@ -4,6 +4,27 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [0.3.0] - 2026-11-10
+
+### Ajouté
+
+- **Paquet Flatpak** (`LinTO-Live-<version>-x86_64.flatpak`) pour toute distribution Linux avec
+  Flatpak : `flatpak install --user ./LinTO-Live-<version>-x86_64.flatpak`. Le runtime Freedesktop
+  est récupéré sur Flathub à l'installation.
+- Chaque version est désormais construite et publiée par la CI : dmg, `.deb`, Flatpak, AppImage et
+  `SHA256SUMS.txt`, avec les notes de ce journal.
+
+### Modifié
+
+- Désinstallation depuis le Flatpak : le message indique `flatpak uninstall --delete-data
+  ai.linto.live` au lieu d'`apt remove`.
+
+### Corrigé
+
+- OBS embarqué démarre sans la bibliothèque préchargée par le bac à sable Electron du Flatpak.
+- CI : contrôle des bibliothèques d'OBS sur le `.deb` réellement installé ; job macOS remis en
+  service (macos-15).
+
 ## [0.2.0] - 2026-11-10
 
 ### Ajouté
@@ -56,5 +77,6 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.3.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EnjoyBacon7/linto-live/releases/tag/v0.1.0
