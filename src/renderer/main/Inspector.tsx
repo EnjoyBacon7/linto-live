@@ -59,7 +59,7 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
   )
 }
 
-/** Right pane (inspector): camera, micro + level, transcription profile (read-only here), subtitles. */
+/** Right pane (inspector): camera (optional), micro + level, transcription profile (read-only here), subtitles. */
 export function Inspector(p: InspectorProps) {
   const { data, settings, profile, onChange } = p
   const opts = (items: { id: string; name: string }[] = []) => items.map((d) => ({ value: d.id, label: d.name }))
@@ -69,8 +69,10 @@ export function Inspector(p: InspectorProps) {
     <aside className="inspector" aria-label="Réglages">
       <section className="inspector-group">
         <h3 className="inspector-label"><CameraIcon size={14} />Caméra</h3>
-        <PopUp label="Caméra" className="inspector-control" value={settings?.videoDeviceId ?? ''} placeholder="Choisir…"
-          options={opts(data?.videoDevices)} disabled={!data} onChange={(v) => onChange({ videoDeviceId: v })} />
+        {/* Optional: without a camera the app is a plain LinTO client (audio only, transcript here). */}
+        <PopUp label="Caméra" className="inspector-control" value={settings?.videoDeviceId ?? ''}
+          placeholder="Choisir…" options={[{ value: '', label: 'Aucune' }, ...opts(data?.videoDevices)]} disabled={!data}
+          onChange={(v) => onChange({ videoDeviceId: v })} />
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><MicIcon size={14} />Micro</h3>

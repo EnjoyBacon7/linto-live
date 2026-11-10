@@ -93,7 +93,7 @@ function setup(meta?: Record<string, unknown>) {
   const ctl = {
     ensureScene: vi.fn(async () => {}), listVideoDevices: vi.fn(async () => []), listAudioDevices: vi.fn(async () => []),
     setVideoDevice: vi.fn(async () => {}), setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
-    audioLevel$: vi.fn(() => () => {}), screenshot: vi.fn(async () => ''), startStream: vi.fn(async () => {}),
+    audioLevel$: vi.fn(() => () => {}), startStream: vi.fn(async () => {}),
     stopStream: vi.fn(async () => true), streamState$: vi.fn(() => () => {}), openOutputWindow: vi.fn(async () => {}),
     showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {})
   }
@@ -172,16 +172,13 @@ describe('LiveController subtitle style', () => {
     expect(t.styles().length).toBe(n)
   })
 
-  it('clearSubtitles empties the band and the last line', async () => {
+  it('clearSubtitles empties the band but keeps the transcript', async () => {
     const t = setup()
     await t.live.boot()
-    const lines: string[] = []
-    t.live.on('caption-line', (l: string) => lines.push(l))
     await t.live.start('Conf')
     t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
-    expect(lines.at(-1)).toBe('Bonjour')
     t.live.clearSubtitles()
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'reset' })
-    expect(lines.at(-1)).toBe('')
+    expect(t.live.getTranscript().finals).toEqual([{ id: 1, text: 'Bonjour' }])
   })
 })

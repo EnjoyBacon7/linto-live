@@ -131,8 +131,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const summary = sel && !sel.pending ? sessions?.find((s) => s.name === sel.name) : undefined
   const canStream = !!sel && (!!sel.pending || (summary?.canStream ?? true))
   const startHint = !sel ? 'Choisis une session.'
-    : !settings?.videoDeviceId ? 'Choisis une caméra.'
-    : !settings.audioDeviceId ? 'Choisis un micro.'
+    : !settings?.audioDeviceId ? 'Choisis un micro.'
     : !canStream ? NO_STREAM_REASON : undefined
   // 'error' = the last start failed: retrying is allowed. Any other phase means a show is starting/running.
   const idle = state.phase === 'idle' || state.phase === 'error'
@@ -344,7 +343,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           onTerminate={askTerminate}
         />
         <div className="content-body">
-          <Stage hasCamera={!!settings?.videoDeviceId} banners={hasBanner ? banners : null} />
+          <Stage onAir={onAir} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}

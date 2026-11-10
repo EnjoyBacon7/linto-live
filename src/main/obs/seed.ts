@@ -46,7 +46,11 @@ function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
     'global.ini': [['General', GENERAL]],
     'user.ini': [
       ['General', [['FirstRun', 'true'], ['ConfirmOnExit', 'false']]],
-      ['BasicWindow', [['SysTrayEnabled', tray], ['SysTrayWhenStarted', tray], ['SaveProjectors', 'false']]]
+      // ProjectorAlwaysOnTop: the output window opens above the main window. The hidden OBS cannot be
+      // brought to the front (on macOS its activation policy is « prohibited »), so its window would open behind.
+      ['BasicWindow', [
+        ['SysTrayEnabled', tray], ['SysTrayWhenStarted', tray], ['SaveProjectors', 'false'], ['ProjectorAlwaysOnTop', 'true']
+      ]]
     ],
     'basic/profiles/LinTO Live/basic.ini': [
       ['General', [['Name', 'LinTO Live']]],

@@ -1,47 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { CaptionBuffer, CaptionStream } from '../../src/main/linto/captions'
+import { CaptionStream } from '../../src/main/linto/captions'
 import type { LintoUrls } from '../../src/main/linto/instance'
-
-describe('CaptionBuffer', () => {
-  it('partials with same id replace each other', () => {
-    const b = new CaptionBuffer()
-    b.partial({ segmentId: 1, text: 'bon' })
-    expect(b.partial({ segmentId: 1, text: 'bonjour' })).toEqual({ lines: ['bonjour'], partial: true })
-  })
-  it('final then new partial keeps final before partial', () => {
-    const b = new CaptionBuffer()
-    expect(b.final({ segmentId: 1, text: 'Bonjour' })).toEqual({ lines: ['Bonjour'], partial: false })
-    expect(b.partial({ segmentId: 2, text: 'à tous' })).toEqual({ lines: ['Bonjour à tous'], partial: true })
-  })
-  it('final with new id closes a pending partial', () => {
-    const b = new CaptionBuffer()
-    b.partial({ segmentId: 1, text: 'abc' })
-    expect(b.final({ segmentId: 2, text: 'def' })).toEqual({ lines: ['def'], partial: false })
-  })
-  it('ignores empty events', () => {
-    const b = new CaptionBuffer()
-    b.final({ segmentId: 1, text: 'a' })
-    expect(b.partial({ segmentId: 2, text: '  ' })).toEqual({ lines: ['a'], partial: false })
-    expect(b.final({ segmentId: 3, text: '' })).toEqual({ lines: ['a'], partial: false })
-  })
-  it('wraps on word boundaries and returns only last 2 lines', () => {
-    const b = new CaptionBuffer(10, 2)
-    const v = b.final({ segmentId: 1, text: 'aaaa bbbb cccc dddd eeee ffff' })
-    expect(v.lines).toEqual(['cccc dddd', 'eeee ffff'])
-  })
-  it('splits words longer than a line', () => {
-    const b = new CaptionBuffer(4, 2)
-    expect(b.final({ segmentId: 1, text: 'abcdefghij' }).lines).toEqual(['efgh', 'ij'])
-  })
-  it('keeps memory bounded over 1000 finals with correct output', () => {
-    const b = new CaptionBuffer(10, 2)
-    let v
-    for (let i = 0; i < 1000; i++) v = b.final({ segmentId: i, text: `w${String(i).padStart(4, '0')}` })
-    expect(v!.lines).toEqual(['w0998', 'w0999'])
-    expect(b.size).toBeLessThan(100)
-  })
-})
 
 class FakeSocket extends EventEmitter {
   emit_(ev: string, ...a: unknown[]) { return super.emit(ev, ...a) }

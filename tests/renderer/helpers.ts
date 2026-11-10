@@ -25,10 +25,10 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       terminate: vi.fn().mockResolvedValue(undefined), showOutputWindow: vi.fn().mockResolvedValue(undefined),
       clearSubtitles: vi.fn().mockResolvedValue(undefined),
       getState: vi.fn().mockResolvedValue({ phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }),
+      getTranscript: vi.fn().mockResolvedValue({ finals: [], partial: null }),
       ...over.live
     },
     app: { uninstall: vi.fn().mockResolvedValue(undefined), reportShellState: vi.fn().mockResolvedValue(undefined), ...over.app },
-    preview: { subscribe: vi.fn().mockResolvedValue(undefined), unsubscribe: vi.fn().mockResolvedValue(undefined), ...over.preview },
     on: vi.fn().mockReturnValue(() => {})
   }
   return api as unknown as LintoLiveApi

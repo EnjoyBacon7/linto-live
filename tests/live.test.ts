@@ -2,12 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgTerminated,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
 import type { LiveState } from '../src/shared/ipc'
-import { UnauthorizedError, type Session, type Settings } from '../src/shared/types'
+import { UnauthorizedError, type Session, type Settings, type TranscriptUpdate } from '../src/shared/types'
 
 const SRT_A = 'srt://linto:9000?streamid=a'
 const SRT_B = 'srt://linto:9000?streamid=b'
@@ -35,7 +35,6 @@ function fakeController(log: string[]) {
     setAudioDevice: vi.fn(async () => {}),
     setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}),
-    screenshot: vi.fn(async () => 'data:image/jpg;base64,AAAA'),
     startStream: vi.fn(async (s: { streamServiceSettings: { server: string } }) => {
       log.push(`startStream:${s.streamServiceSettings.server}`)
     }),
@@ -67,7 +66,7 @@ function fakeController(log: string[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[]; preview?: boolean } = {}) {
+function setup(opts: { sessions?: Session[] } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
@@ -126,7 +125,6 @@ function setup(opts: { sessions?: Session[]; preview?: boolean } = {}) {
   }
   const deps = { obs, controllerFactory, api, captions, overlay, settings, platform: 'darwin' as const } satisfies LiveDeps
   const live = new LiveController(deps)
-  if (opts.preview !== false) live.setPreviewSubscribed(true) // the main window shows the preview
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
@@ -182,28 +180,26 @@ describe('LiveController', () => {
     t.captions.emit('status', 'live')
     expect(t.last().captions).toBe('live')
 
-    const lines: string[] = []
-    t.live.on('caption-line', (l: string) => lines.push(l))
+    const updates: TranscriptUpdate[] = []
+    t.live.on('transcript', (u: TranscriptUpdate) => updates.push(u))
     const nStates = t.states.length
     t.captions.emit('partial', { segmentId: 1, text: 'Bonjour' })
-    t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous' })
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous', locutor: 'Alice' })
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'Bonjour à tous' })
-    expect(lines).toEqual(['Bonjour', 'Bonjour à tous'])
+    expect(updates).toEqual([
+      { kind: 'partial', segment: { id: 1, text: 'Bonjour' } },
+      { kind: 'final', segment: { id: 1, text: 'Bonjour à tous', locutor: 'Alice' } }
+    ])
     expect(t.states.length).toBe(nStates) // captions never re-send the live state
-    expect(t.last()).not.toHaveProperty('lastLine')
-
-    const previews: string[] = []
-    t.live.on('preview', (d: string) => previews.push(d))
-    await vi.advanceTimersByTimeAsync(PREVIEW_MS)
-    expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
 
     t.overlay.push.mockClear()
     await t.live.stop()
     expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
-    expect(lines[lines.length - 1]).toBe('') // the status bar line is cleared
-    const n = previews.length
-    await vi.advanceTimersByTimeAsync(1000)
-    expect(previews.length).toBeGreaterThan(n) // the preview keeps running while idle
+    // The transcript outlives the show, until the next start.
+    expect(t.live.getTranscript()).toEqual({ finals: [{ id: 1, text: 'Bonjour à tous', locutor: 'Alice' }], partial: null })
+    await t.live.start('Conf')
+    expect(updates.at(-1)).toEqual({ kind: 'reset' })
+    expect(t.live.getTranscript()).toEqual({ finals: [], partial: null })
   })
 
   it('terminated returns message and starts nothing', async () => {
@@ -530,7 +526,7 @@ describe('LiveController', () => {
       expect(MSG_OBS_SETUP_FAILED).toMatch(/OBS/)
     })
 
-    it('failed session switch while live keeps preview and stream supervision', async () => {
+    it('failed session switch while live keeps the transcript and stream supervision', async () => {
       const t = setup()
       await t.live.boot()
       await t.live.start('Conf')
@@ -539,11 +535,9 @@ describe('LiveController', () => {
       t.api.searchSessions.mockImplementationOnce(
         () => new Promise((_, rej) => setTimeout(() => rej(new Error('LinTO HTTP 500')), 1_000))
       )
-      const previews: string[] = []
-      t.live.on('preview', (d: string) => previews.push(d))
+      t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
       const p = t.live.start('Autre')
-      await vi.advanceTimersByTimeAsync(400) // preview keeps running while the new name resolves
-      expect(previews.length).toBeGreaterThan(0)
+      await vi.advanceTimersByTimeAsync(400)
       c.emitState('stopped') // stream drops during resolution: still supervised
       expect(t.last()).toMatchObject({ phase: 'live', stream: 'error', warning: MSG_STREAM_RETRY })
       await vi.advanceTimersByTimeAsync(600)
@@ -551,9 +545,7 @@ describe('LiveController', () => {
       expect(t.last()).toMatchObject({ phase: 'live', session: { name: 'Conf' } })
       await vi.advanceTimersByTimeAsync(2_000)
       expect(c.startStream).toHaveBeenCalledTimes(2)
-      const n = previews.length
-      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
-      expect(previews.length).toBe(n + 1)
+      expect(t.live.getTranscript().finals).toEqual([{ id: 1, text: 'Bonjour' }])
     })
 
     it('shutdown waits at most 3 s for the stream to stop', async () => {
@@ -655,55 +647,61 @@ describe('LiveController final fixes', () => {
       await t.live.stop()
       expect(t.last()).not.toHaveProperty('startedAt')
     })
+  })
 
-    it('the preview runs while idle as soon as OBS is attached', async () => {
+  describe('transcript', () => {
+    it('a partial left when the show stops is dropped; the finals stay', async () => {
       const t = setup()
-      const previews: string[] = []
-      t.live.on('preview', (d: string) => previews.push(d))
       await t.live.boot()
-      expect(t.last().phase).toBe('idle')
-      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
-      expect(previews).toEqual(['data:image/jpg;base64,AAAA'])
-      t.obs.emit('exit', null) // OBS gone: no more screenshots
-      const n = t.ctl().screenshot.mock.calls.length
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(t.ctl().screenshot.mock.calls.length).toBe(n)
+      await t.live.start('Conf')
+      const updates: TranscriptUpdate[] = []
+      t.live.on('transcript', (u: TranscriptUpdate) => updates.push(u))
+      t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
+      t.captions.emit('partial', { segmentId: 2, text: 'et bien' })
+      t.captions.emit('partial', { segmentId: 3, text: '   ' }) // blank: ignored
+      expect(t.live.getTranscript().partial).toEqual({ id: 2, text: 'et bien' })
+      await t.live.stop()
+      expect(updates.at(-1)).toEqual({ kind: 'partial', segment: null })
+      expect(t.live.getTranscript()).toEqual({ finals: [{ id: 1, text: 'Bonjour' }], partial: null })
     })
   })
 
-  describe('preview and audio level only while someone looks at them', () => {
-    it('no screenshots until the renderer subscribes; none after it unsubscribes', async () => {
-      const t = setup({ preview: false })
-      await t.live.boot()
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(t.ctl().screenshot).not.toHaveBeenCalled()
-      t.live.setPreviewSubscribed(true)
-      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
-      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
-      t.live.setPreviewSubscribed(false)
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
-    })
-
-    it('a subscription made before OBS is attached starts the preview on attach', async () => {
-      const t = setup({ preview: false })
-      t.live.setPreviewSubscribed(true)
-      await t.live.boot()
-      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
-      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
-    })
-
-    it('pauses while the window is hidden or minimised, resumes when shown', async () => {
+  describe('without a camera (plain LinTO client)', () => {
+    it('Démarrer streams and transcribes but opens no output window', async () => {
       const t = setup()
+      await t.live.saveSettings({ videoDeviceId: '' })
       await t.live.boot()
-      t.live.setWindowVisible(false)
-      await vi.advanceTimersByTimeAsync(1000)
-      expect(t.ctl().screenshot).not.toHaveBeenCalled()
-      t.live.setWindowVisible(true)
-      await vi.advanceTimersByTimeAsync(PREVIEW_MS)
-      expect(t.ctl().screenshot).toHaveBeenCalledTimes(1)
+      expect(t.ctl().setVideoDevice).not.toHaveBeenCalled()
+      await t.live.start('Conf')
+      expect(t.ctl().startStream).toHaveBeenCalled()
+      expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
+      expect(t.ctl().openOutputWindow).not.toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'live', output: 'off' })
+      await t.live.showOutputWindow() // still available on demand (menu)
+      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
     })
 
+    it('choosing a camera during the show opens the output window once', async () => {
+      const t = setup()
+      await t.live.saveSettings({ videoDeviceId: '' })
+      await t.live.boot()
+      await t.live.start('Conf')
+      await t.live.saveSettings({ videoDeviceId: 'cam' })
+      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
+      expect(t.last().output).toBe('shown')
+      await t.live.saveSettings({ videoDeviceId: 'cam2' })
+      expect(t.ctl().openOutputWindow).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('choosing no camera empties the OBS video source', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.saveSettings({ videoDeviceId: '' })
+    expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('')
+  })
+
+  describe('audio level only while someone looks at it', () => {
     it('audio levels are not forwarded while the window is hidden', async () => {
       const t = setup()
       await t.live.boot()

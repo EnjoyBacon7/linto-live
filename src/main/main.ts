@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
 import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
-import { UnauthorizedError, type Settings, type SessionSummary, type WatermarkConfig } from '../shared/types'
+import { UnauthorizedError, type Settings, type SessionSummary, type TranscriptUpdate, type WatermarkConfig } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
@@ -250,8 +250,7 @@ function main(): void {
     if (n) notify(n)
     rebuildShell()
   })
-  live.on('caption-line', (line: string) => send(IPC.evtCaptionLine, line))
-  live.on('preview', (d: string) => send(IPC.evtPreview, d))
+  live.on('transcript', (u: TranscriptUpdate) => send(IPC.evtTranscript, u))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   live.on('auth-required', () => {
     send(IPC.evtAuthRequired)
@@ -369,8 +368,7 @@ function main(): void {
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   ipcMain.handle(IPC.liveGetState, () => live.getState())
-  ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
-  ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
+  ipcMain.handle(IPC.liveGetTranscript, () => live.getTranscript())
   ipcMain.handle(IPC.liveClearSubtitles, () => live.clearSubtitles())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
@@ -484,10 +482,7 @@ function main(): void {
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
-  // A reloaded (or crashed) page re-subscribes when its preview mounts.
-  win.webContents.on('did-start-loading', () => live.setPreviewSubscribed(false))
-  win.webContents.on('render-process-gone', () => live.setPreviewSubscribed(false))
-  // No OBS screenshots nor audio levels for a window nobody sees.
+  // No audio levels for a window nobody sees.
   win.on('hide', () => live.setWindowVisible(false))
   win.on('minimize', () => live.setWindowVisible(false))
   win.on('show', () => live.setWindowVisible(!win?.isMinimized()))
