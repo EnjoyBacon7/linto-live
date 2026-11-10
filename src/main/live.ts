@@ -29,6 +29,7 @@ export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const msgTerminated = (name: string): string =>
   `La session « ${name} » est terminée et ne peut pas être reprise. Choisis un autre nom.`
 
+export const PREVIEW_MS = 50 // 20 fps: a 640 px JPEG screenshot costs ~3 ms in OBS and does not delay its rendering
 const STOP_WAIT_MS = 10_000
 const SHUTDOWN_STOP_WAIT_MS = 3_000
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
@@ -51,8 +52,8 @@ export interface LiveObsProcess {
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
-  | 'audioLevel$' | 'startStream' | 'stopStream' | 'streamState$'
-  | 'openOutputWindow' | 'showLive' | 'showPause' | 'resetProjectorState' | 'disconnect'
+  | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
+  | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
 export interface LiveCaptions {
@@ -94,11 +95,13 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
- * Events: 'state'(LiveState) 'transcript'(TranscriptUpdate) 'audio-level'(dB) 'auth-required'().
+ * Events: 'state'(LiveState) 'transcript'(TranscriptUpdate) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'().
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
- * The transcript of the last show is kept until the next start (getTranscript). Audio levels are only
- * forwarded while the window is visible (setWindowVisible). No request closes or lists projectors: the output window is
- * opened once per OBS run by the first show (Arrêter leaves it open, black) and on demand by showOutputWindow.
+ * The transcript of the last show is kept until the next start (getTranscript). The camera preview runs
+ * while OBS is attached, the renderer shows it (setPreviewSubscribed) and the window is visible
+ * (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists
+ * projectors: the output window only opens on demand (showOutputWindow), on or off air, and keeps showing the
+ * camera after Arrêter.
  */
 export class LiveController extends EventEmitter {
   private state: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off' }
@@ -108,13 +111,14 @@ export class LiveController extends EventEmitter {
   private current: Current | null = null
   /** Watermark of the session on air (null when off air: no watermark then). */
   private watermark: Watermark | null = null
-  /** An output window was opened during the current OBS run. */
-  private outputOpened = false
   private streamRunning = false
   private stopRequested = false
   private stopWaiters: (() => void)[] = []
   private retryTimer: NodeJS.Timeout | null = null
   private retryAttempt = 0
+  private previewTimer: NodeJS.Timeout | null = null
+  private previewBusy = false
+  private previewSubscribed = false
   private windowVisible = true
   private intentionalObsStop = false
   private shuttingDown = false
@@ -275,9 +279,16 @@ export class LiveController extends EventEmitter {
     this.setState({ obs: 'down' })
   }
 
+  /** The renderer shows (or stops showing) the camera preview. */
+  setPreviewSubscribed(on: boolean): void {
+    this.previewSubscribed = on
+    this.updatePreview()
+  }
+
   /** The main window was shown/restored (true) or hidden/minimised (false). */
   setWindowVisible(on: boolean): void {
     this.windowVisible = on
+    this.updatePreview()
   }
 
   /** After a successful re-login: re-open captions on the session being shown. */
@@ -350,8 +361,6 @@ export class LiveController extends EventEmitter {
       // '' = no camera (the plain LinTO client): the video source is emptied.
       if (patch.videoDeviceId !== undefined && patch.videoDeviceId !== before.videoDeviceId) {
         await c.setVideoDevice(patch.videoDeviceId)
-        // A camera chosen during a show started without one: open the output window it skipped.
-        if (patch.videoDeviceId && this.state.phase === 'live' && !this.outputOpened) await this.openOutput(c)
       }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
     })
@@ -393,9 +402,9 @@ export class LiveController extends EventEmitter {
     this.unsubs = []
     this.ctl = null
     this.attachedConn = null
-    this.outputOpened = false // a new OBS run has no projector open
     this.streamRunning = false
     this.clearRetry()
+    this.stopPreview()
     this.flushStopWaiters()
     if (this.state.output !== 'off') this.setState({ output: 'off' })
   }
@@ -435,16 +444,13 @@ export class LiveController extends EventEmitter {
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
+    this.updatePreview()
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
   }
 
-  /**
-   * Program scene, the output window if none was opened during this OBS run, then the stream. Without a
-   * camera (plain LinTO client) no output window opens: the transcript is read in the main window.
-   */
+  /** Program scene, then the stream. The output window is the user's to open (showOutputWindow). */
   private async applyShow(c: LiveObsController, cur: Current): Promise<void> {
     await c.showLive().catch(() => {})
-    if (!this.outputOpened && this.d.settings.get().videoDeviceId) await this.openOutput(c)
     if (cur.service) await this.startStreamSafe(c, cur.service)
   }
 
@@ -465,7 +471,6 @@ export class LiveController extends EventEmitter {
     try {
       await c.openOutputWindow()
       if (c !== this.ctl) return
-      this.outputOpened = true
       const failed = this.state.warning?.startsWith(MSG_OUTPUT_FAILED)
       this.setState({ output: 'shown', ...(failed ? { warning: undefined } : {}) })
     } catch (e) {
@@ -637,7 +642,7 @@ export class LiveController extends EventEmitter {
     this.authLost = false
     this.d.captions.close()
     await this.stopStreamAndWait(streamWaitMs)
-    await this.ctl?.showPause().catch(() => {})
+    // The program scene stays on the camera: an open output window keeps showing it (only the captions go).
     this.current = null
     this.watermark = null
     this.pushStyle()
@@ -743,5 +748,35 @@ export class LiveController extends EventEmitter {
   private clearRetry(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = null
+  }
+
+  /** Polls OBS screenshots only when someone can see them. */
+  private updatePreview(): void {
+    if (this.ctl && this.previewSubscribed && this.windowVisible) {
+      if (!this.previewTimer) this.startPreview()
+    } else {
+      this.stopPreview()
+    }
+  }
+
+  private startPreview(): void {
+    this.stopPreview()
+    this.previewTimer = setInterval(() => {
+      const c = this.ctl
+      if (!c) return this.stopPreview()
+      if (this.previewBusy) return
+      this.previewBusy = true
+      c.screenshot()
+        .then((img) => {
+          if (c === this.ctl) this.emit('preview', img)
+        })
+        .catch(() => {})
+        .finally(() => (this.previewBusy = false))
+    }, PREVIEW_MS)
+  }
+
+  private stopPreview(): void {
+    if (this.previewTimer) clearInterval(this.previewTimer)
+    this.previewTimer = null
   }
 }

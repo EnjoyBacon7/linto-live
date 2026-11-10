@@ -7,8 +7,8 @@ Sans caméra, c'est aussi un simple client LinTO : on envoie le son d'un micro e
 transcription qui défile, avec son historique, dans la fenêtre principale.
 
 On se connecte à LinTO, on choisit une session, une caméra et un micro, et on clique sur
-**Démarrer** : le son part vers LinTO pour la transcription, et une fenêtre de sortie affiche la
-vidéo sous-titrée. Tout le travail vidéo est fait par un OBS Studio embarqué et invisible (sa
+**Démarrer** : le son part vers LinTO pour la transcription, et la fenêtre de sortie (à ouvrir sur
+le second écran) affiche la vidéo sous-titrée. Tout le travail vidéo est fait par un OBS Studio embarqué et invisible (sa
 configuration est séparée de celle d'un OBS déjà installé sur la machine).
 
 Plateformes : **macOS (Apple Silicon)** et **Linux (x86_64)**.
@@ -95,17 +95,19 @@ Conseils :
 3. **Régler** dans le panneau de droite : **caméra** (ou carte de capture, facultative : « Aucune »
    pour n'envoyer que le son), **micro** (c'est ce son qui est transcrit), taille des sous-titres,
    affichage des sous-titres et du filigrane.
-   Le centre de la fenêtre affiche la transcription au fil de la parole, avec tout ce qui a été dit
-   depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter
+   Avec une caméra, son aperçu s'affiche en haut du centre de la fenêtre. En dessous, la
+   transcription au fil de la parole, avec tout ce qui a été dit depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter
    dans le texte suspend le défilement ; « Revenir au direct » le reprend. Comme sur LinTO Studio,
    chaque segment porte son heure et la langue détectée (là où elle change). Après Arrêter,
    **Exporter…** (en bas) enregistre la transcription en texte, SRT, WebVTT ou JSON.
-4. **Démarrer** (⌘↩ / Ctrl+Entrée) : une **fenêtre de sortie** s'ouvre. La glisser sur l'écran de la
-   salle ; clic droit › « Plein écran » pour la passer en plein écran sur cet écran.
-   Si elle a été fermée : menu Fenêtre › **Afficher la fenêtre de sortie** (⌘1 / Ctrl+1).
-5. **Arrêter** (⌘. / Ctrl+.) coupe la vidéo et l'envoi du son **sans terminer** la session LinTO :
-   elle peut être reprise plus tard. **Terminer la session…** (menu Session) la clôt
-   définitivement côté LinTO.
+4. Ouvrir la **fenêtre de sortie** (bouton écran de la barre d'outils, ou menu Fenêtre ›
+   **Afficher la fenêtre de sortie**, ⌘1 / Ctrl+1), avant ou pendant le direct : elle ne s'ouvre
+   jamais seule. La glisser sur l'écran de la salle ; clic droit › « Plein écran » pour la passer en
+   plein écran sur cet écran.
+5. **Démarrer** (⌘↩ / Ctrl+Entrée) : les sous-titres apparaissent sur la vidéo.
+6. **Arrêter** (⌘. / Ctrl+.) coupe les sous-titres et l'envoi du son **sans terminer** la session
+   LinTO, qui peut être reprise plus tard ; la fenêtre de sortie reste ouverte, sur la caméra.
+   **Terminer la session…** (menu Session) la clôt définitivement côté LinTO.
 
 La barre d'état en bas indique si LinTO reçoit bien le son. L'icône LinTO Live dans la barre des
 menus (macOS) ou la zone de notification (Linux) signale quand un direct est en cours. Quitter

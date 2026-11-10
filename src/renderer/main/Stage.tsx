@@ -7,6 +7,8 @@ import { PopUp, type PopUpOption } from '../ui/PopUp'
 export interface StageProps {
   /** A show is on air (changes the empty-state wording only). */
   onAir: boolean
+  /** A camera is chosen: its preview (the OBS program output) shows above the transcript. */
+  hasCamera: boolean
   banners: ReactNode
 }
 
@@ -29,6 +31,28 @@ function useTranscript(): TranscriptData {
     return () => { alive = false; off() }
   }, [])
   return t
+}
+
+/** Camera preview: main polls OBS for it only while it is displayed. */
+function CameraPreview() {
+  const [preview, setPreview] = useState<string | null>(null)
+  useEffect(() => {
+    const off = window.lintoLive.on('preview', setPreview)
+    void window.lintoLive.preview.subscribe().catch(() => {})
+    return () => {
+      off()
+      void window.lintoLive.preview.unsubscribe().catch(() => {})
+    }
+  }, [])
+  return (
+    <figure className="stage-preview">
+      <div className="stage-frame">
+        {preview
+          ? <img src={preview} alt="Aperçu de la caméra" draggable={false} />
+          : <span className="stage-frame-placeholder">Aperçu en attente…</span>}
+      </div>
+    </figure>
+  )
 }
 
 /**
@@ -97,8 +121,8 @@ const Finals = memo(function Finals({ finals }: { finals: TranscriptSegment[] })
   return <>{finals.map((s, i) => <Segment key={`${i}-${s.id}`} s={s} prev={finals[i - 1]} />)}</>
 })
 
-/** Centre: banners on top, then the live transcript with its history. */
-export function Stage({ onAir, banners }: StageProps) {
+/** Centre: banners on top, the camera preview (when a camera is chosen), then the live transcript with its history. */
+export function Stage({ onAir, hasCamera, banners }: StageProps) {
   const t = useTranscript()
   const scroller = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
@@ -127,6 +151,7 @@ export function Stage({ onAir, banners }: StageProps) {
   return (
     <section className="stage" aria-label="Transcription">
       {banners && <div className="stage-banners">{banners}</div>}
+      {hasCamera && <CameraPreview />}
       <div className="stage-body">
         {empty ? (
           <p className="stage-placeholder">

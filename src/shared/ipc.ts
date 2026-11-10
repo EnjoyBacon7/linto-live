@@ -21,7 +21,7 @@ export interface LiveState {
   stream: 'off' | 'starting' | 'active' | 'error' | 'unavailable'
   captions: 'connecting' | 'live' | 'offline'
   obs: 'running' | 'restarting' | 'down'
-  /** 'shown': an output window was opened during the current OBS run (it stays open, black, after Arrêter). */
+  /** 'shown': an output window was opened during the current OBS run (it stays open, on the camera, after Arrêter). */
   output: 'shown' | 'off'
   /** ms epoch when the current session went live (absent when not live). */
   startedAt?: number
@@ -83,7 +83,14 @@ export interface LintoLiveApi {
     uninstall(): Promise<void>
     reportShellState(s: ShellReport): Promise<void>
   }
+  /** The 'preview' event only flows while subscribed (and the window is visible): OBS screenshots cost CPU. */
+  preview: {
+    subscribe(): Promise<void>
+    unsubscribe(): Promise<void>
+  }
   on(evt: 'live-state', cb: (s: LiveState) => void): () => void
+  /** Camera preview: a JPEG data URL of the OBS program output. */
+  on(evt: 'preview', cb: (dataUrl: string) => void): () => void
   on(evt: 'audio-level', cb: (db: number) => void): () => void
   on(evt: 'auth-required', cb: () => void): () => void
   /** Transcript changes; kept out of LiveState (one per partial). */
@@ -114,17 +121,21 @@ export const IPC = {
   liveExportTranscript: 'live:export-transcript',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
+  previewSubscribe: 'preview:subscribe',
+  previewUnsubscribe: 'preview:unsubscribe',
   evtLiveState: 'evt:live-state',
+  evtPreview: 'evt:preview',
   evtAudioLevel: 'evt:audio-level',
   evtAuthRequired: 'evt:auth-required',
   evtCommand: 'evt:command',
   evtTranscript: 'evt:transcript'
 } as const
 
-export type EventName = 'live-state' | 'audio-level' | 'auth-required' | 'command' | 'transcript'
+export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command' | 'transcript'
 
 export const EVENT_CHANNELS: Record<EventName, string> = {
   'live-state': IPC.evtLiveState,
+  preview: IPC.evtPreview,
   'audio-level': IPC.evtAudioLevel,
   'auth-required': IPC.evtAuthRequired,
   command: IPC.evtCommand,
@@ -168,6 +179,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       exportTranscript: (format) => call(IPC.liveExportTranscript, format)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
+    preview: { subscribe: () => call(IPC.previewSubscribe), unsubscribe: () => call(IPC.previewUnsubscribe) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {
       const channel = EVENT_CHANNELS[evt]
       const wrapper = (_e: unknown, ...args: unknown[]): void => (cb as (...a: unknown[]) => void)(...args)

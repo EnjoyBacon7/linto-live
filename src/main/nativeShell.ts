@@ -79,7 +79,7 @@ export function appMenuTemplate(s: ShellState, run: Run): Item[] {
   const windowMenu: Item = {
     label: 'Fenêtre',
     submenu: [
-      cmd('Afficher la fenêtre de sortie', 'show-output', run, { accelerator: 'CmdOrCtrl+1', enabled: live }),
+      cmd('Afficher la fenêtre de sortie', 'show-output', run, { accelerator: 'CmdOrCtrl+1' }),
       cmd(`Afficher ${APP_NAME}`, 'show-window', run, { accelerator: 'CmdOrCtrl+0' }),
       sep,
       { label: 'Réduire', role: 'minimize' },
@@ -120,7 +120,7 @@ export function trayMenuTemplate(s: ShellState, run: Run): Item[] {
     live
       ? cmd('Arrêter', 'stop', run)
       : cmd('Démarrer', 'start', run, { enabled: s.loggedIn && canStart(s) }),
-    cmd('Afficher la fenêtre de sortie', 'show-output', run, { enabled: live }),
+    cmd('Afficher la fenêtre de sortie', 'show-output', run),
     cmd(`Afficher ${APP_NAME}`, 'show-window', run),
     sep,
     cmd(quitLabel(s), 'quit', run)

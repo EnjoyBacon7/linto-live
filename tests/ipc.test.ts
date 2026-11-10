@@ -14,7 +14,7 @@ describe('IPC constants', () => {
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
         'setupLoad', 'setupSave', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
-        'liveGetTranscript', 'liveExportTranscript'
+        'liveGetTranscript', 'liveExportTranscript', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
       ].sort()
     )
   })
@@ -64,6 +64,8 @@ describe('createLintoLiveApi', () => {
     await api.live.exportTranscript('srt')
     await api.app.uninstall()
     await api.app.reportShellState({ loggedIn: true, sessionName: 'S', canStart: true })
+    await api.preview.subscribe()
+    await api.preview.unsubscribe()
     expect(invoke.mock.calls).toEqual([
       [IPC.authMethods],
       [IPC.authLoginLocal, 'a@b', 'pw'],
@@ -84,7 +86,9 @@ describe('createLintoLiveApi', () => {
       ['live:get-transcript'],
       ['live:export-transcript', 'srt'],
       [IPC.appUninstall],
-      ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }]
+      ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }],
+      ['preview:subscribe'],
+      ['preview:unsubscribe']
     ])
   })
   it('passes the platform through', () => {
@@ -111,8 +115,9 @@ describe('createLintoLiveApi', () => {
   it('maps every event name', () => {
     const { api, on } = fake()
     api.on('live-state', () => {})
+    api.on('preview', () => {})
     api.on('auth-required', () => {})
     api.on('transcript', () => {})
-    expect(on.mock.calls.map((c) => c[0])).toEqual([IPC.evtLiveState, IPC.evtAuthRequired, IPC.evtTranscript])
+    expect(on.mock.calls.map((c) => c[0])).toEqual([IPC.evtLiveState, IPC.evtPreview, IPC.evtAuthRequired, IPC.evtTranscript])
   })
 })

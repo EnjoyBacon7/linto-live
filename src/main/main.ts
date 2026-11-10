@@ -256,6 +256,7 @@ function main(): void {
     rebuildShell()
   })
   live.on('transcript', (u: TranscriptUpdate) => send(IPC.evtTranscript, u))
+  live.on('preview', (d: string) => send(IPC.evtPreview, d))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   live.on('auth-required', () => {
     send(IPC.evtAuthRequired)
@@ -400,6 +401,8 @@ function main(): void {
     await writeFile(r.filePath, exportTranscript(t, format), 'utf8')
     return { saved: true }
   })
+  ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
+  ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
   ipcMain.handle(IPC.liveClearSubtitles, () => live.clearSubtitles())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
@@ -513,7 +516,10 @@ function main(): void {
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
-  // No audio levels for a window nobody sees.
+  // A reloaded (or crashed) page re-subscribes when its preview mounts.
+  win.webContents.on('did-start-loading', () => live.setPreviewSubscribed(false))
+  win.webContents.on('render-process-gone', () => live.setPreviewSubscribed(false))
+  // No OBS screenshots nor audio levels for a window nobody sees.
   win.on('hide', () => live.setWindowVisible(false))
   win.on('minimize', () => live.setWindowVisible(false))
   win.on('show', () => live.setWindowVisible(!win?.isMinimized()))

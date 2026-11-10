@@ -289,7 +289,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       case 'new-session': openNew(); break
       case 'terminate': askTerminate(); break
       case 'logout': void logout(); break
-      case 'show-output': if (onAir) showOutput(); break
+      case 'show-output': showOutput(); break
     }
   }
   const title = sel?.name ?? liveName ?? null
@@ -358,11 +358,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           startHint={startHint}
           onStart={start}
           onStop={() => void stop()}
+          canShowOutput={state.obs === 'running'}
           onShowOutput={showOutput}
           onTerminate={askTerminate}
         />
         <div className="content-body">
-          <Stage onAir={onAir} banners={hasBanner ? banners : null} />
+          <Stage onAir={onAir} hasCamera={!!settings?.videoDeviceId} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
