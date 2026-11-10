@@ -109,7 +109,9 @@ jobs:
           set -euo pipefail
           deb="$(ls dist/*.deb)"
           dpkg-deb --info "$deb"
-          dpkg-deb --contents "$deb" | grep -q 'resources/obs/bin/obs$'
+          # Listed to a file: grep -q on the pipe would stop early and fail dpkg-deb under pipefail.
+          dpkg-deb --contents "$deb" > /tmp/deb-contents.txt
+          grep 'resources/obs/bin/obs$' /tmp/deb-contents.txt
           sudo apt-get install -y --no-install-recommends "./$deb"
           obs="/opt/LinTO Live/resources/obs/bin/obs"
           test -x "$obs"

@@ -15,7 +15,7 @@
     "test:it": "vitest run --config vitest.it.config.ts --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "fetch:obs:mac": "bash scripts/fetch-obs-macos.sh",
-    "dist:mac": "test -d vendor/obs/macos/OBS.app || (echo 'Lance npm run fetch:obs:mac' && exit 1) && npm run build && electron-builder --mac --arm64",
+    "dist:mac": "test -d vendor/obs/macos/OBS.app || (echo 'Lance npm run fetch:obs:mac' && exit 1) && npm run build && electron-builder --mac --arm64 --publish never",
     "build:obs:linux": "bash scripts/build-obs-linux.sh",
     "dist:linux": "npm run build && electron-builder --linux AppImage deb flatpak --x64 --publish never",
     "dist:linux:nopak": "npm run build && electron-builder --linux AppImage deb --x64 --publish never",
