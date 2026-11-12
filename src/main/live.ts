@@ -19,6 +19,9 @@ import type { SettingsStore } from './settings'
 
 export const MSG_NO_STREAM =
   "Impossible d'envoyer l'audio : LinTO ne le permet qu'au propriétaire de la session et aux gestionnaires de réunion de l'organisation."
+/** The session's channel only offers RTMP, which does not work towards LinTO (spikes/RESULTS.md). */
+export const MSG_RTMP_ONLY =
+  "Impossible d'envoyer l'audio : cette session ne propose que le protocole RTMP, non pris en charge (SRT requis)."
 export const MSG_STREAM_RETRY = 'Envoi audio interrompu — nouvelle tentative…'
 export const MSG_OBS_DOWN = "OBS s'est arrêté et n'a pas pu redémarrer."
 export const MSG_OBS_NOT_READY = "OBS n'est pas encore prêt, réessaie dans quelques secondes."
@@ -680,7 +683,7 @@ export class LiveController extends EventEmitter {
         phase: 'live',
         session: { name: res.session.name, status: res.session.status },
         stream: cur.service ? 'starting' : 'unavailable',
-        warning: cur.service ? undefined : MSG_NO_STREAM,
+        warning: cur.service ? undefined : res.blocker === 'rtmp-only' ? MSG_RTMP_ONLY : MSG_NO_STREAM,
         startedAt
       })
       this.sendTranscript(this.transcript.reset(res.session.name, startedAt))

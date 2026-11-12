@@ -69,7 +69,8 @@ export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
 
 /**
  * Sidebar entries: `active` first, then most recently updated. Only sessions the user can stream to:
- * LinTO lists every session of the organisation but hands stream endpoints only to those with the right.
+ * LinTO lists every session of the organisation but hands stream endpoints only to those with the right
+ * (and an RTMP-only session cannot be streamed to either, see streamTarget).
  */
 export function toSessionSummaries(sessions: Session[], watermark?: WatermarkConfig): SessionSummary[] {
   return sessions

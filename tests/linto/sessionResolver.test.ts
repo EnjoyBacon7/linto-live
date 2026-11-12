@@ -59,6 +59,11 @@ describe('resolveSession', () => {
     const r = await resolveSession(f.api, 'o', 'Conf', 1)
     if (r.kind !== 'terminated') expect(r.canStream).toBe(false)
   })
+  it('RTMP-only session yields canStream false with the rtmp-only blocker', async () => {
+    const f = fake([sess({ name: 'Conf', channels: [{ id: 1, name: 'c', streamEndpoints: { rtmp: 'rtmp://h/a/k' } }] })])
+    const r = await resolveSession(f.api, 'o', 'Conf', 1)
+    expect(r).toMatchObject({ kind: 'reused', canStream: false, blocker: 'rtmp-only' })
+  })
   it('created session lacking endpoints is refetched via getSession', async () => {
     const f = fake([], { created: sess({ name: 'N', id: 'new', channels: [{ id: 1, name: 'N' }] }), full: sess({ name: 'N', id: 'new' }) })
     const r = await resolveSession(f.api, 'o', 'N', 1)
@@ -91,6 +96,10 @@ describe('lookupSession', () => {
     const other = sess({ name: 'Conf', channels: [{ id: 1, name: 'Conf' }] })
     expect(await lookupSession(fake([other]).api, 'o', 'Conf')).toBe('forbidden')
     expect(await lookupSession(fake([sess({ name: 'Conf', channels: [] })]).api, 'o', 'Conf')).toBe('forbidden')
+  })
+  it('rtmp-only when the session only offers RTMP (not supported)', async () => {
+    const r = sess({ name: 'Conf', channels: [{ id: 1, name: 'Conf', streamEndpoints: { rtmp: 'rtmp://h/a/k' } }] })
+    expect(await lookupSession(fake([r]).api, 'o', 'Conf')).toBe('rtmp-only')
   })
   it('terminated when only terminated sessions have that name', async () => {
     expect(await lookupSession(fake([sess({ name: 'Conf', status: 'terminated' })]).api, 'o', 'Conf')).toBe('terminated')
