@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { LintoApi } from '../../src/main/linto/api'
 import { UnauthorizedError } from '../../src/shared/types'
 import type { LintoUrls } from '../../src/main/linto/instance'
@@ -122,5 +122,19 @@ describe('LintoApi', () => {
     await api.terminateSession('o1', 's')
     expect(calls[1].url).toBe('https://s/api/organizations/o1/sessions/s/stop?force=true&waitFinal=true')
     expect(calls[1].init.method).toBe('PUT')
+  })
+})
+
+describe('LinTO request timeout (issue #6)', () => {
+  it('every request carries an abort signal, and a timeout reads as « LinTO ne répond pas »', async () => {
+    const { MSG_LINTO_TIMEOUT } = await import('../../src/main/linto/timeout')
+    const urls = { instance: 'https://x', api: 'https://x/api', auth: 'https://x/auth', wsUrl: 'https://x', wsPath: '/ws' }
+    const fetchFn = vi.fn(async (_u: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal)
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    })
+    const api = new LintoApi(urls, () => 'tok', fetchFn as unknown as typeof fetch)
+    await expect(api.authMethods()).rejects.toThrow(MSG_LINTO_TIMEOUT)
+    expect(fetchFn).toHaveBeenCalledOnce()
   })
 })
