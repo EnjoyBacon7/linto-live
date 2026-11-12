@@ -367,7 +367,8 @@ describe('Terminer…', () => {
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Terminer' }))
     expect(terminate).toHaveBeenCalledTimes(1)
     expect((screen.getByRole('button', { name: 'Fin de session…' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(true)
+    // Arrêter stays available: it interrupts a termination stuck on LinTO (issue #6).
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
     const lists = fn(api.sessions.list).mock.calls.length
     await act(async () => release())
     await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBeGreaterThan(lists))
@@ -409,13 +410,29 @@ describe('Switch while live', () => {
     act(() => emit('live-state', live()))
     await userEvent.click(row('Atelier'))
     await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
-    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement).disabled).toBe(true)
     await userEvent.click(row('Plénière'))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(start).toHaveBeenCalledTimes(1)
     await act(async () => release({ ok: true, reused: false, canStream: true }))
     expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('Arrêter interrupts a switch stuck on LinTO; the cancelled start shows no error (issue #6)', async () => {
+    let release: (r: StartResult) => void = () => {}
+    const start = vi.fn(() => new Promise<StartResult>((r) => { release = r }))
+    const stop = vi.fn(async () => { release({ ok: false, message: 'Démarrage annulé.', cancelled: true }) })
+    setup({ live: { start, stop } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Atelier'))
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Arrêter' }))
+    expect(stop).toHaveBeenCalledTimes(1)
+    act(() => emit('live-state', { ...live(), phase: 'idle', session: undefined }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Démarrer' })).toBeTruthy())
+    expect(screen.queryByText('Démarrage annulé.')).toBeNull()
   })
 
   it('an existing name typed while live offers to switch to it', async () => {

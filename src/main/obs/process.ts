@@ -189,6 +189,15 @@ export class ObsProcess extends EventEmitter {
     this.child?.kill('SIGKILL')
   }
 
+  /**
+   * OBS is alive but no longer answers (the app's watchdog saw it): SIGKILL it without stopping, so the
+   * usual crash path restarts it ('restarting', then 'ready').
+   */
+  killHung(): void {
+    if (this.stopping) return
+    this.child?.kill('SIGKILL')
+  }
+
   private async killChild(): Promise<void> {
     const child = this.child
     if (!child) return

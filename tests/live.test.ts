@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
-  LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
+  LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_START_CANCELLED, MSG_OBS_HUNG, WATCHDOG_MS, WATCHDOG_MISSES, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
   MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
@@ -63,6 +63,7 @@ function fakeController(log: string[]) {
     }),
     resetProjectorState: vi.fn(),
     disconnect: vi.fn(async () => {}),
+    ping: vi.fn(async () => {}),
     emitState: (s: StreamState) => stateCb?.(s)
   }
   return c
@@ -78,6 +79,9 @@ function setup(opts: { sessions?: Session[] } = {}) {
       const conn = { port: port++, password: 'pw' }
       obs.emit('ready', conn)
       return conn
+    }),
+    killHung: vi.fn(() => {
+      log.push('obs.killHung')
     }),
     stop: vi.fn(async () => {
       log.push('obs.stop')
@@ -431,13 +435,108 @@ describe('LiveController', () => {
     expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
   })
 
-  it('serializes concurrent start and stop', async () => {
+  describe('OBS watchdog (issue #6)', () => {
+    it('kills an OBS that stops answering pings so it restarts', async () => {
+      const t = setup()
+      await t.live.boot()
+      t.ctl().ping.mockRejectedValue(new Error('OBS ne répond pas (GetVersion).'))
+      await vi.advanceTimersByTimeAsync(WATCHDOG_MS * (WATCHDOG_MISSES - 1))
+      expect(t.obs.killHung).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(WATCHDOG_MS)
+      expect(t.obs.killHung).toHaveBeenCalledTimes(1)
+      expect(t.last().warning).toBe(MSG_OBS_HUNG)
+      await vi.advanceTimersByTimeAsync(WATCHDOG_MS * 5)
+      expect(t.obs.killHung).toHaveBeenCalledTimes(1) // once per hang: the restart attaches a new watchdog
+    })
+
+    it('an isolated missed ping is forgiven', async () => {
+      const t = setup()
+      await t.live.boot()
+      const ping = t.ctl().ping
+      for (let i = 0; i < 6; i++) {
+        if (i % 2 === 0) ping.mockRejectedValueOnce(new Error('slow'))
+        await vi.advanceTimersByTimeAsync(WATCHDOG_MS)
+      }
+      expect(ping.mock.calls.length).toBeGreaterThanOrEqual(6)
+      expect(t.obs.killHung).not.toHaveBeenCalled()
+    })
+
+    it('runs even while the queue waits on OBS', async () => {
+      const t = setup()
+      await t.live.boot()
+      const c = t.ctl()
+      c.setVideoDevice.mockImplementation(() => new Promise(() => {})) // OBS frozen mid-request
+      c.ping.mockImplementation(() => new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15_000)))
+      void t.live.saveSettings({ videoDeviceId: 'capture-card' }).catch(() => {})
+      await vi.advanceTimersByTimeAsync((WATCHDOG_MS + 15_000) * WATCHDOG_MISSES)
+      expect(t.obs.killHung).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it('serializes start, then stop', async () => {
+    const t = setup()
+    await t.live.boot()
+    const a = t.live.start('Conf')
+    await a
+    const b = t.live.stop()
+    await b
+    expect(t.log.indexOf(`startStream:${SRT_A}`)).toBeLessThan(t.log.lastIndexOf('stopStream'))
+    expect(t.last().phase).toBe('idle')
+  })
+
+  it('Arrêter cancels a start queued before it (issue #6)', async () => {
     const t = setup()
     await t.live.boot()
     const a = t.live.start('Conf')
     const b = t.live.stop()
-    await Promise.all([a, b])
-    expect(t.log.indexOf(`startStream:${SRT_A}`)).toBeLessThan(t.log.indexOf('stopStream'))
+    expect(await a).toEqual({ ok: false, message: MSG_START_CANCELLED, cancelled: true })
+    await b
+    expect(t.ctl().startStream).not.toHaveBeenCalled()
+    expect(t.last().phase).toBe('idle')
+  })
+
+  it('Arrêter does not wait behind a switch stuck on LinTO: the old show stops right away (issue #6)', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.api.searchSessions.mockImplementationOnce(() => new Promise(() => {})) // LinTO accepts, never answers
+    const sw = t.live.start('Atelier')
+    await vi.advanceTimersByTimeAsync(10)
+    const stop = t.live.stop()
+    expect(await sw).toMatchObject({ ok: false, cancelled: true })
+    await stop
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+    expect(t.log).toContain('captions.close')
+  })
+
+  it('Arrêter does not wait behind a termination stuck on LinTO (issue #6)', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.api.terminateSession.mockImplementationOnce(() => new Promise(() => {}))
+    const term = t.live.terminate()
+    await vi.advanceTimersByTimeAsync(10)
+    const stop = t.live.stop()
+    await term
+    await stop
+    expect(t.last().phase).toBe('idle')
+  })
+
+  it('Arrêter does not wait behind a stream-retry probe stuck on LinTO (issue #6)', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('active')
+    c.startStream.mockRejectedValue(new Error('SRT refused'))
+    c.emitState('stopped')
+    await vi.advanceTimersByTimeAsync(2_000 + 5_000) // two retries on the old endpoint
+    t.api.getSession.mockImplementation(() => new Promise(() => {})) // LinTO accepts, never answers
+    await vi.advanceTimersByTimeAsync(10_000) // third retry probes the session first
+    expect(t.api.getSession).toHaveBeenCalled() // the probe is pending
+    const stop = t.live.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await stop
     expect(t.last().phase).toBe('idle')
   })
 

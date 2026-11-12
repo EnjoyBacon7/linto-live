@@ -72,6 +72,11 @@ export class ObsController {
     return new ObsController(guardClient(ws as unknown as ObsClient))
   }
 
+  /** Liveness check (the watchdog): rejects when OBS does not answer in time. */
+  async ping(): Promise<void> {
+    await this.client.call('GetVersion')
+  }
+
   async ensureScene(platform: NodeJS.Platform): Promise<void> {
     this.platform = platform
     const { scenes } = await this.client.call('GetSceneList')
