@@ -25,6 +25,7 @@ import { lookupSession } from './linto/sessionResolver'
 import { asLintoAction } from './linto/accessMessages'
 import { CaptionStream } from './linto/captions'
 import { EXPORT_FILTERS, exportFileName, exportTranscript } from './linto/transcriptExport'
+import { TRANSCRIPT_VIEW_MAX_SEGMENTS, trimTranscript } from '../shared/transcript'
 import { loadInstance, STUDIO_WATERMARK_DEFAULTS, type LintoUrls } from './linto/instance'
 import { checkWatermark, WATERMARK_META_KEY } from './linto/watermark'
 import {
@@ -383,7 +384,8 @@ function main(): void {
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())
   ipcMain.handle(IPC.liveShowOutput, () => live.showOutputWindow())
   ipcMain.handle(IPC.liveGetState, () => live.getState())
-  ipcMain.handle(IPC.liveGetTranscript, () => live.getTranscript())
+  // The window shows only the most recent segments (the export reads the full log below).
+  ipcMain.handle(IPC.liveGetTranscript, () => trimTranscript(live.getTranscript(), TRANSCRIPT_VIEW_MAX_SEGMENTS))
   ipcMain.handle(IPC.liveExportTranscript, async (_e, raw: unknown): Promise<{ saved: boolean }> => {
     if (!(TRANSCRIPT_EXPORT_FORMATS as readonly unknown[]).includes(raw)) throw new Error('Format d’export inconnu.')
     const format = raw as TranscriptExportFormat
