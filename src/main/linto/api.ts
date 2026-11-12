@@ -4,6 +4,7 @@ import {
 } from '../../shared/types'
 import { orgRights } from '../../shared/rights'
 import type { LintoUrls } from './instance'
+import { fetchWithTimeout } from './timeout'
 
 export { ForbiddenError, LintoHttpError, NotFoundError, UnauthorizedError }
 
@@ -75,7 +76,10 @@ export class LintoApi {
     if (init.body !== undefined) headers.set('Content-Type', 'application/json')
     const t = this.token()
     if (auth && t) headers.set('Authorization', `Bearer ${t}`)
-    const res = await this.fetchFn(url, { ...init, headers })
+    return fetchWithTimeout(this.fetchFn, url, { ...init, headers }, (res) => this.read(res, auth))
+  }
+
+  private async read(res: Response, auth: boolean): Promise<any> {
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       const { message, code } = errorBody(text)

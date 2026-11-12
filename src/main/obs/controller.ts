@@ -22,6 +22,34 @@ export interface ObsClient {
   disconnect(): Promise<unknown>
 }
 
+/**
+ * Upper bound for one obs-websocket request. obs-websocket-js has none, and a request in flight when the
+ * socket closes never settles (the library drops its listeners without rejecting): unbounded, one such call
+ * would block LiveController's queue — Démarrer, Arrêter, the re-attach after an OBS restart — until quit.
+ */
+export const OBS_CALL_TIMEOUT_MS = 10_000
+/** Requests that open or enumerate a capture device can legitimately take several seconds. */
+export const OBS_SLOW_CALL_TIMEOUT_MS = 30_000
+const SLOW_REQUESTS = new Set(['CreateInput', 'CreateSceneItem', 'SetInputSettings', 'GetInputPropertiesListPropertyItems'])
+/** connect() waits for OBS's Hello/Identified; disconnect() for the close handshake. */
+const OBS_CONNECT_TIMEOUT_MS = 10_000
+const OBS_DISCONNECT_TIMEOUT_MS = 3_000
+
+export interface ObsTimeouts {
+  call: number
+  slowCall: number
+}
+const DEFAULT_TIMEOUTS: ObsTimeouts = { call: OBS_CALL_TIMEOUT_MS, slowCall: OBS_SLOW_CALL_TIMEOUT_MS }
+
+/** Rejects with `err` if `p` has not settled after `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number, err: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, rej) => {
+    timer = setTimeout(() => rej(err()), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
+}
+
 const MIN_DB = -100
 /** obs-websocket RequestStatus::OutputNotRunning. */
 const OUTPUT_NOT_RUNNING = 501
@@ -44,28 +72,84 @@ export class ObsController {
   private videoItemId: number | null = null
   private lastServer: string | null = null
   private stateListeners = new Set<(s: StreamState) => void>()
+  /** Rejecters of the requests in flight: the library exposes none, so they are tracked here. */
+  private pending = new Set<(e: Error) => void>()
+  private readonly onClosed = (): void => this.failPending(new Error('Connexion à OBS perdue.'))
 
-  constructor(private readonly client: ObsClient) {}
+  constructor(
+    private readonly client: ObsClient,
+    private readonly timeouts: ObsTimeouts = DEFAULT_TIMEOUTS
+  ) {
+    client.on('ConnectionClosed', this.onClosed)
+  }
 
   static async connect(c: ObsConnection): Promise<ObsController> {
     const ws = new OBSWebSocket()
-    await ws.connect(`ws://127.0.0.1:${c.port}`, c.password, {
+    const connecting = ws.connect(`ws://127.0.0.1:${c.port}`, c.password, {
       eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters,
       rpcVersion: 1
     })
+    try {
+      await withTimeout(connecting, OBS_CONNECT_TIMEOUT_MS, () => new Error(`OBS ne répond pas (connexion, ${OBS_CONNECT_TIMEOUT_MS / 1000} s).`))
+    } catch (e) {
+      connecting.catch(() => {})
+      await ws.disconnect().catch(() => {})
+      throw e
+    }
     return new ObsController(ws as unknown as ObsClient)
+  }
+
+  /**
+   * Every request goes through here: bounded by a timeout, and rejected as soon as the connection closes
+   * (the library would leave it pending forever).
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private call(req: string, data?: Record<string, unknown>): Promise<any> {
+    const ms = SLOW_REQUESTS.has(req) ? this.timeouts.slowCall : this.timeouts.call
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return new Promise<any>((resolve, reject) => {
+      const settle = (): void => {
+        clearTimeout(timer)
+        this.pending.delete(fail)
+      }
+      const fail = (e: Error): void => {
+        settle()
+        reject(e)
+      }
+      const timer = setTimeout(() => fail(new Error(`OBS ne répond pas (${req}, ${ms / 1000} s).`)), ms)
+      this.pending.add(fail)
+      let p: Promise<unknown>
+      try {
+        p = this.client.call(req, data)
+      } catch (e) {
+        return fail(e as Error)
+      }
+      p.then(
+        (r) => {
+          settle()
+          resolve(r)
+        },
+        (e) => fail(e as Error)
+      )
+    })
+  }
+
+  private failPending(e: Error): void {
+    const fails = [...this.pending]
+    this.pending.clear()
+    fails.forEach((f) => f(e))
   }
 
   async ensureScene(platform: NodeJS.Platform): Promise<void> {
     this.platform = platform
-    const { scenes } = await this.client.call('GetSceneList')
+    const { scenes } = await this.call('GetSceneList')
     const have = new Set<string>((scenes as { sceneName: string }[]).map((s) => s.sceneName))
     for (const name of [SCENE, SCENE_PAUSE]) {
-      if (!have.has(name)) await this.client.call('CreateScene', { sceneName: name })
+      if (!have.has(name)) await this.call('CreateScene', { sceneName: name })
     }
-    const { inputs } = await this.client.call('GetInputList')
+    const { inputs } = await this.call('GetInputList')
     const existing = new Set<string>((inputs as { inputName: string }[]).map((i) => i.inputName))
-    const { sceneItems } = await this.client.call('GetSceneItemList', { sceneName: SCENE })
+    const { sceneItems } = await this.call('GetSceneItemList', { sceneName: SCENE })
     const inScene = new Set<string>((sceneItems as { sourceName: string }[]).map((i) => i.sourceName))
 
     const wanted: [string, string, Record<string, unknown>][] = [
@@ -75,16 +159,16 @@ export class ObsController {
     ]
     for (const [inputName, inputKind, inputSettings] of wanted) {
       if (!existing.has(inputName)) {
-        await this.client.call('CreateInput', { sceneName: SCENE, inputName, inputKind, inputSettings, sceneItemEnabled: true })
+        await this.call('CreateInput', { sceneName: SCENE, inputName, inputKind, inputSettings, sceneItemEnabled: true })
       } else if (!inScene.has(inputName)) {
-        await this.client.call('CreateSceneItem', { sceneName: SCENE, sourceName: inputName, sceneItemEnabled: true })
+        await this.call('CreateSceneItem', { sceneName: SCENE, sourceName: inputName, sceneItemEnabled: true })
       }
     }
     for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_AUDIO]) {
       const isAudio = name === SRC_AUDIO
       // Silencing a source that has no audio at all (Linux v4l2 camera) is already done.
       const silence = (req: string, data: Record<string, unknown>): Promise<unknown> =>
-        isAudio ? this.client.call(req, data) : this.client.call(req, data).catch(ignoreNoAudio)
+        isAudio ? this.call(req, data) : this.call(req, data).catch(ignoreNoAudio)
       await silence('SetInputAudioTracks', {
         inputName: name,
         inputAudioTracks: isAudio ? { ...TRACKS_NONE, '1': true } : { ...TRACKS_NONE }
@@ -94,7 +178,7 @@ export class ObsController {
   }
 
   private async devices(inputName: string, propertyName: string): Promise<DeviceItem[]> {
-    const { propertyItems } = await this.client.call('GetInputPropertiesListPropertyItems', { inputName, propertyName })
+    const { propertyItems } = await this.call('GetInputPropertiesListPropertyItems', { inputName, propertyName })
     return (propertyItems as { itemName: string; itemValue: unknown; itemEnabled?: boolean }[])
       .filter((i) => i.itemEnabled !== false)
       .map((i) => ({ name: (i.itemName ?? '').trim(), id: i.itemValue == null ? '' : String(i.itemValue) }))
@@ -111,12 +195,12 @@ export class ObsController {
   }
 
   async setVideoDevice(id: string): Promise<void> {
-    await this.client.call('SetInputSettings', { inputName: SRC_VIDEO, inputSettings: { [videoProp(this.platform)]: id } })
+    await this.call('SetInputSettings', { inputName: SRC_VIDEO, inputSettings: { [videoProp(this.platform)]: id } })
     if (this.videoItemId === null) {
-      const r = await this.client.call('GetSceneItemId', { sceneName: SCENE, sourceName: SRC_VIDEO })
+      const r = await this.call('GetSceneItemId', { sceneName: SCENE, sourceName: SRC_VIDEO })
       this.videoItemId = r.sceneItemId as number
     }
-    await this.client.call('SetSceneItemTransform', {
+    await this.call('SetSceneItemTransform', {
       sceneName: SCENE,
       sceneItemId: this.videoItemId,
       sceneItemTransform: {
@@ -131,15 +215,15 @@ export class ObsController {
   }
 
   async setAudioDevice(id: string): Promise<void> {
-    await this.client.call('SetInputSettings', { inputName: SRC_AUDIO, inputSettings: { device_id: id } })
+    await this.call('SetInputSettings', { inputName: SRC_AUDIO, inputSettings: { device_id: id } })
   }
 
   async setOverlayUrl(url: string): Promise<void> {
-    await this.client.call('SetInputSettings', {
+    await this.call('SetInputSettings', {
       inputName: SRC_OVERLAY,
       inputSettings: { url, width: 1920, height: 1080, fps: 30, fps_custom: true, reroute_audio: true, shutdown: false }
     })
-    await this.client.call('SetInputMute', { inputName: SRC_OVERLAY, inputMuted: true })
+    await this.call('SetInputMute', { inputName: SRC_OVERLAY, inputMuted: true })
   }
 
   audioLevel$(cb: (db: number) => void): () => void {
@@ -156,7 +240,7 @@ export class ObsController {
   }
 
   async screenshot(): Promise<string> {
-    const r = await this.client.call('GetSourceScreenshot', {
+    const r = await this.call('GetSourceScreenshot', {
       sourceName: SCENE,
       imageFormat: 'jpg',
       imageWidth: 640,
@@ -166,7 +250,7 @@ export class ObsController {
   }
 
   private async streamActive(): Promise<boolean> {
-    const r = await this.client.call('GetStreamStatus')
+    const r = await this.call('GetStreamStatus')
     return Boolean(r?.outputActive)
   }
 
@@ -177,10 +261,10 @@ export class ObsController {
     try {
       if (await this.streamActive()) {
         if (this.lastServer === id) return
-        await this.client.call('StopStream')
+        await this.call('StopStream')
       }
-      await this.client.call('SetStreamServiceSettings', s as unknown as Record<string, unknown>)
-      await this.client.call('StartStream')
+      await this.call('SetStreamServiceSettings', s as unknown as Record<string, unknown>)
+      await this.call('StartStream')
       this.lastServer = id
     } catch (e) {
       this.stateListeners.forEach((cb) => cb('error'))
@@ -196,7 +280,7 @@ export class ObsController {
   async stopStream(): Promise<boolean> {
     this.lastServer = null
     try {
-      await this.client.call('StopStream')
+      await this.call('StopStream')
       return true
     } catch (e) {
       if ((e as { code?: unknown })?.code === OUTPUT_NOT_RUNNING) return false
@@ -230,15 +314,15 @@ export class ObsController {
    * No request can close or list projectors, so every call opens a new window.
    */
   async openOutputWindow(): Promise<void> {
-    await this.client.call('OpenVideoMixProjector', { videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM' })
+    await this.call('OpenVideoMixProjector', { videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM' })
   }
 
   async showLive(): Promise<void> {
-    await this.client.call('SetCurrentProgramScene', { sceneName: SCENE })
+    await this.call('SetCurrentProgramScene', { sceneName: SCENE })
   }
 
   async showPause(): Promise<void> {
-    await this.client.call('SetCurrentProgramScene', { sceneName: SCENE_PAUSE })
+    await this.call('SetCurrentProgramScene', { sceneName: SCENE_PAUSE })
   }
 
   /** Called by LiveController after an OBS restart: forget cached scene item ids. */
@@ -246,7 +330,12 @@ export class ObsController {
     this.videoItemId = null
   }
 
+  /** Rejects the requests still in flight, then closes the socket (bounded: OBS may be frozen). */
   async disconnect(): Promise<void> {
-    await this.client.disconnect()
+    this.client.off('ConnectionClosed', this.onClosed)
+    this.failPending(new Error('Connexion à OBS fermée.'))
+    const closing = this.client.disconnect()
+    closing.catch(() => {})
+    await withTimeout(closing, OBS_DISCONNECT_TIMEOUT_MS, () => new Error('OBS ne ferme pas la connexion.'))
   }
 }

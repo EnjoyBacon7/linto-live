@@ -4,6 +4,18 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Corrigé
+
+- **Arrêter / Démarrer ne restent plus bloqués après un plantage ou un gel d'OBS** (#6). Une requête
+  OBS en cours au moment du plantage ne se terminait jamais (obs-websocket-js ne la rejette pas) et
+  bloquait toutes les actions suivantes, y compris la reconnexion à l'OBS redémarré, jusqu'à quitter
+  l'application. Chaque requête OBS est désormais bornée (10 s, 30 s pour les périphériques) et
+  rejetée dès que la connexion se ferme.
+- **Un serveur LinTO muet ne bloque plus l'application cinq minutes** (#6) : chaque requête LinTO
+  échoue au bout de 20 s avec un message clair, au lieu du délai par défaut de 300 s de Node.
+
 ## [0.3.0] - 2026-11-10
 
 ### Ajouté

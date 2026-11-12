@@ -1,4 +1,5 @@
 import type { WatermarkConfig } from '../../shared/types'
+import { fetchWithTimeout } from './timeout'
 
 export interface LintoUrls { instance: string; api: string; auth: string; wsUrl: string; wsPath: string }
 
@@ -58,8 +59,9 @@ export async function loadInstance(
   instance: string, fetchFn: typeof fetch = fetch
 ): Promise<{ urls: LintoUrls; watermark: WatermarkConfig }> {
   const inst = instance.replace(/\/+$/, '')
-  const res = await fetchFn(`${inst}/config.js`)
-  if (!res.ok) throw new Error(`config.js: HTTP ${res.status}`)
-  const js = await res.text()
+  const js = await fetchWithTimeout(fetchFn, `${inst}/config.js`, {}, async (res) => {
+    if (!res.ok) throw new Error(`config.js: HTTP ${res.status}`)
+    return res.text()
+  })
   return { urls: parseConfigJs(inst, js), watermark: parseWatermarkConfig(js) }
 }
