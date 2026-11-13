@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
-        'setupLoad', 'setupSave', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
+        'setupLoad', 'setupSave', 'setupPickMedia', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
       ].sort()
@@ -23,6 +23,8 @@ describe('IPC constants', () => {
     expectTypeOf<LintoLiveApi['live']['start']>().parameter(0).toBeString()
     expectTypeOf<LintoLiveApi['setup']['load']>().returns.resolves.not.toHaveProperty('displays')
     expectTypeOf<LintoLiveApi['live']['showOutputWindow']>().returns.resolves.toBeVoid()
+    expectTypeOf<LintoLiveApi['setup']['pickMedia']>().parameter(0).toEqualTypeOf<'image' | 'video'>()
+    expectTypeOf<LintoLiveApi['setup']['pickMedia']>().returns.resolves.toEqualTypeOf<string | null>()
     expectTypeOf<LintoLiveApi['live']['getState']>().returns.resolves.toHaveProperty('phase')
   })
 })
@@ -53,6 +55,7 @@ describe('createLintoLiveApi', () => {
     await api.auth.status()
     await api.setup.load()
     await api.setup.save({ instance: 'i' })
+    await api.setup.pickMedia('image')
     await api.sessions.list()
     await api.sessions.lookup('S')
     await api.live.start('S')
@@ -78,6 +81,7 @@ describe('createLintoLiveApi', () => {
       [IPC.authStatus],
       [IPC.setupLoad],
       [IPC.setupSave, { instance: 'i' }],
+      ['setup:pick-media', 'image'],
       [IPC.sessionsList],
       ['sessions:lookup', 'S'],
       [IPC.liveStart, 'S'],

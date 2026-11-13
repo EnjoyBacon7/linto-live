@@ -19,6 +19,7 @@ import { appPaths } from './paths'
 import { SettingsStore } from './settings'
 import { ObsProcess } from './obs/process'
 import { ObsController } from './obs/controller'
+import { lumaOfBgra } from './obs/fallback'
 import { obsExecutable } from './obs/locate'
 import { ensureObsRuntime } from './obs/runtime'
 import { LintoApi } from './linto/api'
@@ -50,6 +51,10 @@ import {
 } from './nativeShell'
 
 const SHUTDOWN_CAP_MS = 15_000
+const MEDIA_FILTERS = {
+  image: { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
+  video: { name: 'Vidéos', extensions: ['mp4', 'mov', 'mkv', 'webm', 'm4v'] }
+} satisfies Record<'image' | 'video', Electron.FileFilter>
 
 let win: BrowserWindow | null = null
 /** Module-level so the menu-bar icon is never garbage-collected. */
@@ -200,6 +205,7 @@ function main(): void {
     settings,
     platform,
     qrSvg: (url) => QRCode.toString(url, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }),
+    decodeLuma: (dataUrl) => lumaOfBgra(nativeImage.createFromDataURL(dataUrl).toBitmap()),
     watermarkConfig: () => watermarkCfg
   })
 
@@ -375,6 +381,17 @@ function main(): void {
   ipcMain.handle(IPC.setupSave, async (_e, patch: Partial<Settings>) => {
     await live.saveSettings(patch)
     syncTitle()
+  })
+
+  ipcMain.handle(IPC.setupPickMedia, async (_e, kind: unknown): Promise<string | null> => {
+    if (kind !== 'image' && kind !== 'video') throw new Error('Type de fichier inconnu.')
+    const opts: Electron.OpenDialogOptions = {
+      title: kind === 'image' ? 'Choisir une image' : 'Choisir une vidéo',
+      properties: ['openFile'],
+      filters: [MEDIA_FILTERS[kind]]
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return r.canceled ? null : (r.filePaths[0] ?? null)
   })
 
   ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown) => {

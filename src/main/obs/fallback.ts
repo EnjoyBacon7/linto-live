@@ -3,6 +3,20 @@ export interface Luma {
   max: number
 }
 
+/** Mean and max of 0.299R + 0.587G + 0.114B over a BGRA bitmap, in 0..1; null without a single pixel. */
+export function lumaOfBgra(buf: Uint8Array): Luma | null {
+  const n = Math.floor(buf.length / 4)
+  if (n === 0) return null
+  let sum = 0
+  let max = 0
+  for (let i = 0; i < n * 4; i += 4) {
+    const y = 0.114 * buf[i] + 0.587 * buf[i + 1] + 0.299 * buf[i + 2]
+    sum += y
+    if (y > max) max = y
+  }
+  return { mean: sum / n / 255, max: max / 255 }
+}
+
 /** Limited-range black (~0.063) passes. Tune only against a real ATEM capture. */
 export function isBlack(l: Luma): boolean {
   return l.mean < 0.1 && l.max < 0.2

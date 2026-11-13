@@ -9,6 +9,7 @@ import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, typ
 import type { ObsConnection, ObsProcess } from './obs/process'
 import type { ObsController, StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
+import { FallbackMonitor, type Luma } from './obs/fallback'
 import type { LintoApi } from './linto/api'
 import { type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
 import { resolveSession } from './linto/sessionResolver'
@@ -73,7 +74,8 @@ export interface LiveObsProcess {
 }
 export type LiveObsController = Pick<
   ObsController,
-  | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setAudioDevice' | 'setOverlayUrl'
+  | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setBackupVisible' | 'probePrimary'
+  | 'setAudioDevice' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect'
 >
@@ -96,6 +98,8 @@ export interface LiveDeps {
   platform: NodeJS.Platform
   /** SVG markup of a QR code for `url`. */
   qrSvg: (url: string) => Promise<string>
+  /** Luma of a probePrimary() picture (null when it has no pixels: the source is absent). */
+  decodeLuma: (dataUrl: string) => Luma | null
   /** The instance's watermark defaults (config.js); LinTO Studio's defaults when absent. */
   watermarkConfig?: () => WatermarkConfig
 }
@@ -162,6 +166,8 @@ export class LiveController extends EventEmitter {
   private authLost = false
   private tail: Promise<unknown> = Promise.resolve()
   private transcript = new TranscriptLog()
+  /** Switches to the backup source when the primary is absent (only while a backup is configured and OBS attached). */
+  private monitor: FallbackMonitor | null = null
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -408,6 +414,12 @@ export class LiveController extends EventEmitter {
       if (patch.primarySource !== undefined && !sameSource(patch.primarySource, before.primarySource)) {
         await c.setSource('primary', patch.primarySource)
       }
+      // The monitor reads primarySource and blackIsAbsent live: only a backup change concerns it.
+      if (patch.backupSource !== undefined && !sameSource(patch.backupSource, before.backupSource)) {
+        await c.setSource('backup', patch.backupSource)
+        // Another backup file keeps the running monitor (the recreated input keeps its visibility).
+        if ((patch.backupSource.kind === 'none') !== (this.monitor === null)) this.syncMonitor(c)
+      }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
     })
   }
@@ -457,6 +469,9 @@ export class LiveController extends EventEmitter {
   }
 
   private dropController(): void {
+    this.monitor?.stop()
+    this.monitor = null
+    if (this.state.videoOnAir) this.setState({ videoOnAir: undefined })
     this.unsubs.forEach((u) => u())
     this.unsubs = []
     this.ctl = null
@@ -496,6 +511,8 @@ export class LiveController extends EventEmitter {
     const s = this.d.settings.get()
     let warning: string | undefined
     await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch(() => {})
+    await ready.setSource('backup', s.backupSource ?? NO_SOURCE).catch(() => {})
+    this.syncMonitor(ready)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
@@ -505,6 +522,37 @@ export class LiveController extends EventEmitter {
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
     this.updatePreview()
     if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
+  }
+
+  /**
+   * Runs the fallback monitor on `c` when a backup source is configured (its start hides the backup);
+   * without one, hides a backup an earlier OBS run may have left visible.
+   */
+  private syncMonitor(c: LiveObsController): void {
+    this.monitor?.stop()
+    this.monitor = null
+    const settings = (): Settings => this.d.settings.get()
+    if ((settings().backupSource ?? NO_SOURCE).kind === 'none') {
+      c.setBackupVisible(false).catch(() => {})
+      if (this.state.videoOnAir) this.setState({ videoOnAir: undefined })
+      return
+    }
+    const m = new FallbackMonitor({
+      probe: () => c.probePrimary(),
+      decode: (d) => this.d.decodeLuma(d),
+      setBackup: (on) => c.setBackupVisible(on),
+      blackIsAbsent: () => settings().blackIsAbsent !== false,
+      primaryIsFile: () => {
+        const k = settings().primarySource?.kind
+        return k === 'image' || k === 'video'
+      },
+      onChange: (onBackup) => {
+        if (this.monitor === m) this.setState({ videoOnAir: onBackup ? 'backup' : 'primary' })
+      }
+    })
+    this.monitor = m
+    this.setState({ videoOnAir: 'primary' })
+    m.start()
   }
 
   /** Program scene, then the stream. The output window is the user's to open (showOutputWindow). */

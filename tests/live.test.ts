@@ -6,10 +6,14 @@ import {
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
+import type { Luma } from '../src/main/obs/fallback'
 import type { LiveState } from '../src/shared/ipc'
 import {
   ForbiddenError, NotFoundError, UnauthorizedError, type Session, type Settings, type TranscriptUpdate
 } from '../src/shared/types'
+
+const PICTURE: Luma = { mean: 0.4, max: 0.9 }
+const BLACK: Luma = { mean: 16 / 255, max: 16 / 255 }
 
 const SRT_A = 'srt://linto:9000?streamid=a'
 const SRT_B = 'srt://linto:9000?streamid=b'
@@ -34,6 +38,8 @@ function fakeController(log: string[]) {
     listVideoDevices: vi.fn(async () => [{ id: 'cam', name: 'Cam' }]),
     listAudioDevices: vi.fn(async () => [{ id: 'mic', name: 'Mic' }]),
     setSource: vi.fn(async () => {}),
+    setBackupVisible: vi.fn(async (_on: boolean) => {}),
+    probePrimary: vi.fn(async () => 'data:image/png;base64,AAAA'),
     setAudioDevice: vi.fn(async () => {}),
     setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}),
@@ -69,7 +75,7 @@ function fakeController(log: string[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[] } = {}) {
+function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
@@ -116,7 +122,8 @@ function setup(opts: { sessions?: Session[] } = {}) {
     orgId: 'org1',
     profileId: 3,
     primarySource: { kind: 'device', id: 'cam' },
-    audioDeviceId: 'mic'
+    audioDeviceId: 'mic',
+    ...opts.settings
   }
   const settings = {
     get: vi.fn(() => ({ ...data })),
@@ -127,12 +134,15 @@ function setup(opts: { sessions?: Session[] } = {}) {
     getToken: vi.fn(() => 'tok')
   }
   const qrSvg = vi.fn(async (url: string) => `<svg>${url}</svg>`)
-  const deps = { obs, controllerFactory, api, captions, overlay, settings, qrSvg, platform: 'darwin' as const } satisfies LiveDeps
+  const decodeLuma = vi.fn((_d: string) => (opts.luma ? opts.luma() : PICTURE))
+  const deps = {
+    obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const
+  } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
-  return { live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, qrSvg, log, states, last: () => live.getState() }
+  return { live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, qrSvg, decodeLuma, log, states, last: () => live.getState() }
 }
 
 const flush = async (): Promise<void> => {
@@ -1323,5 +1333,100 @@ describe('QR code', () => {
     expect(lastStyle(t)).toMatchObject({ qr: { pinned: true, frequency: 30, duration: 5 } })
     await t.live.stop()
     expect(lastStyle(t)).toMatchObject({ qr: null })
+  })
+})
+
+describe('backup source', () => {
+  const BACKUP = { kind: 'image', path: '/secours.png' } as const
+
+  it('applies both sources on attach', async () => {
+    const t = setup({ settings: { backupSource: BACKUP } })
+    await t.live.boot()
+    expect(t.ctl().setSource).toHaveBeenCalledWith('primary', { kind: 'device', id: 'cam' })
+    expect(t.ctl().setSource).toHaveBeenCalledWith('backup', BACKUP)
+    expect(t.ctl().setBackupVisible).toHaveBeenCalledWith(false)
+    expect(t.last().videoOnAir).toBe('primary')
+  })
+
+  it('monitor shows the backup when the primary goes black', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    const t = setup({ settings: { backupSource: BACKUP }, luma: () => BLACK })
+    await t.live.boot()
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(t.ctl().setBackupVisible).not.toHaveBeenCalledWith(true)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(t.ctl().setBackupVisible).toHaveBeenLastCalledWith(true)
+    expect(t.last().videoOnAir).toBe('backup')
+  })
+
+  it('a black primary is not absent when blackIsAbsent is off (read live)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    const t = setup({ settings: { backupSource: BACKUP, blackIsAbsent: false }, luma: () => BLACK })
+    await t.live.boot()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(t.ctl().setBackupVisible).not.toHaveBeenCalledWith(true)
+    await t.live.saveSettings({ blackIsAbsent: true })
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(t.ctl().setBackupVisible).toHaveBeenLastCalledWith(true)
+  })
+
+  it('monitor stops on OBS restart and resumes on attach', async () => {
+    const t = setup({ settings: { backupSource: BACKUP } })
+    await t.live.boot()
+    const first = t.ctl()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(first.probePrimary).toHaveBeenCalled()
+    t.obs.emit('restarting', 1)
+    const n = first.probePrimary.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(first.probePrimary).toHaveBeenCalledTimes(n)
+    t.obs.emit('ready', { port: 4100, password: 'pw2' })
+    await t.live.settled()
+    const second = t.ctl()
+    expect(second).not.toBe(first)
+    expect(second.setSource).toHaveBeenCalledWith('backup', BACKUP)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(second.probePrimary).toHaveBeenCalled()
+    expect(first.probePrimary).toHaveBeenCalledTimes(n)
+  })
+
+  it('no monitor without backup', async () => {
+    const t = setup()
+    await t.live.boot()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(t.ctl().probePrimary).not.toHaveBeenCalled()
+    expect(t.ctl().setSource).toHaveBeenCalledWith('backup', { kind: 'none' })
+    expect(t.ctl().setBackupVisible).toHaveBeenCalledWith(false) // hides a backup left visible by an earlier OBS run
+    expect(t.last()).not.toHaveProperty('videoOnAir')
+  })
+
+  it('choosing a backup starts the monitor, removing it stops it and hides it', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.saveSettings({ backupSource: BACKUP })
+    expect(t.ctl().setSource).toHaveBeenLastCalledWith('backup', BACKUP)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(t.ctl().probePrimary).toHaveBeenCalled()
+    expect(t.last().videoOnAir).toBe('primary')
+    await t.live.saveSettings({ backupSource: { kind: 'none' } })
+    expect(t.ctl().setSource).toHaveBeenLastCalledWith('backup', { kind: 'none' })
+    expect(t.ctl().setBackupVisible).toHaveBeenLastCalledWith(false)
+    const n = t.ctl().probePrimary.mock.calls.length
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(t.ctl().probePrimary).toHaveBeenCalledTimes(n)
+    expect(t.last()).not.toHaveProperty('videoOnAir')
+  })
+
+  it('another backup file keeps the running monitor and what is on air', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    const t = setup({ settings: { backupSource: BACKUP }, luma: () => BLACK })
+    await t.live.boot()
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(t.last().videoOnAir).toBe('backup')
+    const visibility = t.ctl().setBackupVisible.mock.calls.length
+    await t.live.saveSettings({ backupSource: { kind: 'video', path: '/boucle.mp4' } })
+    expect(t.ctl().setSource).toHaveBeenLastCalledWith('backup', { kind: 'video', path: '/boucle.mp4' })
+    expect(t.ctl().setBackupVisible).toHaveBeenCalledTimes(visibility)
+    expect(t.last().videoOnAir).toBe('backup')
   })
 })

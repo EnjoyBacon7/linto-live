@@ -92,7 +92,8 @@ function setup(meta?: Record<string, unknown>) {
   })
   const ctl = {
     ensureScene: vi.fn(async () => {}), listVideoDevices: vi.fn(async () => []), listAudioDevices: vi.fn(async () => []),
-    setSource: vi.fn(async () => {}), setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
+    setSource: vi.fn(async () => {}), setBackupVisible: vi.fn(async () => {}), probePrimary: vi.fn(async () => ''),
+    setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}), screenshot: vi.fn(async () => ''), startStream: vi.fn(async () => {}),
     stopStream: vi.fn(async () => true), streamState$: vi.fn(() => () => {}), openOutputWindow: vi.fn(async () => {}),
     showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {})
@@ -107,7 +108,7 @@ function setup(meta?: Record<string, unknown>) {
       createSession: vi.fn(async () => sessions[0]!), terminateSession: vi.fn(async () => {})
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
-    overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', watermarkConfig: () => CFG
+    overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', decodeLuma: () => null, watermarkConfig: () => CFG
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const styles = () => overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')

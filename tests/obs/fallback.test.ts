@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FallbackMonitor, isBlack, type Luma } from '../../src/main/obs/fallback'
+import { FallbackMonitor, isBlack, lumaOfBgra, type Luma } from '../../src/main/obs/fallback'
 
 const BLACK: Luma = { mean: 16 / 255, max: 16 / 255 }
 const PICTURE: Luma = { mean: 0.4, max: 0.9 }
@@ -8,6 +8,24 @@ describe('isBlack', () => {
   it('detects limited-range black and rejects a picture', () => {
     expect(isBlack({ mean: 16 / 255, max: 16 / 255 })).toBe(true)
     expect(isBlack({ mean: 0.12, max: 0.6 })).toBe(false)
+  })
+})
+
+describe('lumaOfBgra', () => {
+  it('uniform limited-range black is ~0.063', () => {
+    const l = lumaOfBgra(new Uint8Array(4 * 6).fill(16))!
+    expect(l.mean).toBeCloseTo(16 / 255, 5)
+    expect(l.max).toBeCloseTo(16 / 255, 5)
+    expect(isBlack(l)).toBe(true)
+  })
+  it('weights B, G, R and keeps the brightest pixel', () => {
+    // BGRA: a pure red pixel (0.299) and a black one.
+    const l = lumaOfBgra(Buffer.from([0, 0, 255, 255, 0, 0, 0, 255]))!
+    expect(l.max).toBeCloseTo(0.299, 5)
+    expect(l.mean).toBeCloseTo(0.1495, 5)
+  })
+  it('an empty picture has no luma', () => {
+    expect(lumaOfBgra(new Uint8Array(0))).toBeNull()
   })
 })
 

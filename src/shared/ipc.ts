@@ -25,6 +25,8 @@ export interface LiveState {
   output: 'shown' | 'off'
   /** ms epoch when the current session went live (absent when not live). */
   startedAt?: number
+  /** Video source shown in OBS; absent when no backup source is configured. */
+  videoOnAir?: 'primary' | 'backup'
   warning?: string
 }
 
@@ -56,7 +58,12 @@ export interface LintoLiveApi {
     logout(): Promise<void>
     status(): Promise<{ loggedIn: boolean }>
   }
-  setup: { load(): Promise<SetupData>; save(s: Partial<Settings>): Promise<void> }
+  setup: {
+    load(): Promise<SetupData>
+    save(s: Partial<Settings>): Promise<void>
+    /** Lets the user pick an image or a video file (open dialog); its path, or null if they cancelled. */
+    pickMedia(kind: 'image' | 'video'): Promise<string | null>
+  }
   sessions: {
     list(): Promise<SessionSummary[]>
     /** Does a session with exactly this name exist in the organisation, and can the user stream to it? */
@@ -111,6 +118,7 @@ export const IPC = {
   authSavedLogin: 'auth:saved-login',
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
+  setupPickMedia: 'setup:pick-media',
   sessionsList: 'sessions:list',
   sessionsLookup: 'sessions:lookup',
   sessionsSetWatermark: 'sessions:set-watermark',
@@ -185,7 +193,11 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       logout: () => call(IPC.authLogout),
       status: () => call(IPC.authStatus)
     },
-    setup: { load: () => call(IPC.setupLoad), save: (s) => call(IPC.setupSave, s) },
+    setup: {
+      load: () => call(IPC.setupLoad),
+      save: (s) => call(IPC.setupSave, s),
+      pickMedia: (kind) => call(IPC.setupPickMedia, kind)
+    },
     sessions: {
       list: () => call(IPC.sessionsList),
       lookup: (name) => call(IPC.sessionsLookup, name),
