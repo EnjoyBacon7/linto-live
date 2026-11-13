@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
@@ -14,6 +15,28 @@ const expectedKinds =
   platform === 'darwin'
     ? ['macos-avcapture', 'coreaudio_input_capture', 'browser_source']
     : ['v4l2_input', 'pulse_input_capture', 'browser_source']
+
+/** Video stream size of a media file (ffprobe), or null when ffprobe is not installed. */
+function videoSize(file: string): { width: number; height: number } | null {
+  try {
+    const out = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', file], {
+      encoding: 'utf8'
+    })
+    const s = JSON.parse(out).streams[0]
+    return { width: s.width, height: s.height }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw e
+  }
+}
+const hasFfmpeg = ((): boolean => {
+  try {
+    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
 
 describe.skipIf(!run)('ObsController (real OBS)', () => {
   const userData = mkdtempSync(join(tmpdir(), 'linto-live-it-'))
@@ -111,6 +134,41 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     expect(path).toMatch(/Test enreg \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.mkv$/)
     await new Promise((r) => setTimeout(r, 500))
     expect(existsSync(path!)).toBe(true)
+    expect(path!.startsWith(dir)).toBe(true) // SetRecordDirectory applies in Advanced output mode
+    expect(statSync(path!).size).toBeGreaterThan(50_000)
+    const size = videoSize(path!)
+    console.log('recording video size', JSON.stringify(size), 'bytes', statSync(path!).size)
+    if (size) expect(size).toEqual({ width: 1920, height: 1080 }) // full canvas, not the 640×360 stream
     expect(await ctl!.stopRecord()).toBeNull()
   }, 30_000)
+
+  it.skipIf(!hasFfmpeg)('streams at 640×360 (rescaled stream encoder) while recording at full resolution', async () => {
+    const port = 19350 + Math.floor(Math.random() * 500)
+    const flv = join(userData, 'stream.flv')
+    // ffmpeg as a one-shot RTMP server: stands in for LinTO's ingest.
+    const ff = spawn('ffmpeg', ['-v', 'error', '-y', '-listen', '1', '-i', `rtmp://127.0.0.1:${port}/live/test`, '-c', 'copy', flv], {
+      stdio: 'ignore'
+    })
+    const exited = new Promise((r) => ff.once('exit', r))
+    try {
+      await new Promise((r) => setTimeout(r, 1000))
+      const states: string[] = []
+      const off = ctl!.streamState$((x) => states.push(x))
+      await ctl!.startStream({ streamServiceType: 'rtmp_custom', streamServiceSettings: { server: `rtmp://127.0.0.1:${port}/live`, key: 'test' } })
+      const dir = join(userData, 'rec2')
+      mkdirSync(dir)
+      await ctl!.startRecord(dir, 'Pendant le direct')
+      await new Promise((r) => setTimeout(r, 3000))
+      const path = await ctl!.stopRecord()
+      expect(states).toContain('active')
+      await ctl!.stopStream()
+      off()
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))])
+      expect(videoSize(flv)).toEqual({ width: 640, height: 360 })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(videoSize(path!)).toEqual({ width: 1920, height: 1080 })
+    } finally {
+      ff.kill('SIGKILL')
+    }
+  }, 40_000)
 })
