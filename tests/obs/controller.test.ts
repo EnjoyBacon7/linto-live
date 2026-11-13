@@ -446,6 +446,16 @@ describe('ObsController sources', () => {
     expect(f.item(SCENE, SRC_BACKUP)!.sceneItemEnabled).toBe(false)
   })
 
+  it('setBackupVisible before any backup exists is remembered, not an error', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await expect(c.setBackupVisible(true)).resolves.toBeUndefined()
+    expect(of(f.calls, 'SetSceneItemEnabled')).toEqual([])
+    await c.setSource('backup', { kind: 'image', path: '/b.png' })
+    expect(f.item(SCENE, SRC_BACKUP)!.sceneItemEnabled).toBe(true)
+  })
+
   it('a backup recreated while shown stays shown', async () => {
     const f = fakeClient()
     const c = new ObsController(f.client)

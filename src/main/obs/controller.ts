@@ -132,17 +132,8 @@ export class ObsController {
         sceneItemEnabled: false
       })
     }
-    for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_AUDIO, SRC_DEVICES]) {
-      const isAudio = name === SRC_AUDIO
-      // Silencing a source that has no audio at all (Linux v4l2 camera) is already done.
-      const silence = (req: string, data: Record<string, unknown>): Promise<unknown> =>
-        isAudio ? this.client.call(req, data) : this.client.call(req, data).catch(ignoreNoAudio)
-      await silence('SetInputAudioTracks', {
-        inputName: name,
-        inputAudioTracks: isAudio ? { ...TRACKS_NONE, '1': true } : { ...TRACKS_NONE }
-      })
-      if (!isAudio) await silence('SetInputMute', { inputName: name, inputMuted: true })
-    }
+    await this.client.call('SetInputAudioTracks', { inputName: SRC_AUDIO, inputAudioTracks: { ...TRACKS_NONE, '1': true } })
+    for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_DEVICES]) await this.silence(name)
   }
 
   private async devices(inputName: string, propertyName: string): Promise<DeviceItem[]> {
@@ -162,7 +153,7 @@ export class ObsController {
     return this.devices(SRC_AUDIO, 'device_id')
   }
 
-  /** Mutes an input and takes it off every audio track (no-op for an input without audio). */
+  /** Mutes an input and takes it off every audio track (an input without audio, e.g. a Linux v4l2 camera, is already silent). */
   private async silence(inputName: string): Promise<void> {
     await this.client.call('SetInputAudioTracks', { inputName, inputAudioTracks: { ...TRACKS_NONE } }).catch(ignoreNoAudio)
     await this.client.call('SetInputMute', { inputName, inputMuted: true }).catch(ignoreNoAudio)
@@ -243,7 +234,15 @@ export class ObsController {
   /** Shows or hides the backup above the primary (the primary itself always stays visible). */
   async setBackupVisible(on: boolean): Promise<void> {
     this.backupVisible = on
-    await this.client.call('SetSceneItemEnabled', { sceneName: SCENE, sceneItemId: await this.itemId(SRC_BACKUP), sceneItemEnabled: on })
+    let sceneItemId: number
+    try {
+      sceneItemId = await this.itemId(SRC_BACKUP)
+    } catch (e) {
+      // No backup yet: it will be created with this visibility.
+      if (codeOf(e) === RESOURCE_NOT_FOUND) return
+      throw e
+    }
+    await this.client.call('SetSceneItemEnabled', { sceneName: SCENE, sceneItemId, sceneItemEnabled: on })
   }
 
   /** A tiny picture of the primary input alone, to tell whether it is absent (data URL). */
