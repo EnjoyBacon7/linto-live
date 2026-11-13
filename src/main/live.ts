@@ -431,7 +431,8 @@ export class LiveController extends EventEmitter {
       type: 'style',
       visible: s.subtitlesVisible !== false,
       fontSize: subtitleFontSize(s),
-      watermark: this.watermark ?? resolveWatermark(undefined, cfg)
+      watermark: this.watermark ?? resolveWatermark(undefined, cfg),
+      qr: null
     })
   }
 

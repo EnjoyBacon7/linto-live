@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import QRCode from 'qrcode'
 import { OverlayServer, type OverlayMessage } from '../src/main/overlay/server'
 
 /**
@@ -38,6 +39,15 @@ async function main(): Promise<void> {
   const srv = new OverlayServer({ pageDir: resolve(__dirname, '../src/main/overlay/page') })
   const { url } = await srv.start()
   console.log(`Overlay: ${url}`)
+  // QR code on its own cycle (hidden 8 s, shown 6 s) and a watermark, to check they never overlap the band
+  const svg = await QRCode.toString('https://example.org', { type: 'svg', margin: 0 })
+  srv.push({
+    type: 'style',
+    visible: true,
+    fontSize: 48,
+    watermark: { display: true, pinned: false, content: 'LinTO Live $linto', frequency: 5, duration: 4 },
+    qr: { svg, display: true, pinned: false, frequency: 8, duration: 6 }
+  })
   let i = 0
   const step = (): void => {
     const msg = SCRIPT[i % SCRIPT.length]!

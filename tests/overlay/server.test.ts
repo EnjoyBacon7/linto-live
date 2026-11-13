@@ -94,13 +94,29 @@ describe('OverlayServer', () => {
     srv = new OverlayServer({ pageDir })
     const { url } = await srv.start()
     const wm = { display: true, pinned: true, content: 'x', frequency: 5, duration: 2 }
-    srv.push({ type: 'style', visible: true, fontSize: 40, watermark: wm })
-    srv.push({ type: 'style', visible: false, fontSize: 60, watermark: wm })
+    srv.push({ type: 'style', visible: true, fontSize: 40, watermark: wm, qr: null })
+    srv.push({ type: 'style', visible: false, fontSize: 60, watermark: wm, qr: null })
     srv.push({ type: 'final', text: 'a' })
     srv.push({ type: 'reset' })
     expect(await collect(new WebSocket(wsUrl(url)), 2)).toEqual([
-      { type: 'style', visible: false, fontSize: 60, watermark: wm }, { type: 'reset' }
+      { type: 'style', visible: false, fontSize: 60, watermark: wm, qr: null }, { type: 'reset' }
     ])
+  })
+
+  it('overlay server replays the last style with qr to new clients', async () => {
+    srv = new OverlayServer({ pageDir })
+    const { url } = await srv.start()
+    const watermark = { display: true, pinned: true, content: 'x', frequency: 5, duration: 2 }
+    const qr = { svg: '<svg/>', display: true, pinned: true, frequency: 60, duration: 15 }
+    srv.push({ type: 'style', visible: true, fontSize: 48, watermark, qr })
+    const [style] = (await collect(new WebSocket(wsUrl(url)), 2)) as Array<{ qr: typeof qr }>
+    expect(style!.qr.svg).toBe('<svg/>')
+  })
+
+  it('serves the #qr element in the page', async () => {
+    srv = new OverlayServer({ pageDir })
+    const { url } = await srv.start()
+    expect(await (await fetch(url)).text()).toContain('id="qr"')
   })
 
   it('serves /layout.js as javascript', async () => {

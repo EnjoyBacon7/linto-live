@@ -53,3 +53,19 @@ html, body {
 }
 #band.has-wm #wm { opacity: 1; transform: none; }
 #wm img { height: 1em; vertical-align: middle; }
+/* QR code: top-right, 240 px square on white with a 16 px margin; fades in and out on its own cycle. */
+#qr {
+  position: absolute;
+  top: 40px;
+  right: 40px;
+  width: 240px;
+  height: 240px;
+  padding: 16px;
+  background: #fff;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+#qr[hidden] { display: none; }
+#qr.is-shown { opacity: 1; }
+#qr svg { display: block; width: 100%; height: 100%; }

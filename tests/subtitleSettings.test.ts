@@ -121,7 +121,7 @@ describe('LiveController subtitle style', () => {
   it('boot sends the local settings with no watermark', async () => {
     const t = setup()
     await t.live.boot()
-    expect(t.styles()).toEqual([{ type: 'style', visible: true, fontSize: 48, watermark: resolveWatermark(undefined, CFG) }])
+    expect(t.styles()).toEqual([{ type: 'style', visible: true, fontSize: 48, watermark: resolveWatermark(undefined, CFG), qr: null }])
   })
 
   it('start uses the session watermark (before the reset), stop drops it', async () => {
@@ -130,7 +130,7 @@ describe('LiveController subtitle style', () => {
     t.overlay.push.mockClear()
     await t.live.start('Conf')
     const msgs = t.overlay.push.mock.calls.map((c) => c[0])
-    expect(msgs[0]).toEqual({ type: 'style', visible: true, fontSize: 48, watermark: WM })
+    expect(msgs[0]).toEqual({ type: 'style', visible: true, fontSize: 48, watermark: WM, qr: null })
     expect(msgs[1]).toEqual({ type: 'reset' })
     const stopped = t.live.stop()
     await vi.advanceTimersByTimeAsync(10_000) // the fake OBS never reports the stream stopped
