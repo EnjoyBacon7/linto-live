@@ -81,7 +81,7 @@ const TRANSFORM_1080P = {
 /** File name base for a recording: no character OBS or a file system treats specially ('%' starts an OBS format specifier). */
 export function recordBaseName(sessionName: string): string {
   // eslint-disable-next-line no-control-regex
-  const name = sessionName.replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]/g, '-').trim().slice(0, 100)
+  const name = sessionName.replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]/g, '-').slice(0, 100).trim()
   return name || 'LinTO Live'
 }
 
@@ -375,9 +375,11 @@ export class ObsController {
     }
   }
 
+  /** Recording started ({active: true}) or stopped ({active: false, path}); the STARTING/STOPPING steps are not reported. */
   recordState$(cb: (s: { active: boolean; path?: string }) => void): () => void {
-    const handler = (d: { outputActive?: boolean; outputPath?: string | null }): void => {
-      cb({ active: Boolean(d.outputActive), path: d.outputPath ?? undefined })
+    const handler = (d: { outputState?: string; outputPath?: string | null }): void => {
+      if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED') cb({ active: true })
+      else if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') cb({ active: false, path: d.outputPath ?? undefined })
     }
     this.client.on('RecordStateChanged', handler)
     return () => {

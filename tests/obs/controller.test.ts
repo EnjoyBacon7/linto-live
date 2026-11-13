@@ -524,20 +524,17 @@ describe('ObsController recording', () => {
     await expect(new ObsController(boom.client).stopRecord()).rejects.toThrow('boom')
   })
 
-  it('recordState$ maps RecordStateChanged and unsubscribes', () => {
+  it('recordState$ reports only STARTED and STOPPED, and unsubscribes', () => {
     const f = fakeClient()
     const seen: unknown[] = []
     const off = new ObsController(f.client).recordState$((s) => seen.push(s))
+    f.emit('RecordStateChanged', { outputActive: false, outputState: 'OBS_WEBSOCKET_OUTPUT_STARTING' })
     f.emit('RecordStateChanged', { outputActive: true, outputState: 'OBS_WEBSOCKET_OUTPUT_STARTED', outputPath: '/rec/a.mkv' })
-    f.emit('RecordStateChanged', { outputActive: false, outputState: 'OBS_WEBSOCKET_OUTPUT_STOPPED', outputPath: '/rec/a.mkv' })
     f.emit('RecordStateChanged', { outputActive: false, outputState: 'OBS_WEBSOCKET_OUTPUT_STOPPING' })
+    f.emit('RecordStateChanged', { outputActive: false, outputState: 'OBS_WEBSOCKET_OUTPUT_STOPPED', outputPath: '/rec/a.mkv' })
     off()
-    f.emit('RecordStateChanged', { outputActive: true })
-    expect(seen).toEqual([
-      { active: true, path: '/rec/a.mkv' },
-      { active: false, path: '/rec/a.mkv' },
-      { active: false, path: undefined }
-    ])
+    f.emit('RecordStateChanged', { outputActive: true, outputState: 'OBS_WEBSOCKET_OUTPUT_STARTED' })
+    expect(seen).toEqual([{ active: true }, { active: false, path: '/rec/a.mkv' }])
   })
 
   it('recordBaseName makes a safe file name', () => {
@@ -547,5 +544,7 @@ describe('ObsController recording', () => {
     expect(recordBaseName('')).toBe('LinTO Live')
     expect(recordBaseName('   ')).toBe('LinTO Live')
     expect(recordBaseName('é'.repeat(150))).toHaveLength(100)
+    // Cut to 100 first, then trimmed: no trailing space left by the cut.
+    expect(recordBaseName('a'.repeat(99) + '  b')).toBe('a'.repeat(99))
   })
 })

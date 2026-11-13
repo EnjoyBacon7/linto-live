@@ -106,7 +106,7 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     await ctl!.startRecord(dir, 'Test enreg')
     await new Promise((r) => setTimeout(r, 2000))
     off()
-    expect(ev.at(-1)).toMatchObject({ active: true }) // STARTING reports active=false first
+    expect(ev).toEqual([{ active: true }]) // STARTING is not reported
     const path = await ctl!.stopRecord()
     expect(path).toMatch(/Test enreg \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.mkv$/)
     await new Promise((r) => setTimeout(r, 500))
