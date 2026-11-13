@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_PRIMARY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -1376,6 +1376,61 @@ describe('QR code', () => {
     expect(lastStyle(t)).toMatchObject({ qr: { pinned: true, frequency: 30, duration: 5 } })
     await t.live.stop()
     expect(lastStyle(t)).toMatchObject({ qr: null })
+  })
+})
+
+describe('primary source unavailable on attach', () => {
+  const failingPrimary = (t: ReturnType<typeof setup>): void => {
+    const make = t.controllerFactory.getMockImplementation()!
+    t.controllerFactory.mockImplementationOnce(async () => {
+      const c = await make()
+      c.setSource.mockImplementation(async (slot: string) => {
+        if (slot === 'primary') throw new Error('fichier introuvable')
+      })
+      return c
+    })
+  }
+
+  it('is a warning', async () => {
+    const t = setup()
+    failingPrimary(t)
+    await t.live.boot()
+    expect(t.last()).toMatchObject({ obs: 'running', warning: MSG_PRIMARY_FAILED + 'fichier introuvable' })
+  })
+
+  it('is cleared once another primary source is set', async () => {
+    const t = setup()
+    failingPrimary(t)
+    await t.live.boot()
+    t.ctl().setSource.mockImplementation(async () => {})
+    await t.live.saveSettings({ primarySource: { kind: 'device', id: 'cam2' } })
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it('does not replace an OBS warning (crash restart notice)', async () => {
+    const t = setup()
+    await t.live.boot()
+    failingPrimary(t)
+    t.obs.emit('restarting', 1)
+    t.obs.emit('ready', { port: 4100, password: 'pw2' })
+    await t.live.settled()
+    expect(t.last().warning).toBe(MSG_OBS_RESTARTED)
+  })
+})
+
+describe('OBS exit during a show', () => {
+  it('drops the QR code and the session watermark from the overlay, like Arrêter', async () => {
+    const t = setup({ sessions: [session({ meta: { '@watermark': { display: true, pinned: true, content: 'Salle A' } } })] })
+    t.settings.update({ qr: { display: true, pinned: false, frequency: 60, duration: 15 } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    const styles = () => t.overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')
+    expect(styles().at(-1)).toMatchObject({ qr: { display: true }, watermark: { display: true, content: 'Salle A' } })
+    t.obs.emit('exit', null)
+    expect(styles().at(-1)).toMatchObject({ qr: null, watermark: { display: false, pinned: false } })
+    // Changing a setting afterwards does not bring them back.
+    await t.live.saveSettings({ subtitlesVisible: true })
+    expect(styles().at(-1)).toMatchObject({ qr: null, watermark: { display: false } })
   })
 })
 

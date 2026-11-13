@@ -41,6 +41,7 @@ export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
 export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const MSG_RECORD_FAILED = 'Enregistrement impossible : '
+export const MSG_PRIMARY_FAILED = 'Source principale indisponible : '
 const MSG_RECORD_NOT_STARTED = "OBS n'a pas démarré l'enregistrement."
 const MSG_RECORD_STOPPED = "OBS a arrêté l'enregistrement."
 export const MSG_NO_ORG = 'Choisis une organisation.'
@@ -230,6 +231,9 @@ export class LiveController extends EventEmitter {
       if (this.current) {
         this.d.captions.close()
         this.current = null
+        this.watermark = null
+        this.qrCache = null
+        this.pushStyle()
         this.d.overlay.push({ type: 'reset' })
       }
       this.setState({
@@ -454,6 +458,7 @@ export class LiveController extends EventEmitter {
       // 'none' (the plain LinTO client): the video source is emptied.
       if (patch.primarySource !== undefined && !sameSource(patch.primarySource, before.primarySource)) {
         await c.setSource('primary', patch.primarySource)
+        if (this.state.warning?.startsWith(MSG_PRIMARY_FAILED)) this.setState({ warning: undefined })
       }
       // The monitor reads primarySource and blackIsAbsent live: only a backup change concerns it.
       if (patch.backupSource !== undefined && !sameSource(patch.backupSource, before.backupSource)) {
@@ -558,14 +563,18 @@ export class LiveController extends EventEmitter {
     this.attachedConn = conn
     const s = this.d.settings.get()
     let warning: string | undefined
-    await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch(() => {})
+    let sourceWarning: string | undefined
+    await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch((e) => (sourceWarning = MSG_PRIMARY_FAILED + errMsg(e)))
     const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
     this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
     const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)
+      || w0?.startsWith(MSG_PRIMARY_FAILED)
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
+    // A stream/OBS warning matters more (same rule as the recording ones): the source one only takes a free slot.
+    if (!warning && sourceWarning && (!w0 || staleObsWarning)) warning = sourceWarning
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
     this.updatePreview()
