@@ -406,7 +406,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
             {...(summary?.visibility ? { visibility: summary.visibility } : {})}
-            {...(summary ? { languages: summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
+            {...(summary ? { languages: (summary.name === liveName && state.session?.languages) || summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
               onLanguageChange: saveLanguage } : {})}
             {...(manageBlocked ? { watermarkBlocked: manageBlocked } : {})}
             onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />

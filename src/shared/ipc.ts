@@ -1,6 +1,6 @@
 import type {
   AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
-  TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, Watermark
+  SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, Watermark
 } from './types'
 
 export interface SetupData {
@@ -17,7 +17,8 @@ export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { 
 
 export interface LiveState {
   phase: 'idle' | 'starting' | 'live' | 'stopping' | 'error'
-  session?: { name: string; status: SessionStatus }
+  /** languages: the « Langue affichée » options of the session on air (from the channel LinTO returned). */
+  session?: { name: string; status: SessionStatus; languages?: SubtitleLanguageOption[] }
   stream: 'off' | 'starting' | 'active' | 'error' | 'unavailable'
   captions: 'connecting' | 'live' | 'offline'
   obs: 'running' | 'restarting' | 'down'

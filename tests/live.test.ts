@@ -1250,6 +1250,16 @@ describe('subtitle language', () => {
     channels: [{ id: 7, name: 'Conf', streamEndpoints: { srt: SRT_A }, languages: ['fr-FR'], translations: ['en'] }]
   })
 
+  it('the on-air session exposes its language options (from the channel LinTO returned)', async () => {
+    const t = setup({ sessions: [bilingual()] })
+    await t.live.boot()
+    await t.live.start('Conf')
+    expect(t.last().session?.languages).toEqual([
+      { value: 'original', label: 'Langue originale' },
+      { value: 'en', label: 'Anglais' }
+    ])
+  })
+
   it('translation choice sends only that language to the overlay', async () => {
     const t = setup({ sessions: [bilingual()] })
     t.settings.update({ subtitleLanguages: { s1: 'en' } })

@@ -42,10 +42,10 @@ export async function resolveSession(api: Api, orgId: string, rawName: string, p
   if (anyExact) return { kind: 'terminated', name }
   if (profileId === undefined) throw new Error(MSG_NO_PROFILE)
 
-  // Create response may omit streamEndpoints (assigned on channel setup): refetch only then.
-  let created = await asLintoAction('create', () => api.createSession(orgId, name, profileId, opts))
-  if (!created.channels[0]?.streamEndpoints) created = await asLintoAction('read', () => api.getSession(orgId, created.id))
-  return finish('created', created)
+  // Always re-read: the create response may omit streamEndpoints (assigned on channel setup), and the
+  // channel's languages/translations must be the server's, not the ones asked for.
+  const created = await asLintoAction('create', () => api.createSession(orgId, name, profileId, opts))
+  return finish('created', await asLintoAction('read', () => api.getSession(orgId, created.id)))
 }
 
 /**

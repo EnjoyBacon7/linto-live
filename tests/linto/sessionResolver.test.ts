@@ -71,6 +71,15 @@ describe('resolveSession', () => {
     expect(f.getSession).toHaveBeenCalledWith('o', 'new')
     if (r.kind !== 'terminated') expect(r.canStream).toBe(true)
   })
+  it('created session is always re-read: channel languages and translations are the server\'s', async () => {
+    const created = sess({ name: 'N', id: 'new', channels: [{ id: 1, name: 'N', streamEndpoints: ep, languages: ['fr-FR'] }] })
+    const full = sess({ name: 'N', id: 'new', channels: [{ id: 1, name: 'N', streamEndpoints: ep, languages: ['fr-FR'], translations: ['en'] }] })
+    const f = fake([], { created, full })
+    const r = await resolveSession(f.api, 'o', 'N', 1, { translations: ['en'], visibility: 'public' })
+    expect(f.getSession).toHaveBeenCalledWith('o', 'new')
+    expect(r.kind).toBe('created')
+    if (r.kind !== 'terminated') expect(r.channel.translations).toEqual(['en'])
+  })
   it('throws when session has no channels', async () => {
     const f = fake([sess({ name: 'Conf', channels: [] })])
     await expect(resolveSession(f.api, 'o', 'Conf', 1)).rejects.toThrow("La session « Conf » n'a aucun canal.")

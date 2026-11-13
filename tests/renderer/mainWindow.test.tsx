@@ -236,6 +236,30 @@ describe('Langue affichée', () => {
   })
 })
 
+describe('Langue affichée (session on air)', () => {
+  it('prefers the on-air session options over the session list ones', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const onAir = [{ value: 'original', label: 'Langue originale' }, { value: 'de', label: 'allemand' }]
+    act(() => emit('live-state', live({ session: { name: 'Conférence', status: 'active', languages: onAir } })))
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect([...pop.options].map((o) => o.value)).toEqual(['original', 'de'])
+    await userEvent.selectOptions(pop, 'de')
+    expect(api.live.setSubtitleLanguage).toHaveBeenCalledWith('s1', 'de')
+  })
+
+  it('falls back to the session list options while the on-air ones are not known', async () => {
+    const langs = [{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }]
+    setup({}, setupData(), [{ ...SESSIONS[0]!, languages: langs }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    act(() => emit('live-state', live()))
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect([...pop.options].map((o) => o.value)).toEqual(['original', 'en'])
+  })
+})
+
 describe('Nouvelle session…', () => {
   it('selects a pending session (not created) and saves the profile before starting it', async () => {
     setup()

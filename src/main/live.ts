@@ -820,9 +820,10 @@ export class LiveController extends EventEmitter {
       this.recordIntent = s.recordEnabled === true
 
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
+      const languages = subtitleLanguageOptions(res.channel)
       const cur: Current = {
         orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null,
-        languageChoices: new Set(subtitleLanguageOptions(res.channel).map((o) => o.value))
+        languageChoices: new Set(languages.map((o) => o.value))
       }
       this.current = cur
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
@@ -835,7 +836,7 @@ export class LiveController extends EventEmitter {
       const startedAt = Date.now()
       this.setState({
         phase: 'live',
-        session: { name: res.session.name, status: res.session.status },
+        session: { name: res.session.name, status: res.session.status, languages },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : MSG_NO_STREAM,
         startedAt
