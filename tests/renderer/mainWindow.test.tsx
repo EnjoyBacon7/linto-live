@@ -239,6 +239,16 @@ describe('Nouvelle session…', () => {
     expect(row('Atelier').getAttribute('aria-selected')).toBe('false')
   })
 
+  it('refuses the name of an RTMP-only session, saying why', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('rtmp-only') } })
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Vieille{Enter}')
+    const d = await screen.findByRole('dialog', { name: 'La session « Vieille » existe déjà.' })
+    expect(within(d).getByText(/ne propose que le protocole RTMP/)).toBeTruthy()
+    expect(within(d).queryByRole('button', { name: 'Utiliser' })).toBeNull()
+  })
+
   it('refuses the name of a session the user has no rights on (not listed)', async () => {
     setup({ sessions: { lookup: vi.fn().mockResolvedValue('forbidden') } })
     await renderMain()

@@ -39,7 +39,7 @@ export interface WatermarkConfig {
   duration: number
 }
 /** An exact-name check before « Nouvelle session »: see lookupSession. */
-export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'terminated'
+export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'rtmp-only' | 'terminated'
 /** `rights`: what the user may do there (absent when LinTO did not say: then LinTO alone decides). */
 export interface Organization { id: string; name: string; rights?: OrgRights }
 export interface TranscriberProfile { id: number; name: string; languages?: string[] }

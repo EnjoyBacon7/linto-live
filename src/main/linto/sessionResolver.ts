@@ -1,5 +1,5 @@
 import type { Channel, Session, SessionLookup } from '../../shared/types'
-import { toObsStreamService } from '../obs/streamTarget'
+import { streamBlocker, type StreamBlocker } from '../obs/streamTarget'
 import type { LintoApi } from './api'
 import { asLintoAction } from './accessMessages'
 
@@ -7,7 +7,7 @@ export const MSG_NO_PROFILE =
   "Aucun profil de transcription disponible dans cette organisation : impossible d'y créer une session."
 
 export type Resolution =
-  | { kind: 'reused' | 'created'; session: Session; channel: Channel; canStream: boolean }
+  | { kind: 'reused' | 'created'; session: Session; channel: Channel; canStream: boolean; blocker: StreamBlocker | null }
   | { kind: 'terminated'; name: string }
 
 type Api = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession'>
@@ -15,7 +15,8 @@ type Api = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession'>
 function finish(kind: 'reused' | 'created', session: Session): Resolution {
   const channel = session.channels[0]
   if (!channel) throw new Error(`La session « ${session.name} » n'a aucun canal.`)
-  return { kind, session, channel, canStream: toObsStreamService(channel.streamEndpoints ?? {}, 'srt') !== null }
+  const blocker = streamBlocker(channel.streamEndpoints ?? {})
+  return { kind, session, channel, canStream: blocker === null, blocker }
 }
 
 /** Exact-name matches: the session Démarrer would reuse (most recently created non-terminated one), if any. */
@@ -48,7 +49,8 @@ export async function resolveSession(api: Api, orgId: string, rawName: string, p
 
 /**
  * What « Nouvelle session » with this name would hit: nothing (a new session), a session the user can stream
- * to, one they cannot (LinTO gives stream endpoints only to those with the right), or only terminated ones.
+ * to, one they cannot (LinTO gives stream endpoints only to those with the right), one that only offers RTMP
+ * (not supported, see streamTarget), or only terminated ones.
  */
 export async function lookupSession(
   api: Pick<Api, 'searchSessions' | 'getSession'>, orgId: string, rawName: string
@@ -58,7 +60,8 @@ export async function lookupSession(
   const { best, anyExact } = await findExisting(api, orgId, name)
   if (best) {
     const channel = (await asLintoAction('read', () => api.getSession(orgId, best.id))).channels[0]
-    return channel && toObsStreamService(channel.streamEndpoints ?? {}) !== null ? 'usable' : 'forbidden'
+    if (!channel) return 'forbidden'
+    return streamBlocker(channel.streamEndpoints ?? {}) ?? 'usable'
   }
   return anyExact ? 'terminated' : 'none'
 }

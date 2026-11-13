@@ -48,4 +48,5 @@ Compte machine rôle 4 (Meeting manager) ; un rôle 3 (Quick meeting) reçoit 40
   ~1 phrase finalisée toutes les 3-5 s, latence de quelques secondes. → défaut de l'appli confirmé.
 - **RTMP : KO.** La session alterne `active`/`ready` toutes les ~3,5 s et les `final` arrivent vides
   (connexion qui tombe et se refait). Non creusé : le repli RTMP ne doit pas être considéré comme fiable.
+  → L'appli n'utilise que SRT : une session sans point SRT est signalée comme « RTMP non pris en charge ».
 - Le script attend désormais qu'OBS soit prêt (code 207 au chargement), comme l'appli.
