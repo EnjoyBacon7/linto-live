@@ -1687,6 +1687,40 @@ describe('LiveController recording', () => {
     expect(t.last().warning).toBeUndefined()
   })
 
+  it('a stop OBS never reported does not double-announce the next file', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().stopRecord.mockImplementationOnce(() => new Promise(() => {})) // and no STOPPED either
+    const stopped = t.live.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await stopped
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().recordPath = '/videos/LinTO Live/second.mkv'
+    await t.live.stop()
+    await flush()
+    expect(t.saved).toEqual(['/videos/LinTO Live/second.mkv'])
+  })
+
+  it('after a stop OBS never reported, an unexpected stop of the next file is still a failure', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().stopRecord.mockImplementationOnce(() => new Promise(() => {}))
+    const stopped = t.live.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await stopped
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().emitRecord({ active: false, path: '/videos/LinTO Live/cut.mkv' })
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error' })
+    expect(t.last().warning?.startsWith(MSG_RECORD_FAILED)).toBe(true)
+    expect(t.saved).toEqual(['/videos/LinTO Live/cut.mkv'])
+  })
+
   it('quitting waits for the stream and the recording within one shutdown deadline', async () => {
     const t = setup({ settings: { recordEnabled: true } })
     await t.live.boot()

@@ -908,6 +908,7 @@ export class LiveController extends EventEmitter {
   private async startRecordSafe(c: LiveObsController, cur: Current): Promise<void> {
     const dir = this.d.settings.get().recordDir || this.d.defaultRecordDir
     this.clearRecordTimer()
+    this.recordAnnouncePending = false // a new file: a stop OBS never reported is not waited for any more
     this.recordAwaiting = true
     try {
       await this.d.mkdirp(dir)
@@ -967,6 +968,7 @@ export class LiveController extends EventEmitter {
   private onRecordState(c: LiveObsController, s: { active: boolean; path?: string }): void {
     if (c !== this.ctl) return
     if (s.active) {
+      this.recordAnnouncePending = false
       this.recordAwaiting = false
       this.clearRecordTimer()
       // Started while no show wants it (e.g. late, after Arrêter): no hidden recording left running.
@@ -978,7 +980,7 @@ export class LiveController extends EventEmitter {
       this.setState({ recording: 'on', ...(failed ? { warning: undefined } : {}) })
       return
     }
-    if (this.recordAnnouncePending) {
+    if (this.recordAnnouncePending && !this.recordStopping) {
       // The file of a stopRecord that gave up waiting.
       this.recordAnnouncePending = false
       if (s.path) this.emit('recording-saved', s.path)
