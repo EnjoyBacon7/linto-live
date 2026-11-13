@@ -5,7 +5,7 @@ import {
   type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type Watermark, type WatermarkConfig
 } from '../shared/types'
-import { ORIGINAL, routeOriginal, routeTranslation, type Routed } from '../shared/subtitleLanguage'
+import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import type { ObsController, StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
@@ -101,6 +101,8 @@ interface Current {
   session: Session
   channel: Channel
   service: ObsStreamService | null
+  /** Subtitle languages the channel offers (subtitleLanguageOptions values). */
+  languageChoices: Set<string>
 }
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -348,7 +350,9 @@ export class LiveController extends EventEmitter {
 
   /** Saves the language shown in the band for a session; if it is on air, the band empties and switches now. */
   async setSubtitleLanguage(sessionId: string, choice: string): Promise<void> {
-    const subtitleLanguages = { ...this.d.settings.get().subtitleLanguages, [sessionId]: choice }
+    const saved = this.d.settings.get().subtitleLanguages
+    if ((saved?.[sessionId] ?? ORIGINAL) === choice) return
+    const subtitleLanguages = { ...saved, [sessionId]: choice }
     this.d.settings.update({ subtitleLanguages })
     if (this.current?.session.id === sessionId) this.d.overlay.push({ type: 'reset' })
   }
@@ -408,10 +412,11 @@ export class LiveController extends EventEmitter {
     this.emit('state', this.getState())
   }
 
-  /** Language shown in the band for the session on air. */
+  /** Language shown in the band for the session on air; the original one when the saved choice is not offered. */
   private subtitleLanguage(): string {
-    const id = this.current?.session.id
-    return (id && this.d.settings.get().subtitleLanguages?.[id]) || ORIGINAL
+    const cur = this.current
+    const choice = cur && this.d.settings.get().subtitleLanguages?.[cur.session.id]
+    return choice && cur.languageChoices.has(choice) ? choice : ORIGINAL
   }
 
   private pushCaption(r: Routed): void {
@@ -693,7 +698,10 @@ export class LiveController extends EventEmitter {
       if (this.streamRunning) await this.stopStreamAndWait()
 
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
-      const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
+      const cur: Current = {
+        orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null,
+        languageChoices: new Set(subtitleLanguageOptions(res.channel).map((o) => o.value))
+      }
       this.current = cur
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
       this.pushStyle()

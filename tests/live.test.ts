@@ -1231,6 +1231,56 @@ describe('subtitle language', () => {
     expect(t.overlay.push).not.toHaveBeenCalled()
   })
 
+  it('cross subtitles show each speaker in the other spoken language', async () => {
+    const t = setup({ sessions: [{
+      ...session(),
+      channels: [{ id: 7, name: 'Conf', streamEndpoints: { srt: SRT_A }, languages: ['fr-FR', 'en-US'], translations: ['en', 'fr'] }]
+    }] })
+    t.settings.update({ subtitleLanguages: { s1: 'crossSubtitles' } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour', lang: 'fr-FR' })
+    t.captions.emit('translation', { segmentId: 1, text: 'Hello', sourceLang: 'fr-FR', targetLang: 'en', final: true })
+    t.captions.emit('translation', { segmentId: 1, text: 'Bonjour', sourceLang: 'fr-FR', targetLang: 'fr', final: true })
+    t.captions.emit('final', { segmentId: 2, text: 'Thanks', lang: 'en-US' })
+    t.captions.emit('translation', { segmentId: 2, text: 'Merci', sourceLang: 'en-US', targetLang: 'fr', final: true })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'final', text: 'Hello' }], [{ type: 'final', text: 'Merci' }]])
+  })
+
+  it('translations are ignored in the original language', async () => {
+    const t = setup({ sessions: [bilingual()] })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    t.captions.emit('translation', { segmentId: 1, text: 'Hello', sourceLang: 'fr-FR', targetLang: 'en', final: true })
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour', lang: 'fr-FR' })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'final', text: 'Bonjour' }]])
+  })
+
+  it('a choice the session no longer offers falls back to the original language', async () => {
+    const t = setup({ sessions: [bilingual()] })
+    t.settings.update({ subtitleLanguages: { s1: 'de' } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    t.captions.emit('translation', { segmentId: 1, text: 'Hallo', sourceLang: 'fr-FR', targetLang: 'de', final: true })
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour', lang: 'fr-FR' })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'final', text: 'Bonjour' }]])
+  })
+
+  it('choosing the language already shown does nothing', async () => {
+    const t = setup({ sessions: [bilingual()] })
+    t.settings.update({ subtitleLanguages: { s1: 'en' } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    t.settings.update.mockClear()
+    await t.live.setSubtitleLanguage('s1', 'en')
+    expect(t.settings.update).not.toHaveBeenCalled()
+    expect(t.overlay.push).not.toHaveBeenCalled()
+  })
+
   it('start passes create options to createSession', async () => {
     const t = setup({ sessions: [] })
     await t.live.boot()

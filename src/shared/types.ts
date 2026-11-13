@@ -1,5 +1,4 @@
 import type { OrgRights } from './rights'
-import type { SubtitleLanguageOption } from './subtitleLanguage'
 
 export interface StreamEndpoints {
   srt?: string
@@ -22,6 +21,8 @@ export interface Session {
   /** Free-form session metadata (LinTO Studio keeps the watermark settings under `@watermark`). */
   meta?: Record<string, unknown>
 }
+/** A choice of language for the subtitle band: `value` is 'original', 'crossSubtitles' or a translation code. */
+export interface SubtitleLanguageOption { value: string; label: string }
 /** Sessions the user can stream to (the others of the organisation are not listed). */
 export interface SessionSummary {
   id: string; name: string; status: Exclude<SessionStatus, 'terminated'>; updatedAt?: string

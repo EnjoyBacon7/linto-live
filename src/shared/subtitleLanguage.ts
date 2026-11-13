@@ -1,9 +1,9 @@
-import type { Channel, TranslationEvent } from './types'
+import type { Channel, SubtitleLanguageOption, TranslationEvent } from './types'
 
 export const ORIGINAL = 'original'
 export const CROSS = 'crossSubtitles'
 
-export interface SubtitleLanguageOption { value: string; label: string }
+export type { SubtitleLanguageOption } from './types'
 export type Routed = { kind: 'partial' | 'final'; text: string } | null
 
 const base = (code: string | null | undefined): string => (code ?? '').split('-')[0]
