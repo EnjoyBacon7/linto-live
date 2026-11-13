@@ -181,7 +181,7 @@ Le groupe **Caméra** devient **Vidéo** :
   « Enregistrement sauvegardé » avec un bouton pour afficher le fichier.
 - Erreurs (disque plein, dossier inaccessible) : bannière d'avertissement, le direct continue.
 - **OBS redémarre pendant le direct** : l'enregistrement reprend tout seul dans un **nouveau
-  fichier** (suffixe « (2) », « (3) »…) — l'intention « enregistrer » est un état du
+  fichier** (nouvel horodatage dans le nom) — l'intention « enregistrer » est un état du
   LiveController qui survit au redémarrage, comme le flux. **Démarrer sur une autre session
   sans Arrêter** : on ferme le fichier en cours et on en ouvre un nouveau au nom de la nouvelle
   session. (Mes choix.)
