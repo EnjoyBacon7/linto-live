@@ -20,7 +20,7 @@ const SESSIONS: SessionSummary[] = [
 ]
 
 const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<SetupData> = {}): SetupData => ({
-  settings: { instance: 'https://studio.linto.ai', orgId: 'o1', profileId: 1, videoDeviceId: 'v1', audioDeviceId: 'a1', ...over },
+  settings: { instance: 'https://studio.linto.ai', orgId: 'o1', profileId: 1, primarySource: { kind: 'device', id: 'v1' }, audioDeviceId: 'a1', ...over },
   organizations: [{ id: 'o1', name: 'Org' }],
   profiles: [{ id: 1, name: 'Français' }, { id: 2, name: 'Anglais' }],
   videoDevices: [{ id: 'v1', name: 'Capture HDMI' }, { id: 'v2', name: 'FaceTime HD' }],
@@ -137,7 +137,7 @@ describe('Sidebar', () => {
 
 describe('Démarrer', () => {
   it('is disabled without a session or a micro; the camera is optional', async () => {
-    setup({}, setupData({ videoDeviceId: undefined, audioDeviceId: undefined }))
+    setup({}, setupData({ primarySource: undefined, audioDeviceId: undefined }))
     await renderMain()
     expect(startBtn().disabled).toBe(true)
     await userEvent.click(row('Conférence'))
@@ -151,7 +151,7 @@ describe('Démarrer', () => {
     setup()
     await renderMain()
     await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
-    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: '' })
+    expect(api.setup.save).toHaveBeenCalledWith({ primarySource: { kind: 'none' } })
   })
 
   it('starts an existing session and shows « réutilisée », then refreshes the list', async () => {
@@ -493,7 +493,7 @@ describe('Switch while live', () => {
 
 describe('Stage, inspector and status bar', () => {
   it('shows the camera preview above the transcript once a camera is chosen', async () => {
-    setup({}, setupData({ videoDeviceId: undefined }))
+    setup({}, setupData({ primarySource: undefined }))
     await renderMain()
     expect(screen.queryByText('Aperçu en attente…')).toBeNull()
     expect(api.preview.subscribe).not.toHaveBeenCalled() // no camera: no screenshot polling
@@ -604,7 +604,7 @@ describe('Stage, inspector and status bar', () => {
     act(() => emit('live-state', live()))
     expect((screen.getByLabelText('Caméra') as HTMLSelectElement).disabled).toBe(false)
     await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
-    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v2' })
+    expect(api.setup.save).toHaveBeenCalledWith({ primarySource: { kind: 'device', id: 'v2' } })
   })
 
   it('shows the warning carried by live-state, also while idle, and clears it', async () => {

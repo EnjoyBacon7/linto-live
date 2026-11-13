@@ -82,9 +82,9 @@ export function Inspector(p: InspectorProps) {
       <section className="inspector-group">
         <h3 className="inspector-label"><CameraIcon size={14} />Caméra</h3>
         {/* Optional: without a camera the app is a plain LinTO client (audio only, transcript here). */}
-        <PopUp label="Caméra" className="inspector-control" value={settings?.videoDeviceId ?? ''}
+        <PopUp label="Caméra" className="inspector-control" value={settings?.primarySource?.kind === 'device' ? settings.primarySource.id : ''}
           placeholder="Choisir…" options={[{ value: '', label: 'Aucune' }, ...opts(data?.videoDevices)]} disabled={!data}
-          onChange={(v) => onChange({ videoDeviceId: v })} />
+          onChange={(v) => onChange({ primarySource: v ? { kind: 'device', id: v } : { kind: 'none' } })} />
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><MicIcon size={14} />Micro</h3>

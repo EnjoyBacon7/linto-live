@@ -115,7 +115,7 @@ function setup(opts: { sessions?: Session[] } = {}) {
     instance: 'https://studio.linto.ai',
     orgId: 'org1',
     profileId: 3,
-    videoDeviceId: 'cam',
+    primarySource: { kind: 'device', id: 'cam' },
     audioDeviceId: 'mic'
   }
   const settings = {
@@ -674,7 +674,7 @@ describe('LiveController final fixes', () => {
   describe('without a camera (plain LinTO client)', () => {
     it('Démarrer streams and transcribes but opens no output window', async () => {
       const t = setup()
-      await t.live.saveSettings({ videoDeviceId: '' })
+      await t.live.saveSettings({ primarySource: { kind: 'none' } })
       await t.live.boot()
       expect(t.ctl().setVideoDevice).not.toHaveBeenCalled()
       await t.live.start('Conf')
@@ -688,10 +688,10 @@ describe('LiveController final fixes', () => {
 
     it('choosing a camera during the show does not open the output window', async () => {
       const t = setup()
-      await t.live.saveSettings({ videoDeviceId: '' })
+      await t.live.saveSettings({ primarySource: { kind: 'none' } })
       await t.live.boot()
       await t.live.start('Conf')
-      await t.live.saveSettings({ videoDeviceId: 'cam' })
+      await t.live.saveSettings({ primarySource: { kind: 'device', id: 'cam' } })
       expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('cam')
       expect(t.ctl().openOutputWindow).not.toHaveBeenCalled()
       expect(t.last().output).toBe('off')
@@ -701,7 +701,7 @@ describe('LiveController final fixes', () => {
   it('choosing no camera empties the OBS video source', async () => {
     const t = setup()
     await t.live.boot()
-    await t.live.saveSettings({ videoDeviceId: '' })
+    await t.live.saveSettings({ primarySource: { kind: 'none' } })
     expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('')
   })
 

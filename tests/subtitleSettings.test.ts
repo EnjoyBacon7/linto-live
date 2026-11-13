@@ -98,7 +98,7 @@ function setup(meta?: Record<string, unknown>) {
     showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {})
   }
   const overlay = { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) }
-  let data: Settings = { instance: 'https://x', orgId: 'o', profileId: 1, videoDeviceId: 'v', audioDeviceId: 'a' }
+  let data: Settings = { instance: 'https://x', orgId: 'o', profileId: 1, primarySource: { kind: 'device', id: 'v' }, audioDeviceId: 'a' }
   const settings = { get: vi.fn(() => ({ ...data })), update: vi.fn((p: Partial<Settings>) => { data = { ...data, ...p } }), setToken: vi.fn() }
   const deps = {
     obs, controllerFactory: vi.fn(async () => ctl),
@@ -144,7 +144,7 @@ describe('LiveController subtitle style', () => {
     await t.live.saveSettings({ subtitleFontSize: 60, subtitlesVisible: false })
     expect(t.styles().at(-1)).toMatchObject({ visible: false, fontSize: 60 })
     const n = t.styles().length
-    await t.live.saveSettings({ videoDeviceId: 'v2' })
+    await t.live.saveSettings({ primarySource: { kind: 'device', id: 'v2' } })
     expect(t.styles().length).toBe(n)
   })
 

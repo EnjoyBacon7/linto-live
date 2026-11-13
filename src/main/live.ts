@@ -3,7 +3,7 @@ import type { LiveState, StartResult } from '../shared/ipc'
 import {
   DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
   type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
-  type TranslationEvent, type Watermark, type WatermarkConfig
+  type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
 import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
 import type { ObsConnection, ObsProcess } from './obs/process'
@@ -18,6 +18,9 @@ import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
 import { publicLink } from '../shared/publicLink'
 import type { SettingsStore } from './settings'
+
+/** OBS camera id of a source ('' = no camera: absent or not a device). */
+const deviceIdOf = (src?: VideoSource): string => (src?.kind === 'device' ? src.id : '')
 
 export const MSG_NO_STREAM =
   "Impossible d'envoyer l'audio : LinTO ne le permet qu'au propriétaire de la session et aux gestionnaires de réunion de l'organisation."
@@ -396,8 +399,9 @@ export class LiveController extends EventEmitter {
       const c = this.ctl
       if (!c) return
       // '' = no camera (the plain LinTO client): the video source is emptied.
-      if (patch.videoDeviceId !== undefined && patch.videoDeviceId !== before.videoDeviceId) {
-        await c.setVideoDevice(patch.videoDeviceId)
+      if (patch.primarySource !== undefined) {
+        const id = deviceIdOf(patch.primarySource)
+        if (id !== deviceIdOf(before.primarySource)) await c.setVideoDevice(id)
       }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
     })
@@ -486,7 +490,8 @@ export class LiveController extends EventEmitter {
     this.attachedConn = conn
     const s = this.d.settings.get()
     let warning: string | undefined
-    if (s.videoDeviceId) await ready.setVideoDevice(s.videoDeviceId).catch(() => {})
+    const camera = deviceIdOf(s.primarySource)
+    if (camera) await ready.setVideoDevice(camera).catch(() => {})
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning

@@ -118,11 +118,18 @@ export interface SavedLogin { email: string; password: string }
 export interface QrSettings { display: boolean; pinned: boolean; frequency: number; duration: number }
 export const DEFAULT_QR: QrSettings = { display: false, pinned: false, frequency: 60, duration: 15 }
 
+export type VideoSource = { kind: 'none' } | { kind: 'device'; id: string } | { kind: 'image' | 'video'; path: string }
+
 export interface Settings {
   instance: string
   orgId?: string
   profileId?: number
-  videoDeviceId?: string
+  /** Main video source (absent = none). */
+  primarySource?: VideoSource
+  /** Fallback video source, shown when the main one is absent. */
+  backupSource?: VideoSource
+  /** A black picture counts as an absent source (default true). */
+  blackIsAbsent?: boolean
   audioDeviceId?: string
   lastSessionName?: string
   /** Subtitle band shown in the video (default true). */
