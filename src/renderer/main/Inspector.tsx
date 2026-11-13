@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type Settings, type Watermark
+  DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type Settings, type SubtitleLanguageOption, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -25,9 +25,13 @@ export interface InspectorProps {
   onWatermarkSettings?(): void
   /** Why the watermark cannot be changed (it is stored on the LinTO session); absent = it can. */
   watermarkBlocked?: string
+  /** Subtitle languages of the selected session, the one shown, and its setter (absent languages = no session yet). */
+  languages?: SubtitleLanguageOption[]
+  language?: string
+  onLanguageChange?(v: string): void
 }
 
-function Check({ label, checked, disabled, onChange }: {
+export function Check({ label, checked, disabled, onChange }: {
   label: string; checked: boolean; disabled?: boolean; onChange(v: boolean): void
 }) {
   return (
@@ -93,6 +97,15 @@ export function Inspector(p: InspectorProps) {
           onChange={(v) => onChange({ subtitlesVisible: v })} />
         {shown && (
           <>
+            <label className="field inspector-inline">
+              <span className="field-label">Langue affichée</span>
+              <PopUp label="Langue affichée" value={p.languages ? (p.language ?? 'original') : 'original'}
+                options={p.languages ?? [{ value: 'original', label: 'Originale' }]} disabled={!p.languages}
+                onChange={(v) => p.onLanguageChange?.(v)} />
+            </label>
+            {!data?.watermarkEnabled && p.watermark && 'pending' in p.watermark && (
+              <p className="inspector-note">Réglable une fois la session créée sur LinTO (au démarrage).</p>
+            )}
             <FontSize value={settings?.subtitleFontSize ?? DEFAULT_SUBTITLE_FONT_SIZE} disabled={!settings}
               onChange={(v) => onChange({ subtitleFontSize: v })} />
             {data?.watermarkEnabled && (

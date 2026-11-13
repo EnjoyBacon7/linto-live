@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveState, SetupData } from '../../shared/ipc'
-import type { SessionSummary, Settings, Watermark } from '../../shared/types'
+import type { NewSessionOptions, SessionSummary, Settings, Watermark } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
@@ -36,7 +36,7 @@ export interface MainWindowProps {
 }
 
 /** Selected session: an existing one (by name), or a pending new one created on LinTO at Démarrer. */
-type Selection = { name: string; pending?: { profileId?: number } }
+type Selection = { name: string; pending?: { profileId?: number; create: NewSessionOptions } }
 type SheetState =
   | { kind: 'new' }
   | { kind: 'terminate' }
@@ -160,7 +160,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     setError(null)
     try {
       if (target.pending?.profileId !== undefined) await window.lintoLive.setup.save({ profileId: target.pending.profileId })
-      const r = await window.lintoLive.live.start(target.name)
+      const r = await window.lintoLive.live.start(target.name, ...(target.pending ? [target.pending.create] as const : []))
       if (r.ok) {
         setReused(r.reused)
         setSel({ name: target.name })
@@ -237,7 +237,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   }
   /** Asks LinTO about the name first: an existing session (listed or not, e.g. someone else's) is never re-created. */
   const lookingUp = useRef(false)
-  const submitNew = async (name: string, profileId: number | undefined): Promise<void> => {
+  const submitNew = async (name: string, profileId: number | undefined, create: NewSessionOptions): Promise<void> => {
     if (lookingUp.current) return
     if (name === liveName) { setSheet(null); return }
     lookingUp.current = true
@@ -256,7 +256,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       setSheet({ kind: 'exists', name, usable: found === 'usable', terminated: found === 'terminated' })
       return
     }
-    const target: Selection = { name, pending: { profileId } }
+    const target: Selection = { name, pending: { profileId, create } }
     if (onAir) { setSheet({ kind: 'switch', target }); return }
     setSheet(null)
     setReused(null)
@@ -285,6 +285,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       setError(ipcErrorMessage(e))
       void refresh()
     })
+  }
+  const saveLanguage = (choice: string): void => {
+    if (!summary) return
+    const id = summary.id
+    setSettings((s) => (s ? { ...s, subtitleLanguages: { ...s.subtitleLanguages, [id]: choice } } : s))
+    window.lintoLive.live.setSubtitleLanguage(id, choice).catch((e) => setError(ipcErrorMessage(e)))
   }
   const clearSubtitles = (): void => {
     window.lintoLive.live.clearSubtitles().catch((e) => setError(ipcErrorMessage(e)))
@@ -394,6 +400,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
+            {...(summary ? { languages: summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
+              onLanguageChange: saveLanguage } : {})}
             {...(manageBlocked ? { watermarkBlocked: manageBlocked } : {})}
             onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />
         </div>
@@ -406,7 +414,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         profiles={data?.profiles ?? []}
         profileId={settings?.profileId}
         onOrgChange={(id) => void switchOrg(id)}
-        onSubmit={(n, p) => void submitNew(n, p)}
+        onSubmit={(n, p, o) => void submitNew(n, p, o)}
         onCancel={() => setSheet(null)}
       />
       <ConfirmSheet

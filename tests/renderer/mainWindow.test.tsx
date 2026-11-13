@@ -190,6 +190,52 @@ describe('Démarrer', () => {
   })
 })
 
+describe('Nouvelle session… options', () => {
+  const withTr = () => setupData({}, { profiles: [{ id: 1, name: 'Français', translations: ['en', 'de'] }] })
+  it('new session sends translations and visibility on Démarrer', async () => {
+    setup({}, withTr())
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    await userEvent.type(within(sheet).getByLabelText('Nom'), 'Débat')
+    await userEvent.click(within(sheet).getByRole('checkbox', { name: 'Anglais' }))
+    await userEvent.selectOptions(within(sheet).getByLabelText('Visibilité'), 'public')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'OK' }))
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: ['en'], visibility: 'public' })
+  })
+
+  it('password visibility needs a password', async () => {
+    setup({}, withTr())
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    await userEvent.type(within(sheet).getByLabelText('Nom'), 'Débat')
+    await userEvent.selectOptions(within(sheet).getByLabelText('Visibilité'), 'password')
+    const ok = within(sheet).getByRole('button', { name: 'OK' }) as HTMLButtonElement
+    expect(ok.disabled).toBe(true)
+    await userEvent.type(within(sheet).getByLabelText('Mot de passe'), 'x')
+    expect(ok.disabled).toBe(false)
+    await userEvent.click(ok)
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { visibility: 'password', password: 'x', translations: [] })
+  })
+})
+
+describe('Langue affichée', () => {
+  it('lists the session languages and saves the choice', async () => {
+    const langs = [{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }]
+    setup({}, setupData(), [{ ...SESSIONS[0]!, languages: langs }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect(pop.value).toBe('original')
+    await userEvent.selectOptions(pop, 'en')
+    expect(api.live.setSubtitleLanguage).toHaveBeenCalledWith('s1', 'en')
+    expect((screen.getByLabelText('Langue affichée') as HTMLSelectElement).value).toBe('en')
+  })
+})
+
 describe('Nouvelle session…', () => {
   it('selects a pending session (not created) and saves the profile before starting it', async () => {
     setup()
@@ -207,7 +253,7 @@ describe('Nouvelle session…', () => {
 
     await userEvent.click(startBtn())
     expect(api.setup.save).toHaveBeenCalledWith({ profileId: 2 })
-    expect(api.live.start).toHaveBeenCalledWith('Débat')
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: [], visibility: 'organization' })
     const saveOrder = fn(api.setup.save).mock.invocationCallOrder.at(-1)!
     expect(saveOrder).toBeLessThan(fn(api.live.start).mock.invocationCallOrder[0]!)
   })
@@ -441,7 +487,7 @@ describe('Switch while live', () => {
     expect(screen.getByText('Basculer le direct sur « Débat » ?')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
     expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
-    expect(api.live.start).toHaveBeenCalledWith('Débat')
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: [], visibility: 'organization' })
   })
 })
 
