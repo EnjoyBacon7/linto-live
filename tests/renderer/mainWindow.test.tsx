@@ -1051,3 +1051,44 @@ describe('organisation rights', () => {
     expect(within(dlg).getByText(/Aucun profil de transcription disponible/)).toBeTruthy()
   })
 })
+
+describe('Enregistrement', () => {
+  it('choosing a folder saves recordDir', async () => {
+    setup({ setup: { pickFolder: vi.fn().mockResolvedValue('/Users/x/Rec') } as never })
+    await renderMain()
+    expect(screen.getByText('Dossier Vidéos › LinTO Live')).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
+    expect(api.setup.pickFolder).toHaveBeenCalled()
+    expect(api.setup.save).toHaveBeenCalledWith({ recordDir: '/Users/x/Rec' })
+    await waitFor(() => expect(screen.getByTitle('/Users/x/Rec')).toBeTruthy())
+  })
+
+  it('cancelled folder picker saves nothing', async () => {
+    setup({ setup: { pickFolder: vi.fn().mockResolvedValue(null) } as never })
+    await renderMain()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
+    expect(api.setup.save).not.toHaveBeenCalled()
+  })
+
+  it('the checkbox saves recordEnabled; on air it applies at the next Démarrer', async () => {
+    setup()
+    await renderMain()
+    expect(screen.queryByText('S’applique au prochain Démarrer.')).toBeNull()
+    await userEvent.click(screen.getByLabelText('Enregistrer le direct'))
+    expect(api.setup.save).toHaveBeenCalledWith({ recordEnabled: true })
+    act(() => emit('live-state', live()))
+    expect(await screen.findByText('S’applique au prochain Démarrer.')).toBeTruthy()
+  })
+
+  it('REC pill shows while recording', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'on' })) } as never })
+    await renderMain()
+    expect(within(toolbar()).getByText('REC')).toBeTruthy()
+  })
+
+  it('no REC pill when not recording', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'off' })) } as never })
+    await renderMain()
+    expect(within(toolbar()).queryByText('REC')).toBeNull()
+  })
+})

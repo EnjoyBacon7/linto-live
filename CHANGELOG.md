@@ -4,6 +4,18 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## Non publié
+
+### Ajouté
+
+- **Langues des sous-titres** : choix de la langue affichée sur la vidéo parmi celles de la
+  session, mémorisé par session, avec rappel quand la session n'est pas publique.
+- **QR code** vers la session sur la vidéo, affiché ou épinglé, avec ses paramètres.
+- **Source de secours** (caméra, image ou vidéo) : bascule automatique en 2 s environ quand la
+  principale disparaît, retour de même ; un écran noir (ATEM sans entrée) compte comme absence.
+- **Enregistrement du direct** en MKV dans le dossier choisi (par défaut Vidéos › LinTO Live), avec
+  pastille REC dans la barre d'outils.
+
 ## [0.3.0] - 2026-11-10
 
 ### Ajouté

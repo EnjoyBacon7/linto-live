@@ -123,6 +123,26 @@ La barre d'état en bas indique si LinTO reçoit bien le son. L'icône LinTO Liv
 menus (macOS) ou la zone de notification (Linux) signale quand un direct est en cours. Quitter
 l'application pendant un direct revient à cliquer sur Arrêter.
 
+### Langues, QR code, source de secours, enregistrement
+
+- **Langues des sous-titres** : le panneau de droite propose, pour la session choisie, la langue
+  affichée sur la vidéo (originale ou une traduction de la session). Le choix est gardé par
+  session. Le lien public (QR code) n'est utilisable que si la session est **publique** sur LinTO ;
+  sinon une note le rappelle (rendre la session publique dans LinTO Studio).
+- **QR code** : « Afficher le QR code » place un QR code vers la session sur la vidéo ; « Épingler »
+  le garde visible en permanence ; sinon il apparaît périodiquement (fréquence et durée réglables
+  dans « Paramètres du QR code… »).
+- **Source de secours** : en plus de la source principale, une caméra, une image ou une vidéo peut
+  servir de secours. Si la principale disparaît (câble débranché, caméra coupée), la sortie bascule
+  sur le secours en 2 s environ, puis revient à la principale de même quand elle réapparaît. Le
+  panneau indique laquelle est à l'antenne. Avec « Écran noir = source absente » (activé par
+  défaut), un écran noir fixe, comme celui qu'envoie un ATEM quand son entrée est perdue, est
+  traité comme une source absente.
+- **Enregistrement** : « Enregistrer le direct » écrit la sortie (vidéo, sous-titres incrustés et
+  son) dans un fichier MKV du dossier choisi, par défaut `LinTO Live` dans le dossier Vidéos. Une
+  pastille rouge **REC** s'affiche dans la barre d'outils pendant l'enregistrement. Le réglage
+  s'applique au prochain Démarrer ; une panne d'enregistrement n'interrompt jamais le direct.
+
 ### Droits LinTO nécessaires
 
 Ce que l'application permet dépend du rôle du compte dans l'organisation LinTO ; ce qui n'est pas

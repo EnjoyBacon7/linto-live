@@ -386,6 +386,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           title={title}
           caption={caption}
           onAir={onAir}
+          recording={state.recording === 'on'}
           startedAt={state.startedAt}
           busy={busy}
           canStart={canStart}

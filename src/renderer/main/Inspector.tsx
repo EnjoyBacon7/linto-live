@@ -6,7 +6,7 @@ import {
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
 import { PopUp } from '../ui/PopUp'
-import { CameraIcon, CaptionsIcon, MicIcon } from '../ui/icons'
+import { CameraIcon, CaptionsIcon, MicIcon, RecordIcon } from '../ui/icons'
 
 /** Watermark of the selected session; `pending` = the session does not exist on LinTO yet. */
 export type WatermarkTarget = { watermark: Watermark } | { pending: true } | null
@@ -67,6 +67,17 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
         }}
         onBlur={() => { if (valid(draft) === null) setDraft(String(value)) }} />
     </label>
+  )
+}
+
+/** Path cut in the middle (CSS only truncates the end): the tail (folder name) stays visible. */
+function MiddleEllipsis({ text }: { text: string }) {
+  const tail = Math.min(18, Math.floor(text.length / 2))
+  return (
+    <>
+      <span className="path-head">{text.slice(0, text.length - tail)}</span>
+      <span className="path-tail">{text.slice(text.length - tail)}</span>
+    </>
   )
 }
 
@@ -186,6 +197,21 @@ export function Inspector(p: InspectorProps) {
             </p>
           )}
         </div>
+      </section>
+      <section className="inspector-group" aria-label="Enregistrement">
+        <h3 className="inspector-label"><RecordIcon size={14} />Enregistrement</h3>
+        <Check label="Enregistrer le direct" checked={settings?.recordEnabled === true} disabled={!settings}
+          onChange={(v) => onChange({ recordEnabled: v })} />
+        {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
+        <p className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
+          title={settings?.recordDir}>
+          {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Dossier Vidéos › LinTO Live'}
+        </p>
+        <Button className="inspector-control" disabled={!settings} onClick={() => {
+          void window.lintoLive.setup.pickFolder().then((dir) => { if (dir) onChange({ recordDir: dir }) }, () => {})
+        }}>
+          Choisir…
+        </Button>
       </section>
     </aside>
   )

@@ -332,6 +332,22 @@
   background: #fff;
 }
 
+.rec-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 10px 0 6px;
+  border-radius: 11px;
+  background: var(--live);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
 /* ---------- Stage + inspector ---------- */
 
 .content-body {
@@ -546,6 +562,22 @@
 .inspector-value {
   margin: 0;
   font-size: 13px;
+}
+
+.inspector-path {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.inspector-path .path-head {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.inspector-path .path-tail {
+  flex: none;
 }
 
 .inspector-value.is-empty {
