@@ -398,9 +398,10 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           {...(manageBlocked ? { terminateBlocked: manageBlocked } : {})}
         />
         <div className="content-body">
-          <Stage onAir={onAir} hasCamera={settings?.primarySource?.kind === 'device'} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
+          <Stage onAir={onAir} hasCamera={!!settings?.primarySource && settings.primarySource.kind !== 'none'} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
+            {...(state.videoOnAir ? { videoOnAir: state.videoOnAir } : {})}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
             {...(summary?.visibility ? { visibility: summary.visibility } : {})}

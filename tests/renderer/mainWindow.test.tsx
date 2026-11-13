@@ -142,7 +142,7 @@ describe('Démarrer', () => {
     expect(startBtn().disabled).toBe(true)
     await userEvent.click(row('Conférence'))
     expect(startBtn().disabled).toBe(true)
-    expect((screen.getByLabelText('Caméra') as HTMLSelectElement).value).toBe('') // « Aucune »
+    expect((screen.getByLabelText('Source principale') as HTMLSelectElement).value).toBe('none') // « Aucune »
     await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
     expect(startBtn().disabled).toBe(false)
   })
@@ -150,7 +150,7 @@ describe('Démarrer', () => {
   it('the camera can be set back to « Aucune »', async () => {
     setup()
     await renderMain()
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'Aucune')
     expect(api.setup.save).toHaveBeenCalledWith({ primarySource: { kind: 'none' } })
   })
 
@@ -497,13 +497,13 @@ describe('Stage, inspector and status bar', () => {
     await renderMain()
     expect(screen.queryByText('Aperçu en attente…')).toBeNull()
     expect(api.preview.subscribe).not.toHaveBeenCalled() // no camera: no screenshot polling
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'FaceTime HD')
     expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Aperçu en attente…')).toBeTruthy()
     act(() => emit('preview', 'data:image/jpeg;base64,AAA'))
     expect((screen.getByRole('img', { name: 'Aperçu de la caméra' }) as HTMLImageElement).src).toBe('data:image/jpeg;base64,AAA')
     expect(screen.getByText('La transcription s’affichera ici au démarrage du direct.')).toBeTruthy() // transcript still there
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'Aucune')
     expect(api.preview.unsubscribe).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('img', { name: 'Aperçu de la caméra' })).toBeNull()
   })
@@ -602,8 +602,8 @@ describe('Stage, inspector and status bar', () => {
     setup()
     await renderMain()
     act(() => emit('live-state', live()))
-    expect((screen.getByLabelText('Caméra') as HTMLSelectElement).disabled).toBe(false)
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    expect((screen.getByLabelText('Source principale') as HTMLSelectElement).disabled).toBe(false)
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'FaceTime HD')
     expect(api.setup.save).toHaveBeenCalledWith({ primarySource: { kind: 'device', id: 'v2' } })
   })
 
@@ -835,13 +835,49 @@ describe('Devices at launch', () => {
     setup({ live: { getState: vi.fn().mockResolvedValue({ ...IDLE, obs: 'down' }) } as never, setup: { load } as never })
     await renderMain()
     expect(load).toHaveBeenCalledTimes(1)
-    const cam = () => screen.getByLabelText('Caméra') as HTMLSelectElement
+    const cam = () => screen.getByLabelText('Source principale') as HTMLSelectElement
     expect(cam().selectedOptions[0]?.textContent).toBe('Choisir…')
     act(() => emit('live-state', IDLE))
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(cam().selectedOptions[0]?.textContent).toBe('Capture HDMI'))
     act(() => emit('live-state', { ...IDLE, output: 'shown' }))
     expect(load).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Inspector: sources vidéo', () => {
+  const noBackup = () => screen.getByLabelText('Source de secours') as HTMLSelectElement
+
+  it('choosing Image… stores an image source', async () => {
+    setup({ setup: { pickMedia: vi.fn().mockResolvedValue('/x/logo.png') } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Image…')
+    expect(api.setup.pickMedia).toHaveBeenCalledWith('image')
+    expect(api.setup.save).toHaveBeenCalledWith({ backupSource: { kind: 'image', path: '/x/logo.png' } })
+    await waitFor(() => expect(noBackup().selectedOptions[0]?.textContent).toBe('logo.png'))
+  })
+
+  it('cancelled picker keeps the previous source', async () => {
+    setup({ setup: { pickMedia: vi.fn().mockResolvedValue(null) } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Vidéo…')
+    expect(api.setup.pickMedia).toHaveBeenCalledWith('video')
+    expect(api.setup.save).not.toHaveBeenCalled()
+    expect(noBackup().value).toBe('none')
+  })
+
+  it('on-air status shows secours', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ videoOnAir: 'backup' })) } as never })
+    await renderMain()
+    expect(await screen.findByText('À l’antenne : secours')).toBeTruthy()
+  })
+
+  it('the black-screen check is ticked by default and disabled without a backup', async () => {
+    setup()
+    await renderMain()
+    const box = screen.getByRole('checkbox', { name: 'Écran noir = source absente' }) as HTMLInputElement
+    expect(box.checked).toBe(true)
+    expect(box.disabled).toBe(true)
   })
 })
 

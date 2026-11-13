@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -32,6 +32,8 @@ export interface InspectorProps {
   /** Visibility of the selected session on LinTO (the public link needs 'public'). */
   visibility?: SessionVisibility
   onQrSettings?(): void
+  /** Which source is on air when a backup is configured (absent otherwise). */
+  videoOnAir?: 'primary' | 'backup'
 }
 
 export function Check({ label, checked, disabled, onChange }: {
@@ -68,6 +70,36 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
   )
 }
 
+const baseName = (path: string): string => path.split(/[/\\]/).filter(Boolean).pop() ?? path
+
+const encodeSource = (s: VideoSource | undefined): string =>
+  !s || s.kind === 'none' ? 'none' : s.kind === 'device' ? `device:${s.id}` : `file:${s.path}`
+
+/** Video source menu: Aucune, each device, the current file (kept selectable), then the pickers. */
+function SourcePopUp({ label, source, devices, disabled, onChange }: {
+  label: string; source: VideoSource | undefined; devices: { id: string; name: string }[]; disabled: boolean
+  onChange(s: VideoSource): void
+}) {
+  const options = [
+    { value: 'none', label: 'Aucune' },
+    ...devices.map((d) => ({ value: `device:${d.id}`, label: d.name })),
+    ...(source && (source.kind === 'image' || source.kind === 'video')
+      ? [{ value: `file:${source.path}`, label: baseName(source.path) }] : []),
+    { value: 'pick:image', label: 'Image…' },
+    { value: 'pick:video', label: 'Vidéo…' }
+  ]
+  const change = (v: string): void => {
+    if (v === 'none') onChange({ kind: 'none' })
+    else if (v.startsWith('device:')) onChange({ kind: 'device', id: v.slice(7) })
+    else if (v.startsWith('pick:')) {
+      const kind = v === 'pick:image' ? 'image' : 'video'
+      void window.lintoLive.setup.pickMedia(kind).then((path) => { if (path) onChange({ kind, path }) }, () => {})
+    }
+  }
+  return <PopUp label={label} className="inspector-control" value={encodeSource(source)} placeholder="Choisir…"
+    options={options} disabled={disabled} onChange={change} />
+}
+
 /** Right pane (inspector): camera (optional), micro + level, transcription profile (read-only here), subtitles. */
 export function Inspector(p: InspectorProps) {
   const { data, settings, profile, onChange } = p
@@ -80,11 +112,18 @@ export function Inspector(p: InspectorProps) {
   return (
     <aside className="inspector" aria-label="Réglages">
       <section className="inspector-group">
-        <h3 className="inspector-label"><CameraIcon size={14} />Caméra</h3>
-        {/* Optional: without a camera the app is a plain LinTO client (audio only, transcript here). */}
-        <PopUp label="Caméra" className="inspector-control" value={settings?.primarySource?.kind === 'device' ? settings.primarySource.id : ''}
-          placeholder="Choisir…" options={[{ value: '', label: 'Aucune' }, ...opts(data?.videoDevices)]} disabled={!data}
-          onChange={(v) => onChange({ primarySource: v ? { kind: 'device', id: v } : { kind: 'none' } })} />
+        <h3 className="inspector-label"><CameraIcon size={14} />Vidéo</h3>
+        {/* Optional: without a source the app is a plain LinTO client (audio only, transcript here). */}
+        <SourcePopUp label="Source principale" source={settings?.primarySource} devices={data?.videoDevices ?? []}
+          disabled={!data} onChange={(v) => onChange({ primarySource: v })} />
+        <SourcePopUp label="Source de secours" source={settings?.backupSource} devices={data?.videoDevices ?? []}
+          disabled={!data} onChange={(v) => onChange({ backupSource: v })} />
+        <Check label="Écran noir = source absente" checked={settings?.blackIsAbsent !== false}
+          disabled={!settings || !settings.backupSource || settings.backupSource.kind === 'none'}
+          onChange={(v) => onChange({ blackIsAbsent: v })} />
+        {p.videoOnAir && (
+          <p className="inspector-note">À l’antenne : {p.videoOnAir === 'backup' ? 'secours' : 'principale'}</p>
+        )}
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><MicIcon size={14} />Micro</h3>
