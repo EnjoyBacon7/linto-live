@@ -46,6 +46,11 @@ describe('seedFiles', () => {
     expect(linux).toContain('StreamEncoder=x264\nPreset=ultrafast')
     expect(linux).not.toContain('apple_h264')
   })
+  it('basic.ini: records MKV with the stream encoder', () => {
+    const b = f['basic/profiles/LinTO Live/basic.ini']
+    expect(b).toContain('RecFormat2=mkv')
+    expect(b).toContain('RecQuality=Stream')
+  })
   it('scene collection', () => {
     const s = JSON.parse(f['basic/scenes/LinTO Live.json'])
     expect(s.name).toBe('LinTO Live')

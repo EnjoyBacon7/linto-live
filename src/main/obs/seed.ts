@@ -66,7 +66,7 @@ function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
         ]
       ],
       ['Output', [['Mode', 'Simple']]],
-      ['SimpleOutput', [['VBitrate', String(STREAM.videoKbps)], ['ABitrate', '128'], ...streamEncoder(o.platform)]]
+      ['SimpleOutput', [['VBitrate', String(STREAM.videoKbps)], ['ABitrate', '128'], ...streamEncoder(o.platform), ['RecFormat2', 'mkv'], ['RecQuality', 'Stream']]]
     ]
   }
 }

@@ -78,6 +78,13 @@ const TRANSFORM_1080P = {
   boundsHeight: 1080
 }
 
+/** File name base for a recording: no character OBS or a file system treats specially ('%' starts an OBS format specifier). */
+export function recordBaseName(sessionName: string): string {
+  // eslint-disable-next-line no-control-regex
+  const name = sessionName.replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]/g, '-').trim().slice(0, 100)
+  return name || 'LinTO Live'
+}
+
 export class ObsController {
   private platform: NodeJS.Platform = process.platform
   /** Scene item ids in SCENE, by source name (new OBS run = new ids, see resetProjectorState). */
@@ -343,6 +350,38 @@ export class ObsController {
     return () => {
       this.client.off('StreamStateChanged', handler)
       this.stateListeners.delete(cb)
+    }
+  }
+
+  /** Records the output as `<baseName> <date time>` in dir (OBS appends the extension of the profile's format). */
+  async startRecord(dir: string, baseName: string): Promise<void> {
+    await this.client.call('SetRecordDirectory', { recordDirectory: dir })
+    await this.client.call('SetProfileParameter', {
+      parameterCategory: 'Output',
+      parameterName: 'FilenameFormatting',
+      parameterValue: `${baseName} %CCYY-%MM-%DD %hh-%mm-%ss`
+    })
+    await this.client.call('StartRecord')
+  }
+
+  /** Stops the recording; resolves the file path, or null when no recording was running. */
+  async stopRecord(): Promise<string | null> {
+    try {
+      const r = await this.client.call('StopRecord')
+      return (r?.outputPath as string | undefined) ?? null
+    } catch (e) {
+      if (codeOf(e) === OUTPUT_NOT_RUNNING) return null
+      throw e
+    }
+  }
+
+  recordState$(cb: (s: { active: boolean; path?: string }) => void): () => void {
+    const handler = (d: { outputActive?: boolean; outputPath?: string | null }): void => {
+      cb({ active: Boolean(d.outputActive), path: d.outputPath ?? undefined })
+    }
+    this.client.on('RecordStateChanged', handler)
+    return () => {
+      this.client.off('RecordStateChanged', handler)
     }
   }
 

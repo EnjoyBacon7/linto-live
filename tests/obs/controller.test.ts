@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ObsController, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_VIDEO, type ObsClient
+  ObsController, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_VIDEO, type ObsClient
 } from '../../src/main/obs/controller'
 
 type Call = { req: string; data?: Record<string, unknown> }
@@ -12,7 +12,7 @@ class CodedError extends Error {
 }
 
 function fakeClient(
-  opts: { items?: unknown[]; failStart?: boolean; stopError?: Error; noAudio?: string[]; lingerAfterRemove?: number } = {}
+  opts: { items?: unknown[]; failStart?: boolean; stopError?: Error; noAudio?: string[]; lingerAfterRemove?: number; recordStopError?: Error } = {}
 ) {
   let active = false
   let starting = false
@@ -102,6 +102,9 @@ function fakeClient(
           return {}
         case 'GetStreamStatus':
           return { outputActive: active }
+        case 'StopRecord':
+          if (opts.recordStopError) throw opts.recordStopError
+          return { outputPath: '/rec/Réunion 2026-11-13 10-00-00.mkv' }
         default:
           return {}
       }
@@ -492,5 +495,57 @@ describe('ObsController sources', () => {
     const img = await new ObsController(f.client).probePrimary()
     expect(img).toBe('data:image/jpeg;base64,AAAA')
     expect(of(f.calls, 'GetSourceScreenshot')[0].data).toEqual({ sourceName: SRC_VIDEO, imageFormat: 'png', imageWidth: 32 })
+  })
+})
+
+describe('ObsController recording', () => {
+  it('startRecord sets directory, filename and starts, in that order', async () => {
+    const f = fakeClient()
+    await new ObsController(f.client).startRecord('/rec', 'Réunion')
+    expect(f.calls).toEqual([
+      { req: 'SetRecordDirectory', data: { recordDirectory: '/rec' } },
+      {
+        req: 'SetProfileParameter',
+        data: { parameterCategory: 'Output', parameterName: 'FilenameFormatting', parameterValue: 'Réunion %CCYY-%MM-%DD %hh-%mm-%ss' }
+      },
+      { req: 'StartRecord', data: undefined }
+    ])
+  })
+
+  it('stopRecord returns the path', async () => {
+    const f = fakeClient()
+    expect(await new ObsController(f.client).stopRecord()).toBe('/rec/Réunion 2026-11-13 10-00-00.mkv')
+  })
+
+  it('stopRecord returns null when not running, rethrows other errors', async () => {
+    const off = fakeClient({ recordStopError: new CodedError(501, 'The output is not running.') })
+    expect(await new ObsController(off.client).stopRecord()).toBeNull()
+    const boom = fakeClient({ recordStopError: new Error('boom') })
+    await expect(new ObsController(boom.client).stopRecord()).rejects.toThrow('boom')
+  })
+
+  it('recordState$ maps RecordStateChanged and unsubscribes', () => {
+    const f = fakeClient()
+    const seen: unknown[] = []
+    const off = new ObsController(f.client).recordState$((s) => seen.push(s))
+    f.emit('RecordStateChanged', { outputActive: true, outputState: 'OBS_WEBSOCKET_OUTPUT_STARTED', outputPath: '/rec/a.mkv' })
+    f.emit('RecordStateChanged', { outputActive: false, outputState: 'OBS_WEBSOCKET_OUTPUT_STOPPED', outputPath: '/rec/a.mkv' })
+    f.emit('RecordStateChanged', { outputActive: false, outputState: 'OBS_WEBSOCKET_OUTPUT_STOPPING' })
+    off()
+    f.emit('RecordStateChanged', { outputActive: true })
+    expect(seen).toEqual([
+      { active: true, path: '/rec/a.mkv' },
+      { active: false, path: '/rec/a.mkv' },
+      { active: false, path: undefined }
+    ])
+  })
+
+  it('recordBaseName makes a safe file name', () => {
+    expect(recordBaseName('A/B: C?')).toBe('A-B- C-')
+    expect(recordBaseName('100% \\ "x" <y>|z\u0001')).toBe('100- - -x- -y--z-')
+    expect(recordBaseName('  Réunion  ')).toBe('Réunion')
+    expect(recordBaseName('')).toBe('LinTO Live')
+    expect(recordBaseName('   ')).toBe('LinTO Live')
+    expect(recordBaseName('é'.repeat(150))).toHaveLength(100)
   })
 })

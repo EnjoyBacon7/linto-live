@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
@@ -97,4 +97,20 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
       await raw.disconnect().catch(() => {})
     }
   }, 60_000)
+
+  it('records the output to an mkv file in the chosen directory', async () => {
+    const dir = join(userData, 'rec')
+    mkdirSync(dir) // OBS does not create the record directory itself (the app must)
+    const ev: unknown[] = []
+    const off = ctl!.recordState$((x) => ev.push(x))
+    await ctl!.startRecord(dir, 'Test enreg')
+    await new Promise((r) => setTimeout(r, 2000))
+    off()
+    expect(ev.at(-1)).toMatchObject({ active: true }) // STARTING reports active=false first
+    const path = await ctl!.stopRecord()
+    expect(path).toMatch(/Test enreg \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.mkv$/)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(existsSync(path!)).toBe(true)
+    expect(await ctl!.stopRecord()).toBeNull()
+  }, 30_000)
 })
