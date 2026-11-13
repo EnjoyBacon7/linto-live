@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   subtitleLanguageOptions, isQualifiedForCrossSubtitles, routeOriginal, routeTranslation, languageLabel
 } from '../src/shared/subtitleLanguage'
-import type { TranslationEvent } from '../src/main/linto/captions'
+import type { TranslationEvent } from '../src/shared/types'
 
 const ev = (o: Partial<TranslationEvent>): TranslationEvent =>
   ({ segmentId: 1, text: 'b', targetLang: 'en', final: false, ...o })
@@ -17,6 +17,10 @@ describe('subtitleLanguageOptions', () => {
   })
   it('has no cross option with a single spoken language', () => {
     const o = subtitleLanguageOptions({ languages: ['fr-FR'], translations: ['en'] })
+    expect(o.map((x) => x.value)).toEqual(['original', 'en'])
+  })
+  it('lists each translation once', () => {
+    const o = subtitleLanguageOptions({ languages: ['fr-FR'], translations: ['en', 'en'] })
     expect(o.map((x) => x.value)).toEqual(['original', 'en'])
   })
 })
@@ -34,6 +38,7 @@ describe('isQualifiedForCrossSubtitles', () => {
     expect(isQualifiedForCrossSubtitles(['fr-FR', 'en-US'], ['en'])).toBe(false)
     expect(isQualifiedForCrossSubtitles(['fr-FR'], ['fr'])).toBe(false)
     expect(isQualifiedForCrossSubtitles(undefined, undefined)).toBe(false)
+    expect(isQualifiedForCrossSubtitles(['fr-FR', 'fr-CA'], ['fr'])).toBe(false)
   })
 })
 

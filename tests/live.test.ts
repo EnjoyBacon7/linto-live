@@ -1186,3 +1186,55 @@ describe('LiveController and LinTO access rights', () => {
     expect(JSON.stringify(last)).toContain('streamid=b')
   })
 })
+
+describe('subtitle language', () => {
+  const bilingual = (): Session => ({
+    ...session(),
+    channels: [{ id: 7, name: 'Conf', streamEndpoints: { srt: SRT_A }, languages: ['fr-FR'], translations: ['en'] }]
+  })
+
+  it('translation choice sends only that language to the overlay', async () => {
+    const t = setup({ sessions: [bilingual()] })
+    t.settings.update({ subtitleLanguages: { s1: 'en' } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour', lang: 'fr-FR' })
+    t.captions.emit('translation', { segmentId: 1, text: 'Hello', sourceLang: 'fr-FR', targetLang: 'en', final: true })
+    t.captions.emit('translation', { segmentId: 1, text: 'Hallo', sourceLang: 'fr-FR', targetLang: 'de', final: true })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'final', text: 'Hello' }]])
+    expect(t.live.getTranscript().finals).toMatchObject([{ id: 1, text: 'Bonjour' }])
+  })
+
+  it('switching language resets the band', async () => {
+    const t = setup({ sessions: [bilingual()] })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.captions.emit('partial', { segmentId: 1, text: 'Bonjour' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'partial', text: 'Bonjour' })
+    t.overlay.push.mockClear()
+    await t.live.setSubtitleLanguage('s1', 'en')
+    expect(t.settings.get().subtitleLanguages).toEqual({ s1: 'en' })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'reset' }]])
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous' })
+    t.captions.emit('translation', { segmentId: 1, text: 'Hello everyone', sourceLang: 'fr-FR', targetLang: 'en', final: true })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'reset' }], [{ type: 'final', text: 'Hello everyone' }]])
+  })
+
+  it('choosing the language of a session not on air only saves it', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    await t.live.setSubtitleLanguage('other', 'en')
+    expect(t.settings.get().subtitleLanguages).toEqual({ other: 'en' })
+    expect(t.overlay.push).not.toHaveBeenCalled()
+  })
+
+  it('start passes create options to createSession', async () => {
+    const t = setup({ sessions: [] })
+    await t.live.boot()
+    await t.live.start('Nouvelle', { translations: ['en'], visibility: 'public' })
+    expect(t.api.createSession).toHaveBeenCalledWith('org1', 'Nouvelle', 3, { translations: ['en'], visibility: 'public' })
+  })
+})

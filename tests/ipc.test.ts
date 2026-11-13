@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf, vi } from 'vitest'
-import { EVENT_CHANNELS, IPC, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
+import { EVENT_CHANNELS, IPC, checkNewSessionOptions, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
 
 describe('IPC constants', () => {
   it('values are unique', () => {
@@ -14,7 +14,7 @@ describe('IPC constants', () => {
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
         'setupLoad', 'setupSave', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
-        'liveGetTranscript', 'liveExportTranscript', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
+        'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
       ].sort()
     )
   })
@@ -56,6 +56,8 @@ describe('createLintoLiveApi', () => {
     await api.sessions.list()
     await api.sessions.lookup('S')
     await api.live.start('S')
+    await api.live.start('S', { translations: ['en'], visibility: 'public' })
+    await api.live.setSubtitleLanguage('s1', 'en')
     await api.live.stop()
     await api.live.terminate()
     await api.live.showOutputWindow()
@@ -79,6 +81,8 @@ describe('createLintoLiveApi', () => {
       [IPC.sessionsList],
       ['sessions:lookup', 'S'],
       [IPC.liveStart, 'S'],
+      [IPC.liveStart, 'S', { translations: ['en'], visibility: 'public' }],
+      ['live:set-subtitle-language', 's1', 'en'],
       [IPC.liveStop],
       [IPC.liveTerminate],
       ['live:show-output'],
@@ -119,5 +123,22 @@ describe('createLintoLiveApi', () => {
     api.on('auth-required', () => {})
     api.on('transcript', () => {})
     expect(on.mock.calls.map((c) => c[0])).toEqual([IPC.evtLiveState, IPC.evtPreview, IPC.evtAuthRequired, IPC.evtTranscript])
+  })
+})
+
+describe('checkNewSessionOptions (live.start create options)', () => {
+  it('accepts absent options and valid ones', () => {
+    expect(checkNewSessionOptions(undefined)).toBeUndefined()
+    expect(checkNewSessionOptions({ translations: ['en'], visibility: 'public' })).toEqual({ translations: ['en'], visibility: 'public' })
+    expect(checkNewSessionOptions({ translations: [], visibility: 'password', password: 'secret' }))
+      .toEqual({ translations: [], visibility: 'password', password: 'secret' })
+  })
+  it('rejects invalid options', () => {
+    expect(() => checkNewSessionOptions({ translations: [], visibility: 'x' })).toThrow()
+    expect(() => checkNewSessionOptions({ translations: 'en', visibility: 'public' })).toThrow()
+    expect(() => checkNewSessionOptions({ translations: [1], visibility: 'public' })).toThrow()
+    expect(() => checkNewSessionOptions({ translations: [], visibility: 'password' })).toThrow()
+    expect(() => checkNewSessionOptions('public')).toThrow()
+    expect(() => checkNewSessionOptions(null)).toThrow()
   })
 })

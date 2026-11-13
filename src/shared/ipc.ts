@@ -1,5 +1,5 @@
 import type {
-  AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
+  AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
   TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, Watermark
 } from './types'
 
@@ -65,7 +65,10 @@ export interface LintoLiveApi {
     setWatermark(sessionId: string, w: Watermark): Promise<void>
   }
   live: {
-    start(sessionName: string): Promise<StartResult>
+    /** `create`: options of the session created when none has this name (ignored when one is reused). */
+    start(sessionName: string, create?: NewSessionOptions): Promise<StartResult>
+    /** Saves the language shown in the subtitle band for this session; the band switches now if it is on air. */
+    setSubtitleLanguage(sessionId: string, choice: string): Promise<void>
     stop(): Promise<void>
     terminate(): Promise<void>
     /** Opens (another) OBS output window, even if one is already open. */
@@ -119,6 +122,7 @@ export const IPC = {
   liveClearSubtitles: 'live:clear-subtitles',
   liveGetTranscript: 'live:get-transcript',
   liveExportTranscript: 'live:export-transcript',
+  liveSetSubtitleLanguage: 'live:set-subtitle-language',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
@@ -140,6 +144,25 @@ export const EVENT_CHANNELS: Record<EventName, string> = {
   'auth-required': IPC.evtAuthRequired,
   command: IPC.evtCommand,
   transcript: IPC.evtTranscript
+}
+
+const VISIBILITIES: readonly unknown[] = ['private', 'organization', 'public', 'password'] satisfies NewSessionOptions['visibility'][]
+
+/** Main-side check of `live.start`'s `create` argument (it comes from the renderer); throws when malformed. */
+export function checkNewSessionOptions(raw: unknown): NewSessionOptions | undefined {
+  if (raw === undefined) return undefined
+  const bad = (): never => { throw new Error('Options de session invalides.') }
+  if (typeof raw !== 'object' || raw === null) return bad()
+  const o = raw as Record<string, unknown>
+  if (!Array.isArray(o.translations) || !o.translations.every((t) => typeof t === 'string')) return bad()
+  if (!VISIBILITIES.includes(o.visibility)) return bad()
+  const visibility = o.visibility as NewSessionOptions['visibility']
+  const out: NewSessionOptions = { translations: [...(o.translations as string[])], visibility }
+  if (visibility === 'password') {
+    if (typeof o.password !== 'string' || !o.password) return bad()
+    out.password = o.password
+  }
+  return out
 }
 
 /** Minimal transport (ipcRenderer-shaped) so the bridge is testable without Electron. */
@@ -169,7 +192,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       setWatermark: (id, w) => call(IPC.sessionsSetWatermark, id, w)
     },
     live: {
-      start: (name) => call(IPC.liveStart, name),
+      start: (name, create) => (create === undefined ? call(IPC.liveStart, name) : call(IPC.liveStart, name, create)),
+      setSubtitleLanguage: (id, choice) => call(IPC.liveSetSubtitleLanguage, id, choice),
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput),

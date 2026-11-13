@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { io as realIo } from 'socket.io-client'
 import type { LintoUrls } from './instance'
+import type { TranslationEvent } from '../../shared/types'
 
 /**
  * A LinTO caption. `astart`: the channel's absolute start (ISO date); `start` / `end`: the segment's bounds
@@ -16,18 +17,7 @@ export interface CaptionEvent {
   end?: number | null
 }
 
-/** A LinTO translation of a segment into `targetLang` (e.g. 'en'); `sourceLang`: the spoken language (e.g. 'fr-FR'). */
-export interface TranslationEvent {
-  segmentId: number
-  text: string
-  sourceLang?: string | null
-  targetLang: string
-  final: boolean
-  astart?: string | null
-  start?: number | null
-  end?: number | null
-  locutor?: string | null
-}
+export type { TranslationEvent } from '../../shared/types'
 
 type IoFn = typeof realIo
 type Socket = ReturnType<IoFn>

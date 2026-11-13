@@ -2,9 +2,10 @@ import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
   DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
-  type Channel, type DeviceItem, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
-  type Watermark, type WatermarkConfig
+  type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
+  type TranslationEvent, type Watermark, type WatermarkConfig
 } from '../shared/types'
+import { ORIGINAL, routeOriginal, routeTranslation, type Routed } from '../shared/subtitleLanguage'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import type { ObsController, StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
@@ -184,13 +185,17 @@ export class LiveController extends EventEmitter {
       this.setState({ captions: s, ...(recovered ? { warning: undefined } : {}) })
       this.superviseCaptions()
     })
+    // The transcript always keeps the originals; the band shows the chosen language only.
     d.captions.on('partial', (e: CaptionEvent) => {
-      this.d.overlay.push({ type: 'partial', text: e.text })
+      this.pushCaption(routeOriginal(this.subtitleLanguage(), false, e.text))
       this.sendTranscript(this.transcript.partial(e))
     })
     d.captions.on('final', (e: CaptionEvent) => {
-      this.d.overlay.push({ type: 'final', text: e.text })
+      this.pushCaption(routeOriginal(this.subtitleLanguage(), true, e.text))
       this.sendTranscript(this.transcript.final(e))
+    })
+    d.captions.on('translation', (e: TranslationEvent) => {
+      this.pushCaption(routeTranslation(this.subtitleLanguage(), this.current?.channel.languages, e))
     })
     d.captions.on('authError', () => void this.captionsRefused())
   }
@@ -230,8 +235,9 @@ export class LiveController extends EventEmitter {
     }
   }
 
-  start(sessionName: string): Promise<StartResult> {
-    return this.enqueue(() => this.doStart(sessionName))
+  /** `create`: options of the session created when none has this name. */
+  start(sessionName: string, create?: NewSessionOptions): Promise<StartResult> {
+    return this.enqueue(() => this.doStart(sessionName, create))
   }
 
   stop(): Promise<void> {
@@ -340,6 +346,13 @@ export class LiveController extends EventEmitter {
     this.d.overlay.push({ type: 'reset' })
   }
 
+  /** Saves the language shown in the band for a session; if it is on air, the band empties and switches now. */
+  async setSubtitleLanguage(sessionId: string, choice: string): Promise<void> {
+    const subtitleLanguages = { ...this.d.settings.get().subtitleLanguages, [sessionId]: choice }
+    this.d.settings.update({ subtitleLanguages })
+    if (this.current?.session.id === sessionId) this.d.overlay.push({ type: 'reset' })
+  }
+
   /** A session's watermark was saved or re-read from LinTO: the overlay follows if that session is on air. */
   watermarkChanged(sessionId: string, w: Watermark): void {
     if (this.current?.session.id !== sessionId || (this.watermark && sameWatermark(this.watermark, w))) return
@@ -393,6 +406,16 @@ export class LiveController extends EventEmitter {
     this.state = { ...this.state, ...patch }
     for (const k of Object.keys(this.state) as (keyof LiveState)[]) if (this.state[k] === undefined) delete this.state[k]
     this.emit('state', this.getState())
+  }
+
+  /** Language shown in the band for the session on air. */
+  private subtitleLanguage(): string {
+    const id = this.current?.session.id
+    return (id && this.d.settings.get().subtitleLanguages?.[id]) || ORIGINAL
+  }
+
+  private pushCaption(r: Routed): void {
+    if (r) this.d.overlay.push({ type: r.kind, text: r.text })
   }
 
   /** Sends the band's look (local settings + the on-air session's watermark) to the overlay. */
@@ -636,7 +659,7 @@ export class LiveController extends EventEmitter {
     this.captionsRetryTimer = null
   }
 
-  private async doStart(rawName: string): Promise<StartResult> {
+  private async doStart(rawName: string, create?: NewSessionOptions): Promise<StartResult> {
     const s = this.d.settings.get()
     if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
     if (!this.ctl) {
@@ -647,7 +670,7 @@ export class LiveController extends EventEmitter {
     // Resolve first: a failure here must leave a running show (transcript, stream supervision) untouched.
     let res: Awaited<ReturnType<typeof resolveSession>>
     try {
-      res = await resolveSession(this.d.api, s.orgId, rawName, s.profileId)
+      res = await resolveSession(this.d.api, s.orgId, rawName, s.profileId, create)
     } catch (e) {
       if (e instanceof UnauthorizedError) {
         this.reportUnauthorized()

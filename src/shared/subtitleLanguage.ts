@@ -1,5 +1,4 @@
-import type { Channel } from './types'
-import type { TranslationEvent } from '../main/linto/captions'
+import type { Channel, TranslationEvent } from './types'
 
 export const ORIGINAL = 'original'
 export const CROSS = 'crossSubtitles'
@@ -16,9 +15,10 @@ export function languageLabel(code: string, locale = 'fr'): string {
   return name.charAt(0).toLocaleUpperCase(locale) + name.slice(1)
 }
 
-/** Exactly two spoken languages, each with a translation to the other's base language. */
+/** Exactly two spoken languages of different base codes, each with a translation to its base language. */
 export function isQualifiedForCrossSubtitles(languages: string[] | undefined, translations: string[] | undefined): boolean {
   if (languages?.length !== 2 || !translations) return false
+  if (base(languages[0]) === base(languages[1])) return false
   const targets = translations.map(base)
   return languages.every((l) => targets.includes(base(l)))
 }
@@ -31,7 +31,7 @@ export function subtitleLanguageOptions(
   if (isQualifiedForCrossSubtitles(channel.languages, channel.translations)) {
     out.push({ value: CROSS, label: 'Sous-titres croisés' })
   }
-  const tr = (channel.translations ?? []).map((value) => ({ value, label: languageLabel(value, locale) }))
+  const tr = [...new Set(channel.translations ?? [])].map((value) => ({ value, label: languageLabel(value, locale) }))
   tr.sort((a, b) => a.label.localeCompare(b.label, locale))
   return [...out, ...tr]
 }

@@ -11,11 +11,12 @@ import { makeApi, withEvents } from './helpers'
 const fn = (x: unknown) => x as ReturnType<typeof vi.fn>
 
 const WM: Watermark = { display: false, pinned: false, content: 'Transcription by LinTO.ai $linto', frequency: 600, duration: 10 }
+const LANGS = [{ value: 'original', label: 'Langue originale' }]
 const SESSIONS: SessionSummary[] = [
-  { id: 's1', name: 'Conférence', status: 'ready', watermark: WM },
-  { id: 's2', name: 'Atelier', status: 'paused', watermark: WM },
-  { id: 's3', name: 'Externe', status: 'on_schedule', watermark: WM },
-  { id: 's4', name: 'Plénière', status: 'active', watermark: WM }
+  { id: 's1', name: 'Conférence', status: 'ready', watermark: WM, languages: LANGS },
+  { id: 's2', name: 'Atelier', status: 'paused', watermark: WM, languages: LANGS },
+  { id: 's3', name: 'Externe', status: 'on_schedule', watermark: WM, languages: LANGS },
+  { id: 's4', name: 'Plénière', status: 'active', watermark: WM, languages: LANGS }
 ]
 
 const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<SetupData> = {}): SetupData => ({

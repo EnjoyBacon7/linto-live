@@ -157,10 +157,10 @@ describe('LiveController subtitle style', () => {
     expect(t.styles().length).toBe(n)
     t.live.watermarkChanged('s1', WM)
     expect(t.styles().at(-1)!.watermark).toEqual(WM)
-    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: WM }])
+    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: WM, languages: [] }])
     expect(t.styles().length).toBe(n + 1) // unchanged: not sent again
     const pinned = { ...WM, pinned: true }
-    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: pinned }])
+    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: pinned, languages: [] }])
     expect(t.styles().at(-1)!.watermark).toEqual(pinned)
   })
 

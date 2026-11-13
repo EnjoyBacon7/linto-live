@@ -1,4 +1,5 @@
 import type { OrgRights } from './rights'
+import type { SubtitleLanguageOption } from './subtitleLanguage'
 
 export interface StreamEndpoints {
   srt?: string
@@ -26,6 +27,9 @@ export interface SessionSummary {
   id: string; name: string; status: Exclude<SessionStatus, 'terminated'>; updatedAt?: string
   /** The session's watermark, completed with the instance defaults. */
   watermark: Watermark
+  visibility?: SessionVisibility
+  /** Choices for the language shown in the subtitle band (from the first channel). */
+  languages: SubtitleLanguageOption[]
 }
 
 /**
@@ -51,6 +55,18 @@ export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'terminated'
 /** `rights`: what the user may do there (absent when LinTO did not say: then LinTO alone decides). */
 export interface Organization { id: string; name: string; rights?: OrgRights }
 export interface TranscriberProfile { id: number; name: string; languages?: string[]; translations?: string[] }
+/** A LinTO translation of a segment into `targetLang` (e.g. 'en'); `sourceLang`: the spoken language (e.g. 'fr-FR'). */
+export interface TranslationEvent {
+  segmentId: number
+  text: string
+  sourceLang?: string | null
+  targetLang: string
+  final: boolean
+  astart?: string | null
+  start?: number | null
+  end?: number | null
+  locutor?: string | null
+}
 /** Options of a new session: translation targets and who may see it (`password`: public + a password). */
 export interface NewSessionOptions { translations: string[]; visibility: SessionVisibility | 'password'; password?: string }
 export interface AuthMethod { path: string; from: string; name: string }
@@ -108,6 +124,8 @@ export interface Settings {
   subtitlesVisible?: boolean
   /** Subtitle font size in px on the 1920×1080 canvas (default 48). */
   subtitleFontSize?: number
+  /** Language shown in the subtitle band, per session id (absent = the original language). */
+  subtitleLanguages?: Record<string, string>
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
 }

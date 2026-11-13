@@ -5,6 +5,7 @@ import {
   type WatermarkConfig
 } from '../shared/types'
 import { resolveWatermark } from './linto/watermark'
+import { subtitleLanguageOptions } from '../shared/subtitleLanguage'
 
 type Devices = Pick<SetupData, 'videoDevices' | 'audioDevices'>
 
@@ -78,9 +79,11 @@ export function toSessionSummaries(sessions: Session[], watermark?: WatermarkCon
     .map((s): SessionSummary => {
       const out: SessionSummary = {
         id: s.id, name: s.name, status: s.status,
-        watermark: resolveWatermark(s.meta, watermark)
+        watermark: resolveWatermark(s.meta, watermark),
+        languages: subtitleLanguageOptions(s.channels[0])
       }
       if (s.updatedAt) out.updatedAt = s.updatedAt
+      if (s.visibility) out.visibility = s.visibility
       return out
     })
     .sort((a, b) =>

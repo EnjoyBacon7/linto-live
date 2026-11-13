@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
-import { IPC, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
+import { IPC, checkNewSessionOptions, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
 import {
   TRANSCRIPT_EXPORT_FORMATS, UnauthorizedError, type Settings, type SessionLookup, type SessionSummary, type TranscriptExportFormat,
   type TranscriptUpdate, type WatermarkConfig
@@ -375,9 +375,16 @@ function main(): void {
     syncTitle()
   })
 
-  ipcMain.handle(IPC.liveStart, async (_e, name: string) => {
+  ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown) => {
+    const create = checkNewSessionOptions(rawCreate)
     await ensureUrls()
-    return live.start(name)
+    return live.start(name, create)
+  })
+  ipcMain.handle(IPC.liveSetSubtitleLanguage, async (_e, sessionId: unknown, choice: unknown) => {
+    if (typeof sessionId !== 'string' || !sessionId || typeof choice !== 'string' || !choice) {
+      throw new Error('Langue des sous-titres invalide.')
+    }
+    await live.setSubtitleLanguage(sessionId, choice)
   })
   ipcMain.handle(IPC.liveStop, () => live.stop())
   ipcMain.handle(IPC.liveTerminate, () => live.terminate())

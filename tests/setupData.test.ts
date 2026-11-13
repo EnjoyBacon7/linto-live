@@ -67,4 +67,14 @@ describe('toSessionSummaries', () => {
     const r = toSessionSummaries([mk('a', 'ready', undefined, {}), { id: 'b', name: 'b', status: 'ready', channels: [] }, mk('c', 'ready')])
     expect(r.map((s) => s.id)).toEqual(['c'])
   })
+  it('carries the visibility and the subtitle languages of the first channel', () => {
+    const s: Session = {
+      ...mk('a', 'ready'), visibility: 'public',
+      channels: [{ id: 1, name: 'c', streamEndpoints: ep, languages: ['fr-FR'], translations: ['en'] }]
+    }
+    const [r] = toSessionSummaries([s])
+    expect(r.visibility).toBe('public')
+    expect(r.languages).toEqual([{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }])
+    expect(toSessionSummaries([mk('b', 'ready')])[0].languages).toEqual([{ value: 'original', label: 'Langue originale' }])
+  })
 })
