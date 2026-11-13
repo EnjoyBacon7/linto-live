@@ -16,6 +16,19 @@ export interface CaptionEvent {
   end?: number | null
 }
 
+/** A LinTO translation of a segment into `targetLang` (e.g. 'en'); `sourceLang`: the spoken language (e.g. 'fr-FR'). */
+export interface TranslationEvent {
+  segmentId: number
+  text: string
+  sourceLang?: string | null
+  targetLang: string
+  final: boolean
+  astart?: string | null
+  start?: number | null
+  end?: number | null
+  locutor?: string | null
+}
+
 type IoFn = typeof realIo
 type Socket = ReturnType<IoFn>
 const STABLE_MS = 10000
@@ -86,6 +99,7 @@ export class CaptionStream extends EventEmitter {
     socket.on('unauthorized', authFail)
     socket.on('partial', (e: CaptionEvent) => this.emit('partial', e))
     socket.on('final', (e: CaptionEvent) => this.emit('final', e))
+    socket.on('translation', (e: TranslationEvent) => this.emit('translation', e))
   }
 
   close(): void {

@@ -61,6 +61,16 @@ describe('CaptionStream', () => {
     sock.emit_('final', { segmentId: 1, text: 'ab' })
     expect(out).toEqual([['p', { segmentId: 1, text: 'a' }], ['f', { segmentId: 1, text: 'ab' }]])
   })
+  it('forwards translation events', () => {
+    const { s, sock } = mk()
+    const out: unknown[] = []
+    s.on('translation', (e) => out.push(e))
+    s.open('s1', 7)
+    const payload = { segmentId: 1, text: 'hello', sourceLang: 'fr-FR', targetLang: 'en', final: true }
+    sock.emit_('translation', payload)
+    expect(out).toEqual([payload])
+    expect(out[0]).toBe(payload)
+  })
   it('emits authError on connect_error with auth message and stops reconnecting', () => {
     const { s, sock } = mk()
     let n = 0

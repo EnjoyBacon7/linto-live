@@ -70,7 +70,7 @@ export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSe
 export interface LiveCaptions {
   open: CaptionStream['open']
   close: CaptionStream['close']
-  on(event: 'status' | 'partial' | 'final' | 'authError', listener: Listener): unknown
+  on(event: 'status' | 'partial' | 'final' | 'translation' | 'authError', listener: Listener): unknown
 }
 export type LiveOverlay = Pick<OverlayServer, 'start' | 'push' | 'stop'>
 export type LiveSettings = Pick<SettingsStore, 'get' | 'update' | 'setToken'>
