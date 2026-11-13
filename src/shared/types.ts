@@ -140,6 +140,10 @@ export interface Settings {
   subtitleLanguages?: Record<string, string>
   /** QR code of the session's public link in the video (default: hidden). */
   qr?: QrSettings
+  /** Record each show to a file, read at Démarrer (default false). */
+  recordEnabled?: boolean
+  /** Folder of the recordings (default: « LinTO Live » in the user's Videos folder); created when missing. */
+  recordDir?: string
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
 }

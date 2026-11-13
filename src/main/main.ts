@@ -3,7 +3,7 @@ import {
   shell, Tray
 } from 'electron'
 import { existsSync, readdirSync } from 'node:fs'
-import { rm, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -46,7 +46,7 @@ import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
 } from './appLifecycle'
 import {
-  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
+  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, recordingSavedNotification, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
   type NotificationText, type ShellState
 } from './nativeShell'
 
@@ -206,7 +206,11 @@ function main(): void {
     platform,
     qrSvg: (url) => QRCode.toString(url, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }),
     decodeLuma: (dataUrl) => lumaOfBgra(nativeImage.createFromDataURL(dataUrl).toBitmap()),
-    watermarkConfig: () => watermarkCfg
+    watermarkConfig: () => watermarkCfg,
+    mkdirp: async (dir) => {
+      await mkdir(dir, { recursive: true })
+    },
+    defaultRecordDir: join(app.getPath('videos'), 'LinTO Live')
   })
 
   // ---- Native shell: app menu, menu-bar icon, notifications ----
@@ -240,15 +244,16 @@ function main(): void {
   }
   // Shown notifications are kept referenced until clicked or closed, or their 'click' may never fire (GC).
   const notes = new Set<Notification>()
-  // Only when the user is looking elsewhere: the window shows the same information otherwise.
-  const notify = (n: NotificationText): void => {
+  // By default only when the user is looking elsewhere: the window shows the same information otherwise.
+  const notify = (n: NotificationText, opts: { always?: boolean; onClick?: () => void } = {}): void => {
     if (!Notification.isSupported()) return
-    if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return
+    if (!opts.always && win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return
     const note = new Notification({ title: n.title, body: n.body })
     notes.add(note)
     note.on('click', () => {
       notes.delete(note)
-      showWindow()
+      if (opts.onClick) opts.onClick()
+      else showWindow()
     })
     note.on('close', () => notes.delete(note))
     note.show()
@@ -267,6 +272,10 @@ function main(): void {
   live.on('transcript', (u: TranscriptUpdate) => send(IPC.evtTranscript, u))
   live.on('preview', (d: string) => send(IPC.evtPreview, d))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
+  // The window does not say where the file went: always notify, a click shows it in its folder.
+  live.on('recording-saved', (path: string) => {
+    notify(recordingSavedNotification(path), { always: true, onClick: () => shell.showItemInFolder(path) })
+  })
   live.on('auth-required', () => {
     send(IPC.evtAuthRequired)
     notify(AUTH_NOTIFICATION)
@@ -389,6 +398,15 @@ function main(): void {
       title: kind === 'image' ? 'Choisir une image' : 'Choisir une vidéo',
       properties: ['openFile'],
       filters: [MEDIA_FILTERS[kind]]
+    }
+    const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+    return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(IPC.setupPickFolder, async (): Promise<string | null> => {
+    const opts: Electron.OpenDialogOptions = {
+      title: 'Choisir un dossier',
+      properties: ['openDirectory', 'createDirectory']
     }
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return r.canceled ? null : (r.filePaths[0] ?? null)

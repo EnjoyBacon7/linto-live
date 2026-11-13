@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
@@ -28,10 +28,16 @@ function session(over: Partial<Session> = {}, endpoint: string | null = SRT_A): 
   }
 }
 
+const REC_DIR = '/videos/LinTO Live'
+
 function fakeController(log: string[]) {
   let stateCb: ((s: StreamState) => void) | null = null
+  let recordCb: ((s: { active: boolean; path?: string }) => void) | null = null
   const c = {
     autoStop: true,
+    /** false: OBS accepts StartRecord but never reports the recording started. */
+    recordStarts: true,
+    recordPath: '/videos/LinTO Live/Conf 2026-11-13 10-00-00.mkv',
     /** stopStream() result: false = OBS answered "output not running" (e.g. still connecting). */
     stopSent: true,
     ensureScene: vi.fn(async () => {}),
@@ -67,9 +73,25 @@ function fakeController(log: string[]) {
     showPause: vi.fn(async () => {
       log.push('showPause')
     }),
+    startRecord: vi.fn(async (_dir: string, base: string) => {
+      log.push(`startRecord:${base}`)
+      if (c.recordStarts) queueMicrotask(() => recordCb?.({ active: true }))
+    }),
+    stopRecord: vi.fn(async (): Promise<string | null> => {
+      log.push('stopRecord')
+      queueMicrotask(() => recordCb?.({ active: false, path: c.recordPath }))
+      return c.recordPath
+    }),
+    recordState$: vi.fn((cb: (s: { active: boolean; path?: string }) => void) => {
+      recordCb = cb
+      return () => {
+        if (recordCb === cb) recordCb = null
+      }
+    }),
     resetProjectorState: vi.fn(),
     disconnect: vi.fn(async () => {}),
-    emitState: (s: StreamState) => stateCb?.(s)
+    emitState: (s: StreamState) => stateCb?.(s),
+    emitRecord: (s: { active: boolean; path?: string }) => recordCb?.(s)
   }
   return c
 }
@@ -135,14 +157,23 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
   }
   const qrSvg = vi.fn(async (url: string) => `<svg>${url}</svg>`)
   const decodeLuma = vi.fn((_d: string) => (opts.luma ? opts.luma() : PICTURE))
+  const mkdirp = vi.fn(async (dir: string) => {
+    log.push(`mkdirp:${dir}`)
+  })
   const deps = {
-    obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const
+    obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const,
+    mkdirp, defaultRecordDir: REC_DIR
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
+  const saved: string[] = []
+  live.on('recording-saved', (p: string) => saved.push(p))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
-  return { live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, qrSvg, decodeLuma, log, states, last: () => live.getState() }
+  return {
+    live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, qrSvg, decodeLuma, mkdirp, log, states, saved,
+    last: () => live.getState()
+  }
 }
 
 const flush = async (): Promise<void> => {
@@ -1461,5 +1492,213 @@ describe('backup source', () => {
     expect(t.ctl().probePrimary).not.toHaveBeenCalled()
     expect(t.ctl().setBackupVisible).toHaveBeenCalledWith(false)
     expect(t.last()).not.toHaveProperty('videoOnAir')
+  })
+})
+
+describe('LiveController recording', () => {
+  it('is off before any show', () => {
+    expect(setup().last().recording).toBe('off')
+  })
+
+  it('records when enabled at Démarrer', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    expect(t.ctl().startRecord).toHaveBeenCalledWith(REC_DIR, 'Conf')
+    // OBS does not create the record directory: it is created first, after the show is applied.
+    expect(t.log.filter((l) => /^(mkdirp|startRecord|startStream)/.test(l))).toEqual([
+      `startStream:${SRT_A}`, `mkdirp:${REC_DIR}`, 'startRecord:Conf'
+    ])
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'on' })
+    await t.live.stop()
+    await flush()
+    expect(t.ctl().stopRecord).toHaveBeenCalledTimes(1)
+    expect(t.last()).toMatchObject({ phase: 'idle', recording: 'off' })
+    expect(t.saved).toEqual([t.ctl().recordPath]) // once, though OBS also reports the stop
+  })
+
+  it('records into the chosen folder', async () => {
+    const t = setup({ settings: { recordEnabled: true, recordDir: '/mnt/rec' } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    expect(t.mkdirp).toHaveBeenCalledWith('/mnt/rec')
+    expect(t.ctl().startRecord).toHaveBeenCalledWith('/mnt/rec', 'Conf')
+  })
+
+  it('does not record when disabled', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    await t.live.stop()
+    expect(t.ctl().startRecord).not.toHaveBeenCalled()
+    expect(t.ctl().stopRecord).not.toHaveBeenCalled()
+    expect(t.mkdirp).not.toHaveBeenCalled()
+    expect(t.last().recording).toBe('off')
+  })
+
+  it('ticking during a show changes nothing until the next Démarrer', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    await t.live.saveSettings({ recordEnabled: true })
+    expect(t.ctl().startRecord).not.toHaveBeenCalled()
+    expect(t.last().recording).toBe('off')
+    await t.live.stop()
+    await t.live.start('Conf')
+    expect(t.ctl().startRecord).toHaveBeenCalledTimes(1)
+  })
+
+  it('unticking during a show keeps recording it', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    await t.live.saveSettings({ recordEnabled: false })
+    expect(t.ctl().stopRecord).not.toHaveBeenCalled()
+    expect(t.last().recording).toBe('on')
+  })
+
+  it('OBS restart resumes recording', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    const first = t.ctl()
+    t.obs.emit('restarting', 1)
+    expect(t.last().recording).toBe('off')
+    t.obs.emit('ready', { port: 9, password: 'x' })
+    await t.live.settled()
+    await flush()
+    expect(t.ctl()).not.toBe(first)
+    expect(t.ctl().startRecord).toHaveBeenCalledWith(REC_DIR, 'Conf') // a new file (new timestamp)
+    expect(first.startRecord).toHaveBeenCalledTimes(1)
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'on' })
+  })
+
+  it('session switch closes and reopens the file', async () => {
+    const t = setup({ sessions: [session({ id: 'a', name: 'A' }), session({ id: 'b', name: 'B' }, SRT_B)], settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('A')
+    await flush()
+    t.log.length = 0
+    await t.live.start('B')
+    await flush()
+    expect(t.log.filter((l) => /Record/.test(l))).toEqual(['stopRecord', 'startRecord:B'])
+    expect(t.saved).toHaveLength(1)
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'on', session: { name: 'B' } })
+  })
+
+  it('switching to a session after unticking stops recording', async () => {
+    const t = setup({ sessions: [session({ id: 'a', name: 'A' }), session({ id: 'b', name: 'B' }, SRT_B)], settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('A')
+    await t.live.saveSettings({ recordEnabled: false })
+    await t.live.start('B')
+    expect(t.ctl().stopRecord).toHaveBeenCalledTimes(1)
+    expect(t.ctl().startRecord).toHaveBeenCalledTimes(1)
+    expect(t.last().recording).toBe('off')
+  })
+
+  it('record failure is a warning, the show goes on', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.ctl().startRecord.mockRejectedValueOnce(new Error('disque plein'))
+    const r = await t.live.start('Conf')
+    expect(r.ok).toBe(true)
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error', warning: MSG_RECORD_FAILED + 'disque plein' })
+    expect(t.ctl().startStream).toHaveBeenCalled()
+  })
+
+  it('a folder that cannot be created is a record failure', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.mkdirp.mockRejectedValueOnce(new Error('EACCES'))
+    await t.live.start('Conf')
+    expect(t.ctl().startRecord).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error' })
+    expect(t.last().warning?.startsWith(MSG_RECORD_FAILED)).toBe(true)
+  })
+
+  it('OBS not reporting the recording started within 5 s is a failure', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.ctl().recordStarts = false
+    await t.live.start('Conf')
+    await flush()
+    expect(t.last().recording).toBe('off')
+    await vi.advanceTimersByTimeAsync(4_900)
+    expect(t.last().recording).toBe('off')
+    await vi.advanceTimersByTimeAsync(200)
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error' })
+    expect(t.last().warning?.startsWith(MSG_RECORD_FAILED)).toBe(true)
+    // It starts late after all: the indicator and the warning follow.
+    t.ctl().emitRecord({ active: true })
+    expect(t.last().recording).toBe('on')
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it('no failure after a start that is reported in time', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(t.last().recording).toBe('on')
+  })
+
+  it('Arrêter stops the stream even if stopRecord throws', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().emitState('active')
+    t.ctl().stopRecord.mockRejectedValueOnce(new Error('boom'))
+    await t.live.stop()
+    expect(t.ctl().stopStream).toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off', recording: 'off' })
+    expect(t.saved).toEqual([])
+  })
+
+  it('Arrêter does not wait forever for OBS to stop the recording', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().stopRecord.mockImplementationOnce(() => new Promise(() => {}))
+    const stopped = t.live.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await stopped
+    expect(t.last()).toMatchObject({ phase: 'idle', recording: 'off' })
+  })
+
+  it('terminate stops the recording', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await t.live.terminate()
+    expect(t.ctl().stopRecord).toHaveBeenCalledTimes(1)
+    expect(t.last().recording).toBe('off')
+    // The next show follows the setting read at its own Démarrer.
+    t.settings.update({ recordEnabled: false })
+    await t.live.start('Conf')
+    expect(t.ctl().startRecord).toHaveBeenCalledTimes(1)
+  })
+
+  it('OBS stopping the recording by itself is a failure and the file is announced', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().emitRecord({ active: false, path: '/videos/LinTO Live/cut.mkv' })
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error' })
+    expect(t.last().warning?.startsWith(MSG_RECORD_FAILED)).toBe(true)
+    expect(t.saved).toEqual(['/videos/LinTO Live/cut.mkv'])
+  })
+
+  it('a recording that starts when no show wants one is stopped', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.ctl().emitRecord({ active: true })
+    await flush()
+    expect(t.ctl().stopRecord).toHaveBeenCalled()
+    expect(t.last().recording).toBe('off')
   })
 })

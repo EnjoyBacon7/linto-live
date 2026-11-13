@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 import {
-  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
+  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, recordingSavedNotification, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
   type AppCommand, type ShellState
 } from '../src/main/nativeShell'
 import type { LiveState } from '../src/shared/ipc'
 
-const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }
+const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off' }
 const LIVE: LiveState = {
-  phase: 'live', session: { name: 'Conférence', status: 'active' }, stream: 'active', captions: 'live', obs: 'running', output: 'shown'
+  phase: 'live', session: { name: 'Conférence', status: 'active' }, stream: 'active', captions: 'live', obs: 'running', output: 'shown',
+  recording: 'off'
 }
 
 const shell = (over: Partial<ShellState> = {}): ShellState => ({ platform: 'darwin', loggedIn: true, phase: 'idle', canStart: false, ...over })
@@ -237,5 +238,11 @@ describe('notificationFor', () => {
   it('a normal Arrêter (stream and captions go off together, phase idle) does not notify', () => {
     expect(notificationFor(LIVE, { ...IDLE, phase: 'idle', stream: 'off', captions: 'offline' })).toBeNull()
     expect(notificationFor(LIVE, { ...LIVE, phase: 'stopping', captions: 'offline' })).toBeNull()
+  })
+})
+
+describe('recordingSavedNotification', () => {
+  it('names the saved file', () => {
+    expect(recordingSavedNotification('/v/Conf 2026.mkv')).toEqual({ title: 'Enregistrement sauvegardé', body: 'Conf 2026.mkv' })
   })
 })

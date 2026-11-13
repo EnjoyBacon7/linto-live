@@ -27,6 +27,8 @@ export interface LiveState {
   startedAt?: number
   /** Video source shown in OBS; absent when no backup source is configured. */
   videoOnAir?: 'primary' | 'backup'
+  /** Recording of the show to a file: 'error' when it could not start or stopped by itself (the show goes on). */
+  recording: 'off' | 'on' | 'error'
   warning?: string
 }
 
@@ -63,6 +65,8 @@ export interface LintoLiveApi {
     save(s: Partial<Settings>): Promise<void>
     /** Lets the user pick an image or a video file (open dialog); its path, or null if they cancelled. */
     pickMedia(kind: 'image' | 'video'): Promise<string | null>
+    /** Lets the user pick (or create) a folder; its path, or null if they cancelled. */
+    pickFolder(): Promise<string | null>
   }
   sessions: {
     list(): Promise<SessionSummary[]>
@@ -119,6 +123,7 @@ export const IPC = {
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
   setupPickMedia: 'setup:pick-media',
+  setupPickFolder: 'setup:pick-folder',
   sessionsList: 'sessions:list',
   sessionsLookup: 'sessions:lookup',
   sessionsSetWatermark: 'sessions:set-watermark',
@@ -196,7 +201,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
     setup: {
       load: () => call(IPC.setupLoad),
       save: (s) => call(IPC.setupSave, s),
-      pickMedia: (kind) => call(IPC.setupPickMedia, kind)
+      pickMedia: (kind) => call(IPC.setupPickMedia, kind),
+      pickFolder: () => call(IPC.setupPickFolder)
     },
     sessions: {
       list: () => call(IPC.sessionsList),

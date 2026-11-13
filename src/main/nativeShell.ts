@@ -1,4 +1,5 @@
 import type { MenuItemConstructorOptions } from 'electron'
+import { basename } from 'node:path'
 import type { AppCommand, LiveState } from '../shared/ipc'
 
 /**
@@ -151,6 +152,11 @@ export interface NotificationText {
 export const AUTH_NOTIFICATION: NotificationText = {
   title: 'Connexion LinTO expirée',
   body: 'Reconnecte-toi à LinTO dans LinTO Live.'
+}
+
+/** A recording was saved: the body names the file (clicking shows it in its folder). */
+export function recordingSavedNotification(path: string): NotificationText {
+  return { title: 'Enregistrement sauvegardé', body: basename(path) }
 }
 
 /**

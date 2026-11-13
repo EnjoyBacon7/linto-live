@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { LiveState } from '../../shared/ipc'
 
-export const IDLE_STATE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }
+export const IDLE_STATE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off' }
 
 /**
  * Latest LiveState: fetched on mount (main's push on page load may arrive before React subscribes),

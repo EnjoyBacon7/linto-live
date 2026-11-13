@@ -29,10 +29,10 @@ const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<Set
   ...extra
 })
 
-const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }
+const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off' }
 const live = (over: Partial<LiveState> = {}): LiveState => ({
   phase: 'live', session: { name: 'Conférence', status: 'active' }, stream: 'active', captions: 'live', obs: 'running',
-  output: 'shown', startedAt: Date.now() - 5000, ...over
+  output: 'shown', recording: 'off', startedAt: Date.now() - 5000, ...over
 })
 
 let api: LintoLiveApi
