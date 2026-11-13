@@ -1,6 +1,6 @@
 import {
   ForbiddenError, LintoHttpError, NotFoundError, UnauthorizedError,
-  type AuthMethod, type Channel, type Organization, type Session, type SessionStatus, type TranscriberProfile
+  type AuthMethod, type Channel, type NewSessionOptions, type Organization, type Session, type SessionStatus, type TranscriberProfile
 } from '../../shared/types'
 import { orgRights } from '../../shared/rights'
 import type { LintoUrls } from './instance'
@@ -46,6 +46,12 @@ const SEARCH_MAX_PAGES = 20
 function toChannel(c: any): Channel {
   const ch: Channel = { id: c.id, name: c.name }
   if (c.streamEndpoints) ch.streamEndpoints = c.streamEndpoints
+  if (Array.isArray(c.languages)) ch.languages = c.languages.filter((l: any) => typeof l === 'string')
+  if (Array.isArray(c.translations)) {
+    ch.translations = c.translations
+      .map((t: any) => (typeof t === 'string' ? t : t?.target))
+      .filter((t: any) => typeof t === 'string')
+  }
   return ch
 }
 
@@ -57,6 +63,7 @@ function toSession(s: any): Session {
     channels: (s.channels ?? []).map(toChannel)
   }
   if (s.owner) out.owner = s.owner
+  if (s.visibility === 'private' || s.visibility === 'organization' || s.visibility === 'public') out.visibility = s.visibility
   if (s.createdAt) out.createdAt = s.createdAt
   if (s.updatedAt) out.updatedAt = s.updatedAt
   if (s.meta && typeof s.meta === 'object' && !Array.isArray(s.meta)) out.meta = s.meta
@@ -126,6 +133,12 @@ export class LintoApi {
       if (Array.isArray(p.config?.languages)) {
         out.languages = p.config.languages.map((l: any) => (typeof l === 'string' ? l : l.candidate))
       }
+      const tr = p.config?.availableTranslations
+      if (Array.isArray(tr)) out.translations = tr
+      else if (tr && typeof tr === 'object') {
+        const ext = Array.isArray(tr.external) ? tr.external.flatMap((e: any) => (Array.isArray(e?.languages) ? e.languages : [])) : []
+        out.translations = [...new Set<string>([...(Array.isArray(tr.discrete) ? tr.discrete : []), ...ext])]
+      }
       return out
     })
   }
@@ -167,15 +180,16 @@ export class LintoApi {
     return this.pagedSessions(orgId, { statusList: 'on_schedule,ready,active,paused' }, "Trop de sessions dans l'organisation.")
   }
 
-  async createSession(orgId: string, name: string, profileId: number): Promise<Session> {
+  async createSession(orgId: string, name: string, profileId: number, opts?: NewSessionOptions): Promise<Session> {
     const body = {
       name,
       channels: [{
-        transcriberProfileId: profileId, name, translations: [],
+        transcriberProfileId: profileId, name, translations: opts?.translations ?? [],
         diarization: false, keepAudio: true, compressAudio: true
       }],
       meta: {}, scheduleOn: null, endOn: null, autoStart: true, autoEnd: false,
-      visibility: 'organization'
+      visibility: opts ? (opts.visibility === 'password' ? 'public' : opts.visibility) : 'organization',
+      password: opts?.visibility === 'password' ? (opts.password ?? null) : null
     }
     return toSession(await this.request(`${this.urls.api}/organizations/${orgId}/sessions`, {
       method: 'POST', body: JSON.stringify(body)

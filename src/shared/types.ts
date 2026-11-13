@@ -7,9 +7,17 @@ export interface StreamEndpoints {
 }
 
 export type SessionStatus = 'on_schedule' | 'ready' | 'active' | 'paused' | 'terminated'
-export interface Channel { id: number; name: string; streamEndpoints?: StreamEndpoints }
+export type SessionVisibility = 'private' | 'organization' | 'public'
+export interface Channel {
+  id: number; name: string; streamEndpoints?: StreamEndpoints
+  /** Spoken languages (e.g. `fr-FR`). */
+  languages?: string[]
+  /** Translation target codes. */
+  translations?: string[]
+}
 export interface Session {
   id: string; name: string; status: SessionStatus; channels: Channel[]; owner?: string; createdAt?: string; updatedAt?: string
+  visibility?: SessionVisibility
   /** Free-form session metadata (LinTO Studio keeps the watermark settings under `@watermark`). */
   meta?: Record<string, unknown>
 }
@@ -42,7 +50,9 @@ export interface WatermarkConfig {
 export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'terminated'
 /** `rights`: what the user may do there (absent when LinTO did not say: then LinTO alone decides). */
 export interface Organization { id: string; name: string; rights?: OrgRights }
-export interface TranscriberProfile { id: number; name: string; languages?: string[] }
+export interface TranscriberProfile { id: number; name: string; languages?: string[]; translations?: string[] }
+/** Options of a new session: translation targets and who may see it (`password`: public + a password). */
+export interface NewSessionOptions { translations: string[]; visibility: SessionVisibility | 'password'; password?: string }
 export interface AuthMethod { path: string; from: string; name: string }
 /** LinTO rejected the token (expired, revoked…): logging in again is the fix. */
 export class UnauthorizedError extends Error {

@@ -100,6 +100,40 @@ describe('LintoApi', () => {
     const { api } = mk(() => json({ sessions: [{ id: 's', name: 'n', status: 'active', createdAt: '2026-01-02T00:00:00Z', channels: [] }] }))
     expect((await api.searchSessions('o1', 'n'))[0].createdAt).toBe('2026-01-02T00:00:00Z')
   })
+  it('transcriberProfiles normalises availableTranslations', async () => {
+    const { api } = mk(() => json([
+      { id: 1, config: { name: 'A', availableTranslations: { discrete: ['en'], external: [{ languages: ['de', 'en'] }] } } },
+      { id: 2, config: { name: 'B', availableTranslations: ['es'] } },
+      { id: 3, config: { name: 'C' } }
+    ]))
+    const [a, b, c] = await api.transcriberProfiles('o1')
+    expect(a.translations).toEqual(['en', 'de'])
+    expect(b.translations).toEqual(['es'])
+    expect(c.translations).toBeUndefined()
+  })
+  it('createSession sends translations, visibility and password', async () => {
+    const { calls, api } = mk(() => json({ id: 'n', name: 'X', status: 'ready', channels: [] }))
+    await api.createSession('o1', 'X', 42, { translations: ['en', 'de'], visibility: 'password', password: 'x' })
+    await api.createSession('o1', 'X', 42)
+    const b1 = JSON.parse(calls[0].init.body as string)
+    expect(b1.channels[0].translations).toEqual(['en', 'de'])
+    expect(b1.visibility).toBe('public')
+    expect(b1.password).toBe('x')
+    const b2 = JSON.parse(calls[1].init.body as string)
+    expect(b2.channels[0].translations).toEqual([])
+    expect(b2.visibility).toBe('organization')
+    expect(b2.password).toBeNull()
+  })
+  it('toSession reads visibility, channel languages and translations', async () => {
+    const { api } = mk(() => json({
+      id: 's', name: 'N', status: 'ready', visibility: 'public',
+      channels: [{ id: 1, name: 'N', languages: ['fr-FR'], translations: [{ target: 'en' }, 'de'] }]
+    }))
+    const s = await api.getSession('o1', 's')
+    expect(s.visibility).toBe('public')
+    expect(s.channels[0].languages).toEqual(['fr-FR'])
+    expect(s.channels[0].translations).toEqual(['en', 'de'])
+  })
   it('createSession body matches the constraints payload', async () => {
     const { calls, api } = mk(() => json({ id: 'n', name: 'X', status: 'ready', channels: [{ id: 1, name: 'X' }] }))
     const s = await api.createSession('o1', 'X', 42)
@@ -110,7 +144,7 @@ describe('LintoApi', () => {
     expect(body).toEqual({
       name: 'X',
       channels: [{ transcriberProfileId: 42, name: 'X', translations: [], diarization: false, keepAudio: true, compressAudio: true }],
-      meta: {}, scheduleOn: null, endOn: null, autoStart: true, autoEnd: false, visibility: 'organization'
+      meta: {}, scheduleOn: null, endOn: null, autoStart: true, autoEnd: false, visibility: 'organization', password: null
     })
     expect(body.channels[0].transcriberProfileId).toBe(42)
     expect(s.id).toBe('n')

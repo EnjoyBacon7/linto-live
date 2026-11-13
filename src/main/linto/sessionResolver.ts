@@ -1,4 +1,4 @@
-import type { Channel, Session, SessionLookup } from '../../shared/types'
+import type { Channel, NewSessionOptions, Session, SessionLookup } from '../../shared/types'
 import { toObsStreamService } from '../obs/streamTarget'
 import type { LintoApi } from './api'
 import { asLintoAction } from './accessMessages'
@@ -31,7 +31,9 @@ async function findExisting(api: Pick<Api, 'searchSessions'>, orgId: string, nam
  * The session Démarrer goes live on: an existing one with this exact name, else a new one with `profileId`
  * (only needed then: reusing a session works without access to the transcriber profiles).
  */
-export async function resolveSession(api: Api, orgId: string, rawName: string, profileId: number | undefined): Promise<Resolution> {
+export async function resolveSession(api: Api, orgId: string, rawName: string, profileId: number | undefined,
+  opts?: NewSessionOptions
+): Promise<Resolution> {
   const name = rawName.trim()
   if (!name) throw new Error('Nom de session vide')
 
@@ -41,7 +43,7 @@ export async function resolveSession(api: Api, orgId: string, rawName: string, p
   if (profileId === undefined) throw new Error(MSG_NO_PROFILE)
 
   // Create response may omit streamEndpoints (assigned on channel setup): refetch only then.
-  let created = await asLintoAction('create', () => api.createSession(orgId, name, profileId))
+  let created = await asLintoAction('create', () => api.createSession(orgId, name, profileId, opts))
   if (!created.channels[0]?.streamEndpoints) created = await asLintoAction('read', () => api.getSession(orgId, created.id))
   return finish('created', created)
 }

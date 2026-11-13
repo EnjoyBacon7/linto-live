@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { lookupSession, resolveSession } from '../../src/main/linto/sessionResolver'
-import type { Session } from '../../src/shared/types'
+import type { NewSessionOptions, Session } from '../../src/shared/types'
 
 const ep = { srt: 'srt://h:1?streamid=abc' }
 const sess = (o: Partial<Session> & { name: string }): Session => ({
@@ -8,7 +8,7 @@ const sess = (o: Partial<Session> & { name: string }): Session => ({
 })
 function fake(list: Session[], opts: { created?: Session; full?: Session } = {}) {
   const searchSessions = vi.fn(async () => list)
-  const createSession = vi.fn(async (_o: string, name: string) => opts.created ?? sess({ name, id: 'new' }))
+  const createSession = vi.fn(async (_o: string, name: string, _p?: number, _opts?: NewSessionOptions) => opts.created ?? sess({ name, id: 'new' }))
   const getSession = vi.fn(async (_o: string, id: string) => opts.full ?? list.find((s) => s.id === id) ?? sess({ name: 'x', id }))
   return { api: { searchSessions, createSession, getSession }, searchSessions, createSession, getSession }
 }
@@ -25,7 +25,13 @@ describe('resolveSession', () => {
     const f = fake([sess({ name: 'Conférence' })])
     const r = await resolveSession(f.api, 'o', 'Conf', 1)
     expect(r.kind).toBe('created')
-    expect(f.createSession).toHaveBeenCalledWith('o', 'Conf', 1)
+    expect(f.createSession).toHaveBeenCalledWith('o', 'Conf', 1, undefined)
+  })
+  it('forwards create options', async () => {
+    const f = fake([])
+    const opts: NewSessionOptions = { translations: ['en'], visibility: 'public' }
+    await resolveSession(f.api, 'o', 'Conf', 1, opts)
+    expect(f.createSession).toHaveBeenCalledWith('o', 'Conf', 1, opts)
   })
   it('trims input', async () => {
     const f = fake([sess({ name: 'Conf' })])
