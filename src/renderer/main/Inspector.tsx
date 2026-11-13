@@ -155,7 +155,7 @@ export function Inspector(p: InspectorProps) {
             <label className="field inspector-inline">
               <span className="field-label">Langue affichée</span>
               <PopUp label="Langue affichée" value={language}
-                options={p.languages ?? [{ value: 'original', label: 'Originale' }]} disabled={!p.languages}
+                options={p.languages ?? [{ value: 'original', label: 'Langue originale' }]} disabled={!p.languages}
                 onChange={(v) => p.onLanguageChange?.(v)} />
             </label>
             {!data?.watermarkEnabled && p.watermark && 'pending' in p.watermark && (
@@ -205,7 +205,7 @@ export function Inspector(p: InspectorProps) {
         {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
         <p className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
           title={settings?.recordDir}>
-          {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Dossier Vidéos › LinTO Live'}
+          {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Vidéos (Films sur macOS) › LinTO Live'}
         </p>
         <Button className="inspector-control" disabled={!settings} onClick={() => {
           void window.lintoLive.setup.pickFolder().then((dir) => { if (dir) onChange({ recordDir: dir }) }, () => {})

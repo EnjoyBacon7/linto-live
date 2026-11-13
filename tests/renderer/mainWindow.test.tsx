@@ -236,6 +236,16 @@ describe('Langue affichée', () => {
   })
 })
 
+describe('Langue affichée (no session)', () => {
+  it('the disabled fallback reads like the option it stands for', async () => {
+    setup()
+    await renderMain()
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect(pop.disabled).toBe(true)
+    expect([...pop.options].map((o) => o.text)).toEqual(['Langue originale'])
+  })
+})
+
 describe('Langue affichée (session on air)', () => {
   it('prefers the on-air session options over the session list ones', async () => {
     setup()
@@ -944,8 +954,8 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(screen.queryByText(/Le public devra se connecter à LinTO/)).toBeNull()
   })
 
-  it('stored language not offered shows Originale', async () => {
-    setup({}, setupData({ subtitleLanguages: { s1: 'xx' } }), [{ ...SESSIONS[0], languages: [{ value: 'original', label: 'Originale' }, { value: 'en', label: 'Anglais' }] }])
+  it('stored language not offered shows Langue originale', async () => {
+    setup({}, setupData({ subtitleLanguages: { s1: 'xx' } }), [{ ...SESSIONS[0], languages: [{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }] }])
     await renderMain()
     await userEvent.click(row('Conférence'))
     expect((screen.getByRole('combobox', { name: 'Langue affichée' }) as HTMLSelectElement).value).toBe('original')
@@ -1080,7 +1090,7 @@ describe('Enregistrement', () => {
   it('choosing a folder saves recordDir', async () => {
     setup({ setup: { pickFolder: vi.fn().mockResolvedValue('/Users/x/Rec') } as never })
     await renderMain()
-    expect(screen.getByText('Dossier Vidéos › LinTO Live')).toBeTruthy()
+    expect(screen.getByText('Vidéos (Films sur macOS) › LinTO Live')).toBeTruthy()
     await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
     expect(api.setup.pickFolder).toHaveBeenCalled()
     expect(api.setup.save).toHaveBeenCalledWith({ recordDir: '/Users/x/Rec' })

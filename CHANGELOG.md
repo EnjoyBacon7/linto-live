@@ -13,8 +13,8 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - **QR code** vers la session sur la vidéo, affiché ou épinglé, avec ses paramètres.
 - **Source de secours** (caméra, image ou vidéo) : bascule automatique en 2 s environ quand la
   principale disparaît, retour de même ; un écran noir (ATEM sans entrée) compte comme absence.
-- **Enregistrement du direct** en MKV dans le dossier choisi (par défaut Vidéos › LinTO Live), avec
-  pastille REC dans la barre d'outils.
+- **Enregistrement du direct** en MKV 1920×1080 dans le dossier choisi (par défaut Vidéos (Films
+  sur macOS) › LinTO Live), avec pastille REC dans la barre d'outils.
 
 ## [0.3.0] - 2026-11-10
 

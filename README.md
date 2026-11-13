@@ -100,8 +100,10 @@ Conseils :
 1. **Se connecter** : indiquer l'instance LinTO (par défaut `studio.linto.ai`), puis se connecter
    par email / mot de passe ou par SSO. « Se souvenir de moi » garde la session ouverte.
 2. **Choisir une session** dans la barre latérale, ou en créer une avec **Nouvelle session…**
-   (⌘N / Ctrl+N) : nom, organisation, profil de transcription. Un nom déjà utilisé reprend la
-   session existante au lieu d'en créer une deuxième.
+   (⌘N / Ctrl+N) : nom, organisation, profil de transcription, **Traductions** (langues dans
+   lesquelles LinTO traduit la session, proposées par le profil) et **Visibilité** (Organisation,
+   Public, Protégée par mot de passe ou Privée). Un nom déjà utilisé reprend la session existante
+   au lieu d'en créer une deuxième.
 3. **Régler** dans le panneau de droite : **caméra** (ou carte de capture, facultative : « Aucune »
    pour n'envoyer que le son), **micro** (c'est ce son qui est transcrit), taille des sous-titres,
    affichage des sous-titres et du filigrane.
@@ -130,8 +132,8 @@ l'application pendant un direct revient à cliquer sur Arrêter.
   session. Le lien public (QR code) n'est utilisable que si la session est **publique** sur LinTO ;
   sinon une note le rappelle (rendre la session publique dans LinTO Studio).
 - **QR code** : « Afficher le QR code » place un QR code vers la session sur la vidéo ; « Épingler »
-  le garde visible en permanence ; sinon il apparaît périodiquement (fréquence et durée réglables
-  dans « Paramètres du QR code… »).
+  le garde visible en permanence ; sinon il apparaît périodiquement, par défaut toutes les 60 s
+  pendant 15 s (fréquence et durée réglables dans « Paramètres du QR code… »).
 - **Source de secours** : en plus de la source principale, une caméra, une image ou une vidéo peut
   servir de secours. Si la principale disparaît (câble débranché, caméra coupée), la sortie bascule
   sur le secours en 2 s environ, puis revient à la principale de même quand elle réapparaît. Le
@@ -139,9 +141,10 @@ l'application pendant un direct revient à cliquer sur Arrêter.
   défaut), un écran noir fixe, comme celui qu'envoie un ATEM quand son entrée est perdue, est
   traité comme une source absente.
 - **Enregistrement** : « Enregistrer le direct » écrit la sortie (vidéo, sous-titres incrustés et
-  son) dans un fichier MKV du dossier choisi, par défaut `LinTO Live` dans le dossier Vidéos. Une
-  pastille rouge **REC** s'affiche dans la barre d'outils pendant l'enregistrement. Le réglage
-  s'applique au prochain Démarrer ; une panne d'enregistrement n'interrompt jamais le direct.
+  son) en 1920×1080 dans un fichier MKV du dossier choisi, par défaut Vidéos (Films sur macOS) ›
+  `LinTO Live`. Une pastille rouge **REC** s'affiche dans la barre d'outils pendant
+  l'enregistrement. Le réglage s'applique au prochain Démarrer ; une panne d'enregistrement
+  n'interrompt jamais le direct.
 
 ### Droits LinTO nécessaires
 
