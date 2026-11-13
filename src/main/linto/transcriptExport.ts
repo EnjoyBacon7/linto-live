@@ -49,11 +49,16 @@ function cueTime(ms: number, sep: ',' | '.'): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}${sep}${pad(v % 1000, 3)}`
 }
 
+/** Said in the file when the oldest segments of a very long show were no longer kept. */
+export const droppedNote = (n: number): string =>
+  `Transcription incomplète : les ${n} premiers segments de la session n'ont pas été conservés.`
+
 function toTxt(t: Transcript): string {
   const head: string[] = []
   if (t.sessionName) head.push(t.sessionName)
   const when = t.startedAt ?? t.finals[0]?.at
   if (when !== undefined) head.push(`${localDate(when)} ${clockTime(when)}`)
+  const note = t.dropped ? [droppedNote(t.dropped), ''] : []
   const lines = t.finals.map((s, i) => {
     const l = segmentLabels(s, t.finals[i - 1])
     const meta = [`[${clockTime(s.at)}]`]
@@ -61,7 +66,7 @@ function toTxt(t: Transcript): string {
     if (l.lang && s.lang) meta.push(`(${s.lang})`)
     return `${meta.join(' ')} ${s.text}`
   })
-  return [...(head.length ? [head.join(' — '), ''] : []), ...lines, ''].join('\n')
+  return [...(head.length ? [head.join(' — '), ''] : []), ...note, ...lines, ''].join('\n')
 }
 
 function toSrt(t: Transcript): string {
@@ -81,7 +86,8 @@ function toVtt(t: Transcript): string {
     const lang = c.s.lang ? `<lang ${vttEscape(c.s.lang)}>${voiced}</lang>` : voiced
     return `${cueTime(c.from, '.')} --> ${cueTime(c.to, '.')}\n${lang}\n`
   })
-  return ['WEBVTT', '', ...body].join('\n')
+  const note = t.dropped ? [`NOTE ${droppedNote(t.dropped)}`, ''] : []
+  return ['WEBVTT', '', ...note, ...body].join('\n')
 }
 
 function toJson(t: Transcript): string {
@@ -96,7 +102,8 @@ function toJson(t: Transcript): string {
     speaker: c.s.locutor,
     text: c.s.text
   }))
-  return `${JSON.stringify({ session: t.sessionName, startedAt: iso(t.startedAt), segments }, null, 2)}\n`
+  const out = { session: t.sessionName, startedAt: iso(t.startedAt), ...(t.dropped ? { droppedSegments: t.dropped } : {}), segments }
+  return `${JSON.stringify(out, null, 2)}\n`
 }
 
 /** The finalized transcript as a file in `format` (an unfinished partial is not part of it). */
