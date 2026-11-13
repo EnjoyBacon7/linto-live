@@ -37,7 +37,7 @@ function fakeController(log: string[]) {
     ensureScene: vi.fn(async () => {}),
     listVideoDevices: vi.fn(async () => [{ id: 'cam', name: 'Cam' }]),
     listAudioDevices: vi.fn(async () => [{ id: 'mic', name: 'Mic' }]),
-    setSource: vi.fn(async () => {}),
+    setSource: vi.fn(async (_slot: string, _src: unknown) => {}),
     setBackupVisible: vi.fn(async (_on: boolean) => {}),
     probePrimary: vi.fn(async () => 'data:image/png;base64,AAAA'),
     setAudioDevice: vi.fn(async () => {}),
@@ -1428,5 +1428,38 @@ describe('backup source', () => {
     expect(t.ctl().setSource).toHaveBeenLastCalledWith('backup', { kind: 'video', path: '/boucle.mp4' })
     expect(t.ctl().setBackupVisible).toHaveBeenCalledTimes(visibility)
     expect(t.last().videoOnAir).toBe('backup')
+  })
+
+  it('OBS restarting while the backup is being set: no monitor on the dead controller', async () => {
+    const t = setup()
+    await t.live.boot()
+    const first = t.ctl()
+    let release!: () => void
+    first.setSource.mockImplementationOnce(() => new Promise<void>((r) => (release = r)))
+    const saving = t.live.saveSettings({ backupSource: BACKUP })
+    await flush()
+    t.obs.emit('restarting', 1)
+    release()
+    await saving
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(first.probePrimary).not.toHaveBeenCalled()
+    expect(t.last()).not.toHaveProperty('videoOnAir')
+  })
+
+  it('a backup that cannot be set up on attach runs no monitor', async () => {
+    const t = setup({ settings: { backupSource: BACKUP } })
+    t.controllerFactory.mockImplementationOnce(async () => {
+      const c = fakeController(t.log)
+      c.setSource.mockImplementation(async (slot: string) => {
+        if (slot === 'backup') throw new Error('fichier introuvable')
+      })
+      t.ctls.push(c)
+      return c
+    })
+    await t.live.boot()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(t.ctl().probePrimary).not.toHaveBeenCalled()
+    expect(t.ctl().setBackupVisible).toHaveBeenCalledWith(false)
+    expect(t.last()).not.toHaveProperty('videoOnAir')
   })
 })

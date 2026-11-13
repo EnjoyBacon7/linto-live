@@ -417,6 +417,7 @@ export class LiveController extends EventEmitter {
       // The monitor reads primarySource and blackIsAbsent live: only a backup change concerns it.
       if (patch.backupSource !== undefined && !sameSource(patch.backupSource, before.backupSource)) {
         await c.setSource('backup', patch.backupSource)
+        if (this.ctl !== c) return // OBS restarted meanwhile: attach re-applies everything
         // Another backup file keeps the running monitor (the recreated input keeps its visibility).
         if ((patch.backupSource.kind === 'none') !== (this.monitor === null)) this.syncMonitor(c)
       }
@@ -511,8 +512,8 @@ export class LiveController extends EventEmitter {
     const s = this.d.settings.get()
     let warning: string | undefined
     await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch(() => {})
-    await ready.setSource('backup', s.backupSource ?? NO_SOURCE).catch(() => {})
-    this.syncMonitor(ready)
+    const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
+    this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
@@ -526,13 +527,14 @@ export class LiveController extends EventEmitter {
 
   /**
    * Runs the fallback monitor on `c` when a backup source is configured (its start hides the backup);
-   * without one, hides a backup an earlier OBS run may have left visible.
+   * without one (or when it could not be set up: `backupSet` false), hides a backup an earlier OBS run may
+   * have left visible.
    */
-  private syncMonitor(c: LiveObsController): void {
+  private syncMonitor(c: LiveObsController, backupSet = true): void {
     this.monitor?.stop()
     this.monitor = null
     const settings = (): Settings => this.d.settings.get()
-    if ((settings().backupSource ?? NO_SOURCE).kind === 'none') {
+    if (!backupSet || (settings().backupSource ?? NO_SOURCE).kind === 'none') {
       c.setBackupVisible(false).catch(() => {})
       if (this.state.videoOnAir) this.setState({ videoOnAir: undefined })
       return
