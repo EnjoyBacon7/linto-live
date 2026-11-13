@@ -163,6 +163,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     setError(null)
     try {
       if (target.pending?.profileId !== undefined) await window.lintoLive.setup.save({ profileId: target.pending.profileId })
+      // Arrêter came while the profile was being saved: the switch is dropped, it must not go live after the stop.
+      if (busyRef.current !== b) return
       const r = await window.lintoLive.live.start(target.name)
       if (r.ok) {
         setReused(r.reused)

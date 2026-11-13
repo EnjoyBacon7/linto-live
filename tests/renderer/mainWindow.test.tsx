@@ -459,6 +459,21 @@ describe('Switch while live', () => {
     expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
     expect(api.live.start).toHaveBeenCalledWith('Débat')
   })
+
+  it('Arrêter during the profile save of a switch: the new session is not started after the stop', async () => {
+    let saved: () => void = () => {}
+    setup({ setup: { load: vi.fn().mockResolvedValue(setupData()), save: vi.fn(() => new Promise<void>((r) => { saved = r })) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Débat{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
+    await userEvent.click(screen.getByRole('button', { name: 'Arrêter' }))
+    expect(api.live.stop).toHaveBeenCalledTimes(1)
+    await act(async () => saved())
+    expect(api.live.start).not.toHaveBeenCalled()
+  })
 })
 
 describe('Stage, inspector and status bar', () => {
