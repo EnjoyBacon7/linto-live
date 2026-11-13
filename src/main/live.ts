@@ -32,6 +32,7 @@ export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
 export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const MSG_NO_ORG = 'Choisis une organisation.'
+export const MSG_START_CANCELLED = 'Démarrage annulé.'
 /** The caption socket was refused while the token is still valid: access to the session itself was lost. */
 export const MSG_CAPTIONS_FORBIDDEN =
   "Sous-titres refusés : tu n'as plus accès à cette session sur LinTO (retiré de l'organisation ?). L'audio continue d'être envoyé."
@@ -53,6 +54,11 @@ const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
 const CAPTIONS_STALE_MS = 30_000
 /** Caption socket refused with a still valid token: wait this long before joining again. */
 const CAPTIONS_REFUSED_RETRY_MS = 30_000
+/** OBS liveness watchdog: a ping this often, outside the queue (it must work while the queue waits on OBS). */
+export const WATCHDOG_MS = 10_000
+/** Consecutive unanswered pings before OBS is deemed hung and killed (each one waits up to the call timeout). */
+export const WATCHDOG_MISSES = 3
+export const MSG_OBS_HUNG = 'OBS ne répondait plus : redémarrage…'
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** Structural slices of the real modules, so tests can inject fakes. */
@@ -61,13 +67,15 @@ type Listener = (...args: any[]) => void
 export interface LiveObsProcess {
   start: ObsProcess['start']
   stop: ObsProcess['stop']
+  /** Kills an OBS that no longer answers so it restarts (absent in fakes that never hang). */
+  killHung?: ObsProcess['killHung']
   on(event: 'ready' | 'restarting' | 'exit', listener: Listener): unknown
 }
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
-  | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect'
+  | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
 export interface LiveCaptions {
@@ -105,12 +113,22 @@ interface Current {
   service: ObsStreamService | null
 }
 
+/** Arrêter (or quit) was asked while this action waited on LinTO: it gives up so the stop runs now. */
+class CancelledError extends Error {
+  constructor() {
+    super('Annulé')
+    this.name = 'CancelledError'
+  }
+}
+
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
  * Events: 'state'(LiveState) 'transcript'(TranscriptUpdate) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'().
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
+ * Arrêter does not wait behind a slow LinTO call: stop() cancels the start, terminate or stream retry queued
+ * before it (their LinTO wait is abandoned, see abortable), so the stop runs right after.
  * The transcript of the last show is kept until the next start (getTranscript). The camera preview runs
  * while OBS is attached, the renderer shows it (setPreviewSubscribed) and the window is visible
  * (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists
@@ -131,6 +149,9 @@ export class LiveController extends EventEmitter {
   private retryTimer: NodeJS.Timeout | null = null
   private retryAttempt = 0
   private previewTimer: NodeJS.Timeout | null = null
+  private watchdogTimer: NodeJS.Timeout | null = null
+  private watchdogBusy = false
+  private watchdogMisses = 0
   private previewBusy = false
   private previewSubscribed = false
   private windowVisible = true
@@ -147,6 +168,9 @@ export class LiveController extends EventEmitter {
   /** LinTO rejected the token and the UI was told; cleared by re-login (resumeCaptions), stop or a new start. */
   private authLost = false
   private tail: Promise<unknown> = Promise.resolve()
+  /** Bumped by stop()/shutdown(): actions queued before then give up their LinTO waits (abortable). */
+  private cancelGen = 0
+  private cancelListeners = new Set<() => void>()
   private transcript = new TranscriptLog()
 
   constructor(private readonly d: LiveDeps) {
@@ -234,15 +258,20 @@ export class LiveController extends EventEmitter {
   }
 
   start(sessionName: string): Promise<StartResult> {
-    return this.enqueue(() => this.doStart(sessionName))
+    const gen = this.cancelGen
+    return this.enqueue(() => this.doStart(sessionName, gen))
   }
 
+  /** Arrêter: cancels the actions queued before it (see abortable), then stops the show. */
   stop(): Promise<void> {
+    this.cancelQueued()
     return this.enqueue(() => this.doStop())
   }
 
   terminate(): Promise<void> {
+    const gen = this.cancelGen
     return this.enqueue(async () => {
+      if (gen !== this.cancelGen) return // Arrêter came first: it ends the show, the session is left as is
       const cur = this.current
       if (cur) {
         // Stop sending audio first: a session terminated under a running stream looks like a stream
@@ -252,8 +281,10 @@ export class LiveController extends EventEmitter {
         this.clearRetry()
         await this.stopStreamAndWait()
         try {
-          await this.d.api.terminateSession(cur.orgId, cur.session.id)
+          await this.abortable(gen, this.d.api.terminateSession(cur.orgId, cur.session.id))
         } catch (e) {
+          // Arrêter while LinTO was slow to answer: end the show now (the termination may still go through).
+          if (e instanceof CancelledError) return this.doStop()
           // Deleted on LinTO meanwhile: there is nothing left to terminate, the show just ends.
           if (e instanceof NotFoundError) return this.doStop()
           if (wasLive && cur === this.current) {
@@ -283,6 +314,7 @@ export class LiveController extends EventEmitter {
   }
 
   async shutdown(): Promise<void> {
+    this.cancelQueued()
     await this.enqueue(() => this.doStop(SHUTDOWN_STOP_WAIT_MS)).catch(() => {})
     this.shuttingDown = true
     this.restartGen++
@@ -386,6 +418,33 @@ export class LiveController extends EventEmitter {
 
   // ---------------------------------------------------------------------------------------------
 
+  /** Makes every action queued so far give up its abortable waits. */
+  private cancelQueued(): void {
+    this.cancelGen++
+    const l = [...this.cancelListeners]
+    this.cancelListeners.clear()
+    l.forEach((f) => f())
+  }
+
+  /**
+   * `p`, or a CancelledError as soon as stop()/shutdown() is called after the action (queued at `gen`) was
+   * queued. `p` itself is not cancelled: its outcome is just no longer awaited.
+   */
+  private abortable<T>(gen: number, p: Promise<T>): Promise<T> {
+    if (gen !== this.cancelGen) {
+      p.catch(() => {})
+      return Promise.reject(new CancelledError())
+    }
+    return new Promise<T>((resolve, reject) => {
+      const cancel = (): void => reject(new CancelledError())
+      this.cancelListeners.add(cancel)
+      p.then(
+        (v) => { this.cancelListeners.delete(cancel); resolve(v) },
+        (e: unknown) => { this.cancelListeners.delete(cancel); reject(e) }
+      )
+    })
+  }
+
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.tail.then(fn, fn)
     this.tail = run.catch(() => {})
@@ -416,6 +475,7 @@ export class LiveController extends EventEmitter {
   }
 
   private dropController(): void {
+    this.stopWatchdog()
     this.unsubs.forEach((u) => u())
     this.unsubs = []
     this.ctl = null
@@ -452,6 +512,7 @@ export class LiveController extends EventEmitter {
     this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
     this.ctl = ready
     this.attachedConn = conn
+    this.startWatchdog(ready)
     const s = this.d.settings.get()
     let warning: string | undefined
     if (s.videoDeviceId) await ready.setVideoDevice(s.videoDeviceId).catch(() => {})
@@ -639,7 +700,8 @@ export class LiveController extends EventEmitter {
     this.captionsRetryTimer = null
   }
 
-  private async doStart(rawName: string): Promise<StartResult> {
+  private async doStart(rawName: string, gen: number): Promise<StartResult> {
+    if (gen !== this.cancelGen) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
     const s = this.d.settings.get()
     if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
     if (!this.ctl) {
@@ -650,8 +712,9 @@ export class LiveController extends EventEmitter {
     // Resolve first: a failure here must leave a running show (transcript, stream supervision) untouched.
     let res: Awaited<ReturnType<typeof resolveSession>>
     try {
-      res = await resolveSession(this.d.api, s.orgId, rawName, s.profileId)
+      res = await this.abortable(gen, resolveSession(this.d.api, s.orgId, rawName, s.profileId))
     } catch (e) {
+      if (e instanceof CancelledError) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
       if (e instanceof UnauthorizedError) {
         this.reportUnauthorized()
         return { ok: false, message: MSG_AUTH }
@@ -802,12 +865,18 @@ export class LiveController extends EventEmitter {
     this.retryAttempt += 1
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
+      const gen = this.cancelGen
       void this.enqueue(async () => {
         const c = this.ctl
         const cur = this.current
         if (!c || !cur?.service || this.state.phase !== 'live') return
         if (this.retryAttempt >= RETRY_PROBE_FROM) {
-          const p = await this.probeSession(cur)
+          let p: Awaited<ReturnType<LiveController['probeSession']>>
+          try {
+            p = await this.abortable(gen, this.probeSession(cur))
+          } catch {
+            return // Arrêter meanwhile: it runs next
+          }
           if (p.kind === 'terminated' || p.kind === 'deleted') return this.stopGone(cur, p.kind)
           // LinTO may hand out new stream endpoints (transcriber redeployed): retry on the current ones.
           if (p.kind === 'ok' && cur === this.current) {
@@ -850,6 +919,38 @@ export class LiveController extends EventEmitter {
         .catch(() => {})
         .finally(() => (this.previewBusy = false))
     }, PREVIEW_MS)
+  }
+
+  /**
+   * Pings OBS while attached. An OBS that hangs without exiting keeps its socket open, so neither the process
+   * nor the websocket notices; after WATCHDOG_MISSES unanswered pings it is killed and the crash path restarts it.
+   */
+  private startWatchdog(c: LiveObsController): void {
+    this.stopWatchdog()
+    this.watchdogTimer = setInterval(() => {
+      if (c !== this.ctl) return this.stopWatchdog()
+      if (this.watchdogBusy) return
+      this.watchdogBusy = true
+      c.ping()
+        .then(() => {
+          if (c === this.ctl) this.watchdogMisses = 0
+        })
+        .catch(() => {
+          if (c !== this.ctl || this.shuttingDown || this.intentionalObsStop) return
+          if (++this.watchdogMisses < WATCHDOG_MISSES) return
+          this.stopWatchdog()
+          this.setState({ warning: MSG_OBS_HUNG })
+          this.d.obs.killHung?.()
+        })
+        .finally(() => (this.watchdogBusy = false))
+    }, WATCHDOG_MS)
+    this.watchdogTimer.unref?.()
+  }
+
+  private stopWatchdog(): void {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer)
+    this.watchdogTimer = null
+    this.watchdogMisses = 0
   }
 
   private stopPreview(): void {

@@ -2,6 +2,7 @@ import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
 import type { ObsStreamService } from './streamTarget'
 import type { DeviceItem } from '../../shared/types'
+import { guardClient, OBS_CALL_TIMEOUT_MS } from './guardedClient'
 
 export type StreamState = 'starting' | 'active' | 'stopped' | 'error'
 
@@ -49,11 +50,31 @@ export class ObsController {
 
   static async connect(c: ObsConnection): Promise<ObsController> {
     const ws = new OBSWebSocket()
-    await ws.connect(`ws://127.0.0.1:${c.port}`, c.password, {
-      eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters,
-      rpcVersion: 1
+    // Bounded too: an OBS that accepts the socket but never identifies would otherwise hold the queue.
+    let timer: NodeJS.Timeout | undefined
+    const timeout = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error("OBS ne répond pas (connexion).")), OBS_CALL_TIMEOUT_MS)
     })
-    return new ObsController(ws as unknown as ObsClient)
+    try {
+      await Promise.race([
+        ws.connect(`ws://127.0.0.1:${c.port}`, c.password, {
+          eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters,
+          rpcVersion: 1
+        }),
+        timeout
+      ])
+    } catch (e) {
+      await ws.disconnect().catch(() => {})
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
+    return new ObsController(guardClient(ws as unknown as ObsClient))
+  }
+
+  /** Liveness check (the watchdog): rejects when OBS does not answer in time. */
+  async ping(): Promise<void> {
+    await this.client.call('GetVersion')
   }
 
   async ensureScene(platform: NodeJS.Platform): Promise<void> {

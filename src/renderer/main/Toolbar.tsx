@@ -5,6 +5,9 @@ import { useElapsed } from './useLive'
 
 export type Busy = 'start' | 'stop' | 'terminate' | 'switch' | null
 
+/** Arrêter stays available while a session switch or a termination waits (it interrupts them). */
+export const canInterrupt = (b: Busy): boolean => b === null || b === 'switch' || b === 'terminate'
+
 export interface ToolbarProps {
   title: string | null
   caption: string | null
@@ -56,7 +59,7 @@ export function Toolbar(p: ToolbarProps) {
         {p.onAir ? (
           <>
             <LivePill startedAt={p.startedAt} />
-            <Button size="large" icon={<StopIcon size={12} />} disabled={p.busy !== null} onClick={p.onStop}>
+            <Button size="large" icon={<StopIcon size={12} />} disabled={!canInterrupt(p.busy)} onClick={p.onStop}>
               {p.busy === 'stop' ? 'Arrêt…' : 'Arrêter'}
             </Button>
             {outputButton}

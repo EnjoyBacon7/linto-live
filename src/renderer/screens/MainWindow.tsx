@@ -12,7 +12,7 @@ import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
 import { Sidebar } from '../main/Sidebar'
 import { Stage } from '../main/Stage'
-import { Toolbar, type Busy } from '../main/Toolbar'
+import { canInterrupt, Toolbar, type Busy } from '../main/Toolbar'
 import { isOnAir } from '../main/useLive'
 import { Login } from './Login'
 import '../main/mainWindow.css'
@@ -60,6 +60,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const [busy, setBusyState] = useState<Busy>(null)
   const busyRef = useRef<Busy>(null)
   const setBusy = (b: Busy): void => { busyRef.current = b; setBusyState(b) }
+  /** Ends `b` only if Arrêter has not taken over meanwhile (it may interrupt a switch or a termination). */
+  const endBusy = (b: Busy): void => { if (busyRef.current === b) setBusy(null) }
   const [error, setError] = useState<string | null>(null)
   const [sheet, setSheet] = useState<SheetState>(null)
   const sheetRef = useRef<SheetState>(null)
@@ -156,25 +158,29 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   // ---- Actions (plain functions: buttons, sheets and menu/tray commands share them) ----
   const startSession = async (target: Selection): Promise<void> => {
     if (busyRef.current) return
-    setBusy(onAir ? 'switch' : 'start')
+    const b: Busy = onAir ? 'switch' : 'start'
+    setBusy(b)
     setError(null)
     try {
       if (target.pending?.profileId !== undefined) await window.lintoLive.setup.save({ profileId: target.pending.profileId })
+      // Arrêter came while the profile was being saved: the switch is dropped, it must not go live after the stop.
+      if (busyRef.current !== b) return
       const r = await window.lintoLive.live.start(target.name)
       if (r.ok) {
         setReused(r.reused)
         setSel({ name: target.name })
-      } else setError(r.message)
+      } else if (!r.cancelled) setError(r.message)
     } catch (e) {
       setError(ipcErrorMessage(e))
     } finally {
-      setBusy(null)
+      endBusy(b)
       void refresh()
     }
   }
   const start = (): void => { if (canStart && sel) void startSession(sel) }
+  // Arrêter may interrupt a session switch or a termination (main cancels their wait on LinTO).
   const stop = async (): Promise<void> => {
-    if (busyRef.current || !onAir) return
+    if (!onAir || !canInterrupt(busyRef.current)) return
     setBusy('stop')
     setError(null)
     try {
@@ -183,7 +189,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     } catch (e) {
       setError(ipcErrorMessage(e))
     } finally {
-      setBusy(null)
+      endBusy('stop')
       void refresh()
     }
   }
@@ -205,7 +211,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     } catch (e) {
       setError(ipcErrorMessage(e))
     } finally {
-      setBusy(null)
+      endBusy('terminate')
       void refresh()
     }
   }

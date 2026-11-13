@@ -13,7 +13,8 @@ export interface SetupData {
   watermarkEnabled: boolean
 }
 
-export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { ok: false; message: string }
+/** `cancelled`: Arrêter came while it waited (nothing to report to the user). */
+export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { ok: false; message: string; cancelled?: boolean }
 
 export interface LiveState {
   phase: 'idle' | 'starting' | 'live' | 'stopping' | 'error'
