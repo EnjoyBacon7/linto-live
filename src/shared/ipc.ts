@@ -1,6 +1,6 @@
 import type {
   AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
-  SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, Watermark
+  QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
 } from './types'
 
 export interface SetupData {
@@ -177,6 +177,38 @@ export function checkNewSessionOptions(raw: unknown): NewSessionOptions | undefi
     out.password = o.password
   }
   return out
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length > 0
+/** macOS and Linux only: an absolute path starts with « / ». */
+const absolute = (v: unknown): v is string => nonEmpty(v) && v.startsWith('/')
+const positive = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v > 0
+
+function isVideoSource(v: unknown): v is VideoSource {
+  if (!isObj(v)) return false
+  if (v.kind === 'none') return true
+  if (v.kind === 'device') return nonEmpty(v.id)
+  return (v.kind === 'image' || v.kind === 'video') && absolute(v.path)
+}
+
+const isQr = (v: unknown): v is QrSettings =>
+  isObj(v) && typeof v.display === 'boolean' && typeof v.pinned === 'boolean' && positive(v.frequency) && positive(v.duration)
+
+/**
+ * Main-side check of `setup.save`'s patch (it comes from the renderer); throws when malformed. The
+ * per-session subtitle languages are not writable this way (live.setSubtitleLanguage is).
+ */
+export function checkSettingsPatch(raw: unknown): Partial<Settings> {
+  const bad = (): never => { throw new Error('Réglages invalides.') }
+  if (!isObj(raw)) return bad()
+  if ('subtitleLanguages' in raw) return bad()
+  if ('primarySource' in raw && !isVideoSource(raw.primarySource)) return bad()
+  if ('backupSource' in raw && !isVideoSource(raw.backupSource)) return bad()
+  if ('recordDir' in raw && !absolute(raw.recordDir)) return bad()
+  if ('qr' in raw && !isQr(raw.qr)) return bad()
+  for (const k of ['blackIsAbsent', 'recordEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
+  return raw as Partial<Settings>
 }
 
 /** Minimal transport (ipcRenderer-shaped) so the bridge is testable without Electron. */

@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url'
 import QRCode from 'qrcode'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
-import { IPC, checkNewSessionOptions, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
+import { IPC, checkNewSessionOptions, checkSettingsPatch, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
 import {
   TRANSCRIPT_EXPORT_FORMATS, UnauthorizedError, type Settings, type SessionLookup, type SessionSummary, type TranscriptExportFormat,
   type TranscriptUpdate, type WatermarkConfig
@@ -387,8 +387,8 @@ function main(): void {
     live.watermarkChanged(sessionId, w)
   })
   // SettingsStore validates the instance URL and drops the token when the instance changes.
-  ipcMain.handle(IPC.setupSave, async (_e, patch: Partial<Settings>) => {
-    await live.saveSettings(patch)
+  ipcMain.handle(IPC.setupSave, async (_e, raw: unknown) => {
+    await live.saveSettings(checkSettingsPatch(raw))
     syncTitle()
   })
 

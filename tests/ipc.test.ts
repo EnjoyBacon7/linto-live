@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf, vi } from 'vitest'
-import { EVENT_CHANNELS, IPC, checkNewSessionOptions, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
+import { EVENT_CHANNELS, IPC, checkNewSessionOptions, checkSettingsPatch, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
 
 describe('IPC constants', () => {
   it('values are unique', () => {
@@ -148,5 +148,45 @@ describe('checkNewSessionOptions (live.start create options)', () => {
     expect(() => checkNewSessionOptions({ translations: [], visibility: 'password' })).toThrow()
     expect(() => checkNewSessionOptions('public')).toThrow()
     expect(() => checkNewSessionOptions(null)).toThrow()
+  })
+})
+
+describe('checkSettingsPatch (setup.save patch)', () => {
+  it('accepts valid patches of the new fields, and other fields as they are', () => {
+    const ok = [
+      { primarySource: { kind: 'none' } },
+      { primarySource: { kind: 'device', id: 'cam' } },
+      { backupSource: { kind: 'image', path: '/Users/x/secours.png' } },
+      { backupSource: { kind: 'video', path: '/home/x/boucle.mp4' } },
+      { recordDir: '/Users/x/Movies/LinTO Live' },
+      { qr: { display: true, pinned: false, frequency: 60, duration: 15 } },
+      { blackIsAbsent: false, recordEnabled: true },
+      { instance: 'https://studio.linto.ai', profileId: 2, subtitleFontSize: 40 }
+    ]
+    for (const p of ok) expect(checkSettingsPatch(p)).toEqual(p)
+  })
+  it('rejects malformed patches', () => {
+    const bad: unknown[] = [
+      null, 'x', [],
+      { primarySource: { kind: 'camera', id: 'cam' } },
+      { primarySource: { kind: 'device', id: '' } },
+      { primarySource: { kind: 'device' } },
+      { primarySource: null },
+      { backupSource: { kind: 'image', path: 'relatif.png' } },
+      { backupSource: { kind: 'video', path: '' } },
+      { backupSource: { kind: 'image', path: 3 } },
+      { recordDir: 'Movies' },
+      { recordDir: '' },
+      { recordDir: 42 },
+      { qr: { display: 'yes', pinned: false, frequency: 60, duration: 15 } },
+      { qr: { display: true, pinned: false, frequency: 0, duration: 15 } },
+      { qr: { display: true, pinned: false, frequency: 60, duration: Infinity } },
+      { qr: { display: true, pinned: false, frequency: 60 } },
+      { qr: null },
+      { blackIsAbsent: 'true' },
+      { recordEnabled: 1 },
+      { subtitleLanguages: { s1: 'en' } }
+    ]
+    for (const p of bad) expect(() => checkSettingsPatch(p), JSON.stringify(p)).toThrow('Réglages invalides.')
   })
 })
