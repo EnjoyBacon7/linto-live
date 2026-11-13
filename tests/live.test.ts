@@ -1591,6 +1591,66 @@ describe('LiveController recording', () => {
     expect(t.last()).toMatchObject({ phase: 'live', recording: 'on', session: { name: 'B' } })
   })
 
+  it('session switch waits for OBS to report the old recording stopped before starting the new file', async () => {
+    const t = setup({ sessions: [session({ id: 'a', name: 'A' }), session({ id: 'b', name: 'B' }, SRT_B)], settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('A')
+    await flush()
+    const c = t.ctl()
+    // StopRecord answers before the output has stopped; OBS refuses StartRecord (OutputRunning) until then.
+    let outputStopped = false
+    c.stopRecord.mockImplementationOnce(async () => {
+      t.log.push('stopRecord')
+      setTimeout(() => {
+        outputStopped = true
+        c.emitRecord({ active: false, path: c.recordPath })
+      }, 300)
+      return c.recordPath
+    })
+    const startRecord = c.startRecord.getMockImplementation()!
+    c.startRecord.mockImplementation(async (dir: string, base: string) => {
+      if (!outputStopped) throw Object.assign(new Error('output running'), { code: 500 })
+      return startRecord(dir, base)
+    })
+    t.log.length = 0
+    const started = t.live.start('B')
+    await vi.advanceTimersByTimeAsync(400)
+    await started
+    await flush()
+    expect(t.log.filter((l) => /Record/.test(l))).toEqual(['stopRecord', 'startRecord:B'])
+    expect(c.startRecord).toHaveBeenCalledTimes(2) // A, then B once: no refused attempt
+    expect(t.saved).toEqual([c.recordPath])
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'on', session: { name: 'B' } })
+  })
+
+  it('StartRecord refused with OutputRunning is retried a few times', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    const outputRunning = Object.assign(new Error('output running'), { code: 500 })
+    t.ctl().startRecord.mockRejectedValueOnce(outputRunning).mockRejectedValueOnce(outputRunning)
+    const started = t.live.start('Conf')
+    await vi.advanceTimersByTimeAsync(1_000)
+    await started
+    await flush()
+    expect(t.ctl().startRecord).toHaveBeenCalledTimes(3)
+    expect(t.last().recording).toBe('on')
+  })
+
+  it('StartRecord still refused with OutputRunning after the retries is a recording failure', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.ctl().startRecord.mockRejectedValue(Object.assign(new Error('output running'), { code: 500 }))
+    const started = t.live.start('Conf')
+    await vi.advanceTimersByTimeAsync(5_000)
+    await started
+    await flush()
+    const n = t.ctl().startRecord.mock.calls.length
+    expect(n).toBeGreaterThan(1)
+    expect(n).toBeLessThanOrEqual(6)
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error' })
+    expect(t.last().warning).toMatch(new RegExp('^' + MSG_RECORD_FAILED))
+  })
+
   it('switching to a session after unticking stops recording', async () => {
     const t = setup({ sessions: [session({ id: 'a', name: 'A' }), session({ id: 'b', name: 'B' }, SRT_B)], settings: { recordEnabled: true } })
     await t.live.boot()

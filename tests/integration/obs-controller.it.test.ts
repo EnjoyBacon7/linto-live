@@ -142,6 +142,46 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     expect(await ctl!.stopRecord()).toBeNull()
   }, 30_000)
 
+  it('a new recording starts right after the previous one is stopped (session switch)', async () => {
+    const dir = join(userData, 'rec-switch')
+    mkdirSync(dir)
+    const ev: { active: boolean; path?: string }[] = []
+    const off = ctl!.recordState$((x) => ev.push(x))
+    const waitFor = async (pred: () => boolean, ms: number): Promise<void> => {
+      for (const end = Date.now() + ms; !pred(); ) {
+        if (Date.now() > end) throw new Error('timeout ' + JSON.stringify(ev))
+        await new Promise((r) => setTimeout(r, 20))
+      }
+    }
+    await ctl!.startRecord(dir, 'Session A')
+    await waitFor(() => ev.some((e) => e.active), 5000)
+    await new Promise((r) => setTimeout(r, 1000))
+    const first = await ctl!.stopRecord()
+    const stoppedAtAnswer = ev.some((e) => !e.active)
+    // What LiveController does: wait for « stopped », then start, retrying while OBS says OutputRunning.
+    await waitFor(() => ev.some((e) => !e.active), 5000)
+    let refused = 0
+    for (;;) {
+      try {
+        await ctl!.startRecord(dir, 'Session B')
+        break
+      } catch (e) {
+        if ((e as { code?: number }).code !== 500 || refused >= 5) throw e
+        refused++
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+    console.log('stopped event before StopRecord answer:', stoppedAtAnswer, '— OutputRunning refusals:', refused)
+    await waitFor(() => ev.filter((e) => e.active).length === 2, 5000)
+    await new Promise((r) => setTimeout(r, 1000))
+    const second = await ctl!.stopRecord()
+    off()
+    expect(first).toMatch(/Session A .*\.mkv$/)
+    expect(second).toMatch(/Session B .*\.mkv$/)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(existsSync(first!) && existsSync(second!)).toBe(true)
+  }, 30_000)
+
   it.skipIf(!hasFfmpeg)('streams at 640×360 (rescaled stream encoder) while recording at full resolution', async () => {
     const port = 19350 + Math.floor(Math.random() * 500)
     const flv = join(userData, 'stream.flv')

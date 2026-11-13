@@ -67,6 +67,11 @@ const CAPTIONS_STALE_MS = 30_000
 const CAPTIONS_REFUSED_RETRY_MS = 30_000
 /** StartRecord accepted but no « started » from OBS within this delay: the recording failed. */
 const RECORD_START_WAIT_MS = 5_000
+/** StartRecord refused because the previous recording output is still stopping: retries, this far apart. */
+const RECORD_RUNNING_RETRIES = 5
+const RECORD_RUNNING_RETRY_MS = 200
+/** obs-websocket RequestStatus::OutputRunning. */
+const OUTPUT_RUNNING = 500
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 /** Runs `fn` with one deadline (`limit` resolves after `ms`) that all its waits share; the timer is cleared after. */
 async function withDeadline<T>(ms: number, fn: (limit: Promise<void>) => Promise<T>): Promise<T> {
@@ -201,6 +206,8 @@ export class LiveController extends EventEmitter {
   private recordStopping = false
   /** stopRecord gave up waiting for OBS: OBS's « stopped » event, when it comes, announces the file. */
   private recordAnnouncePending = false
+  /** Waiting for OBS's « stopped » recording event (StopRecord may answer before the output has stopped). */
+  private recordStopWaiters: (() => void)[] = []
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -515,6 +522,7 @@ export class LiveController extends EventEmitter {
     this.clearRetry()
     this.stopPreview()
     this.flushStopWaiters()
+    this.flushRecordStopWaiters()
     this.clearRecordTimer()
     this.recordAnnouncePending = false // that OBS run will not report it any more
     if (this.state.output !== 'off') this.setState({ output: 'off' })
@@ -912,7 +920,17 @@ export class LiveController extends EventEmitter {
     this.recordAwaiting = true
     try {
       await this.d.mkdirp(dir)
-      await c.startRecord(dir, recordBaseName(cur.session.name))
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await c.startRecord(dir, recordBaseName(cur.session.name))
+          break
+        } catch (e) {
+          // The previous file's output is still stopping: it frees up shortly.
+          if ((e as { code?: unknown })?.code !== OUTPUT_RUNNING || attempt >= RECORD_RUNNING_RETRIES) throw e
+          await sleep(RECORD_RUNNING_RETRY_MS)
+          if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) return
+        }
+      }
     } catch (e) {
       if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) return
       this.recordAwaiting = false
@@ -929,8 +947,9 @@ export class LiveController extends EventEmitter {
   }
 
   /**
-   * Stops the recording and announces the file. Never throws, and never waits for OBS past `limit`:
-   * Arrêter and session switches must go on whatever happens to the recording.
+   * Stops the recording, announces the file and waits for OBS to report the output stopped (so a new
+   * StartRecord is not refused). Never throws, and never waits for OBS past `limit`: Arrêter and session
+   * switches must go on whatever happens to the recording.
    */
   private async stopRecordSafe(limit: Promise<void>): Promise<void> {
     this.clearRecordTimer()
@@ -939,14 +958,20 @@ export class LiveController extends EventEmitter {
     if (c) {
       this.recordStopping = true
       const timedOut = Symbol('timed out')
+      // Registered before StopRecord: the « stopped » event may come before its answer.
+      const stopped = new Promise<void>((resolve) => this.recordStopWaiters.push(resolve))
       try {
         const r = await Promise.race([c.stopRecord(), limit.then(() => timedOut)])
         if (r === timedOut) this.recordAnnouncePending = true
-        else if (r) this.emit('recording-saved', r)
+        else if (r) {
+          this.emit('recording-saved', r)
+          await Promise.race([stopped, limit])
+        }
       } catch {
         /* OBS gone or not recording */
       } finally {
         this.recordStopping = false
+        this.flushRecordStopWaiters()
       }
     }
     const failed = this.state.warning?.startsWith(MSG_RECORD_FAILED)
@@ -965,8 +990,15 @@ export class LiveController extends EventEmitter {
     this.recordTimer = null
   }
 
+  private flushRecordStopWaiters(): void {
+    const w = this.recordStopWaiters
+    this.recordStopWaiters = []
+    w.forEach((r) => r())
+  }
+
   private onRecordState(c: LiveObsController, s: { active: boolean; path?: string }): void {
     if (c !== this.ctl) return
+    if (!s.active) this.flushRecordStopWaiters()
     if (s.active) {
       this.recordAnnouncePending = false
       this.recordAwaiting = false
