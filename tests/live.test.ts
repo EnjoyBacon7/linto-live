@@ -29,6 +29,8 @@ function session(over: Partial<Session> = {}, endpoint: string | null = SRT_A): 
 }
 
 const REC_DIR = '/videos/LinTO Live'
+/** Delay after which a startRecord OBS never confirmed is a failure (5 s), plus a margin. */
+const RECORD_WAIT_MS = 5_100
 
 function fakeController(log: string[]) {
   let stateCb: ((s: StreamState) => void) | null = null
@@ -1667,6 +1669,90 @@ describe('LiveController recording', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     await stopped
     expect(t.last()).toMatchObject({ phase: 'idle', recording: 'off' })
+  })
+
+  it('a stop that gave up waiting still announces the file when OBS reports it stopped', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().stopRecord.mockImplementationOnce(() => new Promise(() => {}))
+    const stopped = t.live.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await stopped
+    expect(t.saved).toEqual([])
+    t.ctl().emitRecord({ active: false, path: '/videos/LinTO Live/late.mkv' })
+    expect(t.saved).toEqual(['/videos/LinTO Live/late.mkv'])
+    expect(t.last()).toMatchObject({ phase: 'idle', recording: 'off' })
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it('quitting waits for the stream and the recording within one shutdown deadline', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().emitState('active')
+    t.ctl().autoStop = false // OBS never reports the stream stopped
+    t.ctl().stopRecord.mockImplementationOnce(() => new Promise(() => {})) // nor the recording
+    let done = false
+    void t.live.shutdown().then(() => (done = true))
+    await vi.advanceTimersByTimeAsync(2_900)
+    expect(done).toBe(false)
+    await vi.advanceTimersByTimeAsync(200) // 3 s in all, not 3 s + 3 s
+    expect(done).toBe(true)
+    expect(t.ctl().stopRecord).toHaveBeenCalled()
+  })
+
+  it('a record failure does not hide a stream warning', async () => {
+    const t = setup({ sessions: [session({}, null)], settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.ctl().startRecord.mockRejectedValueOnce(new Error('disque plein'))
+    await t.live.start('Conf')
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error', warning: MSG_NO_STREAM })
+  })
+
+  it('a record timeout does not hide the stream retry warning', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.ctl().recordStarts = false
+    await t.live.start('Conf')
+    t.ctl().emitState('stopped') // the stream drops: retrying
+    expect(t.last().warning).toBe(MSG_STREAM_RETRY)
+    await vi.advanceTimersByTimeAsync(RECORD_WAIT_MS)
+    expect(t.last()).toMatchObject({ recording: 'error', warning: MSG_STREAM_RETRY })
+  })
+
+  it('the start timer does not fire after Arrêter', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    t.ctl().recordStarts = false
+    await t.live.start('Conf')
+    await t.live.stop()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(t.last()).toMatchObject({ phase: 'idle', recording: 'off' })
+    expect(t.last().warning).toBeUndefined()
+  })
+
+  it("the start timer does not fire after OBS 'restarting' while the first startRecord is pending", async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    const first = t.ctl()
+    first.recordStarts = false
+    let accept!: () => void
+    first.startRecord.mockImplementationOnce(() => new Promise<void>((r) => (accept = r)))
+    const started = t.live.start('Conf')
+    await flush()
+    expect(first.startRecord).toHaveBeenCalled()
+    t.obs.emit('restarting', 1)
+    accept()
+    await started
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(t.last().recording).toBe('off')
+    expect(t.last().warning?.startsWith(MSG_RECORD_FAILED)).not.toBe(true)
+    t.obs.emit('ready', { port: 9, password: 'x' })
+    await t.live.settled()
+    await flush()
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'on' })
   })
 
   it('terminate stops the recording', async () => {

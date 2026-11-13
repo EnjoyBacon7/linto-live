@@ -68,6 +68,18 @@ const CAPTIONS_REFUSED_RETRY_MS = 30_000
 /** StartRecord accepted but no « started » from OBS within this delay: the recording failed. */
 const RECORD_START_WAIT_MS = 5_000
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+/** Runs `fn` with one deadline (`limit` resolves after `ms`) that all its waits share; the timer is cleared after. */
+async function withDeadline<T>(ms: number, fn: (limit: Promise<void>) => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const limit = new Promise<void>((r) => {
+    timer = setTimeout(r, ms)
+  })
+  try {
+    return await fn(limit)
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** Structural slices of the real modules, so tests can inject fakes. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,6 +199,8 @@ export class LiveController extends EventEmitter {
   private recordTimer: NodeJS.Timeout | null = null
   /** stopRecord in progress: its own result announces the file, not OBS's « stopped » event. */
   private recordStopping = false
+  /** stopRecord gave up waiting for OBS: OBS's « stopped » event, when it comes, announces the file. */
+  private recordAnnouncePending = false
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -295,7 +309,7 @@ export class LiveController extends EventEmitter {
         const wasLive = this.state.phase === 'live'
         this.setState({ phase: 'stopping' })
         this.clearRetry()
-        await this.stopStreamAndWait()
+        await withDeadline(STOP_WAIT_MS, (limit) => this.stopStreamAndWait(limit))
         try {
           await this.d.api.terminateSession(cur.orgId, cur.session.id)
         } catch (e) {
@@ -502,6 +516,7 @@ export class LiveController extends EventEmitter {
     this.stopPreview()
     this.flushStopWaiters()
     this.clearRecordTimer()
+    this.recordAnnouncePending = false // that OBS run will not report it any more
     if (this.state.output !== 'off') this.setState({ output: 'off' })
     // The OBS run that recorded is gone: attach starts a new file if the show is still recorded.
     if (this.state.recording !== 'off') this.setState({ recording: 'off' })
@@ -789,9 +804,11 @@ export class LiveController extends EventEmitter {
       this.captionsAuthLost = false
       this.authLost = false // resolveSession just succeeded: the token is valid
       if (this.current) this.d.captions.close()
-      if (this.streamRunning) await this.stopStreamAndWait()
       // One file per session: the previous show's recording is closed; this show follows the setting read now.
-      if (this.recordIntent) await this.stopRecordSafe()
+      await withDeadline(STOP_WAIT_MS, async (limit) => {
+        if (this.streamRunning) await this.stopStreamAndWait(limit)
+        if (this.recordIntent) await this.stopRecordSafe(limit)
+      })
       this.recordIntent = s.recordEnabled === true
 
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
@@ -841,8 +858,11 @@ export class LiveController extends EventEmitter {
     this.clearCaptionsTimer()
     this.authLost = false
     this.d.captions.close()
-    await this.stopStreamAndWait(streamWaitMs)
-    if (this.recordIntent) await this.stopRecordSafe(streamWaitMs)
+    // One deadline for both: quitting stays within SHUTDOWN_STOP_WAIT_MS.
+    await withDeadline(streamWaitMs, async (limit) => {
+      await this.stopStreamAndWait(limit)
+      if (this.recordIntent) await this.stopRecordSafe(limit)
+    })
     this.recordIntent = false
     // The program scene stays on the camera: an open output window keeps showing it (only the captions go).
     this.current = null
@@ -862,8 +882,8 @@ export class LiveController extends EventEmitter {
     this.sendTranscript(this.transcript.endPartial())
   }
 
-  /** Stops the OBS stream and waits for OBS to report it stopped (StopStream is asynchronous). */
-  private async stopStreamAndWait(waitMs = STOP_WAIT_MS): Promise<void> {
+  /** Stops the OBS stream and waits (until `limit`) for OBS to report it stopped (StopStream is asynchronous). */
+  private async stopStreamAndWait(limit: Promise<void>): Promise<void> {
     const c = this.ctl
     if (!c) return
     if (!this.streamRunning) {
@@ -871,11 +891,7 @@ export class LiveController extends EventEmitter {
       return
     }
     this.stopRequested = true
-    let timer: NodeJS.Timeout | undefined
-    const stopped = new Promise<void>((resolve) => {
-      this.stopWaiters.push(resolve)
-      timer = setTimeout(resolve, waitMs)
-    })
+    const stopped = Promise.race([new Promise<void>((resolve) => this.stopWaiters.push(resolve)), limit])
     try {
       // false: OBS had no running output (e.g. the SRT connect is still pending) — no 'stopped' will
       // come; if the connect succeeds later, onStreamState stops the unwanted stream.
@@ -883,7 +899,6 @@ export class LiveController extends EventEmitter {
     } catch {
       /* OBS gone or already stopped */
     } finally {
-      clearTimeout(timer)
       this.stopRequested = false
       this.streamRunning = false
     }
@@ -913,26 +928,23 @@ export class LiveController extends EventEmitter {
   }
 
   /**
-   * Stops the recording and announces the file. Never throws, and never waits more than `waitMs` for OBS:
+   * Stops the recording and announces the file. Never throws, and never waits for OBS past `limit`:
    * Arrêter and session switches must go on whatever happens to the recording.
    */
-  private async stopRecordSafe(waitMs = STOP_WAIT_MS): Promise<void> {
+  private async stopRecordSafe(limit: Promise<void>): Promise<void> {
     this.clearRecordTimer()
     this.recordAwaiting = false
     const c = this.ctl
     if (c) {
       this.recordStopping = true
-      let timer: NodeJS.Timeout | undefined
-      const timeout = new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), waitMs)
-      })
+      const timedOut = Symbol('timed out')
       try {
-        const path = await Promise.race([c.stopRecord(), timeout])
-        if (path) this.emit('recording-saved', path)
+        const r = await Promise.race([c.stopRecord(), limit.then(() => timedOut)])
+        if (r === timedOut) this.recordAnnouncePending = true
+        else if (r) this.emit('recording-saved', r)
       } catch {
         /* OBS gone or not recording */
       } finally {
-        clearTimeout(timer)
         this.recordStopping = false
       }
     }
@@ -940,8 +952,11 @@ export class LiveController extends EventEmitter {
     if (this.state.recording !== 'off' || failed) this.setState({ recording: 'off', ...(failed ? { warning: undefined } : {}) })
   }
 
+  /** A stream/OBS warning matters more: it stays, the recording indicator alone tells the failure then. */
   private recordFailed(detail: string): void {
-    this.setState({ recording: 'error', warning: MSG_RECORD_FAILED + detail })
+    const w = this.state.warning
+    const mayWarn = !w || w.startsWith(MSG_RECORD_FAILED)
+    this.setState({ recording: 'error', ...(mayWarn ? { warning: MSG_RECORD_FAILED + detail } : {}) })
   }
 
   private clearRecordTimer(): void {
@@ -961,6 +976,12 @@ export class LiveController extends EventEmitter {
       }
       const failed = this.state.warning?.startsWith(MSG_RECORD_FAILED)
       this.setState({ recording: 'on', ...(failed ? { warning: undefined } : {}) })
+      return
+    }
+    if (this.recordAnnouncePending) {
+      // The file of a stopRecord that gave up waiting.
+      this.recordAnnouncePending = false
+      if (s.path) this.emit('recording-saved', s.path)
       return
     }
     // Our own stopRecord announces the file itself; after it, recording is already 'off'.
