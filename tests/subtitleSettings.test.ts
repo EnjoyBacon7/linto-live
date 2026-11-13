@@ -107,7 +107,7 @@ function setup(meta?: Record<string, unknown>) {
       createSession: vi.fn(async () => sessions[0]!), terminateSession: vi.fn(async () => {})
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
-    overlay, settings, platform: 'darwin' as const, watermarkConfig: () => CFG
+    overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', watermarkConfig: () => CFG
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const styles = () => overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')

@@ -865,6 +865,32 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(screen.queryByRole('spinbutton', { name: 'Taille de la police (px)' })).toBeNull()
   })
 
+  it('QR note when the session is not public', async () => {
+    const NOTE = /Le public devra se connecter à LinTO/
+    setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'organization' }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    expect(screen.queryByText(NOTE)).toBeNull()
+    await userEvent.click(box('Afficher le QR code'))
+    expect(fn(api.setup.save)).toHaveBeenCalledWith({ qr: { display: true, pinned: false, frequency: 60, duration: 15 } })
+    expect(screen.getByText(NOTE)).toBeTruthy()
+  })
+
+  it('no QR note when the session is public', async () => {
+    setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'public' }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    await userEvent.click(box('Afficher le QR code'))
+    expect(screen.queryByText(/Le public devra se connecter à LinTO/)).toBeNull()
+  })
+
+  it('stored language not offered shows Originale', async () => {
+    setup({}, setupData({ subtitleLanguages: { s1: 'xx' } }), [{ ...SESSIONS[0], languages: [{ value: 'original', label: 'Originale' }, { value: 'en', label: 'Anglais' }] }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    expect((screen.getByRole('combobox', { name: 'Langue affichée' }) as HTMLSelectElement).value).toBe('original')
+  })
+
   it('watermark controls need a session that exists on LinTO, and save on it', async () => {
     setup()
     await renderMain()

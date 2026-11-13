@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type Settings, type SubtitleLanguageOption, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -29,6 +29,9 @@ export interface InspectorProps {
   languages?: SubtitleLanguageOption[]
   language?: string
   onLanguageChange?(v: string): void
+  /** Visibility of the selected session on LinTO (the public link needs 'public'). */
+  visibility?: SessionVisibility
+  onQrSettings?(): void
 }
 
 export function Check({ label, checked, disabled, onChange }: {
@@ -71,6 +74,8 @@ export function Inspector(p: InspectorProps) {
   const opts = (items: { id: string; name: string }[] = []) => items.map((d) => ({ value: d.id, label: d.name }))
   const shown = settings?.subtitlesVisible !== false
   const wm = p.watermark && 'watermark' in p.watermark ? p.watermark.watermark : null
+  const qr = { ...DEFAULT_QR, ...settings?.qr }
+  const language = p.languages?.some((l) => l.value === p.language) ? p.language! : 'original'
   const wmEditable = !!wm && p.watermarkBlocked === undefined
   return (
     <aside className="inspector" aria-label="Réglages">
@@ -99,7 +104,7 @@ export function Inspector(p: InspectorProps) {
           <>
             <label className="field inspector-inline">
               <span className="field-label">Langue affichée</span>
-              <PopUp label="Langue affichée" value={p.languages ? (p.language ?? 'original') : 'original'}
+              <PopUp label="Langue affichée" value={language}
                 options={p.languages ?? [{ value: 'original', label: 'Originale' }]} disabled={!p.languages}
                 onChange={(v) => p.onLanguageChange?.(v)} />
             </label>
@@ -128,6 +133,20 @@ export function Inspector(p: InspectorProps) {
             </Button>
           </>
         )}
+        <div className="inspector-subgroup">
+          <Check label="Afficher le QR code" checked={qr.display} disabled={!settings}
+            onChange={(v) => onChange({ qr: { ...qr, display: v } })} />
+          <Check label="Épingler le QR code" checked={qr.pinned} disabled={!settings || !qr.display}
+            onChange={(v) => onChange({ qr: { ...qr, pinned: v } })} />
+          <Button className="inspector-control" disabled={!settings} onClick={() => p.onQrSettings?.()}>
+            Paramètres du QR code…
+          </Button>
+          {qr.display && p.visibility !== undefined && p.visibility !== 'public' && (
+            <p className="inspector-note">
+              Le public devra se connecter à LinTO pour ouvrir ce lien : rendre la session publique dans LinTO Studio.
+            </p>
+          )}
+        </div>
       </section>
     </aside>
   )

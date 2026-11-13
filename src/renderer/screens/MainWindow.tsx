@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveState, SetupData } from '../../shared/ipc'
-import type { NewSessionOptions, SessionSummary, Settings, Watermark } from '../../shared/types'
+import { DEFAULT_QR, type NewSessionOptions, type SessionSummary, type Settings, type Watermark } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
@@ -8,6 +8,7 @@ import { Sheet } from '../ui/Sheet'
 import { CloseIcon } from '../ui/icons'
 import { ConfirmSheet } from '../main/ConfirmSheet'
 import { Inspector, type WatermarkTarget } from '../main/Inspector'
+import { QrSheet } from '../main/QrSheet'
 import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
 import { Sidebar } from '../main/Sidebar'
@@ -43,6 +44,7 @@ type SheetState =
   | { kind: 'switch'; target: Selection }
   | { kind: 'login' }
   | { kind: 'watermark' }
+  | { kind: 'qr' }
   /** « Nouvelle session » hit an existing session: `usable` offers to use it, otherwise the name is refused. */
   | { kind: 'exists'; name: string; usable: boolean; terminated?: boolean }
   | null
@@ -400,6 +402,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
+            onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
+            {...(summary?.visibility ? { visibility: summary.visibility } : {})}
             {...(summary ? { languages: summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
               onLanguageChange: saveLanguage } : {})}
             {...(manageBlocked ? { watermarkBlocked: manageBlocked } : {})}
@@ -459,6 +463,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         open={sheet?.kind === 'watermark' && !!summary}
         watermark={summary?.watermark ?? null}
         onApply={(w) => { setSheet(null); saveWatermark(w) }}
+        onCancel={() => setSheet(null)}
+      />
+      <QrSheet
+        open={sheet?.kind === 'qr'}
+        qr={{ ...DEFAULT_QR, ...settings?.qr }}
+        onApply={(q) => { setSheet(null); saveSettings({ qr: { ...DEFAULT_QR, ...settings?.qr, ...q } }) }}
         onCancel={() => setSheet(null)}
       />
       <Sheet title="Se reconnecter à LinTO" open={sheet?.kind === 'login'} onClose={() => setSheet(null)} footer={null}>

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
   type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type Watermark, type WatermarkConfig
 } from '../shared/types'
@@ -16,6 +16,7 @@ import { lintoErrorMessage } from './linto/accessMessages'
 import { TranscriptLog } from './linto/transcript'
 import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
+import { publicLink } from '../shared/publicLink'
 import type { SettingsStore } from './settings'
 
 export const MSG_NO_STREAM =
@@ -84,6 +85,8 @@ export interface LiveDeps {
   overlay: LiveOverlay
   settings: LiveSettings
   platform: NodeJS.Platform
+  /** SVG markup of a QR code for `url`. */
+  qrSvg: (url: string) => Promise<string>
   /** The instance's watermark defaults (config.js); LinTO Studio's defaults when absent. */
   watermarkConfig?: () => WatermarkConfig
 }
@@ -125,6 +128,8 @@ export class LiveController extends EventEmitter {
   private current: Current | null = null
   /** Watermark of the session on air (null when off air: no watermark then). */
   private watermark: Watermark | null = null
+  /** QR code of the on-air session's public link (null when off air); computed once at start. */
+  private qrCache: { url: string; svg: string } | null = null
   private streamRunning = false
   private stopRequested = false
   private stopWaiters: (() => void)[] = []
@@ -387,7 +392,7 @@ export class LiveController extends EventEmitter {
     return this.enqueue(async () => {
       const before = this.d.settings.get()
       this.d.settings.update(patch)
-      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined) this.pushStyle()
+      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined || patch.qr !== undefined) this.pushStyle()
       const c = this.ctl
       if (!c) return
       // '' = no camera (the plain LinTO client): the video source is emptied.
@@ -427,12 +432,13 @@ export class LiveController extends EventEmitter {
   private pushStyle(): void {
     const s = this.d.settings.get()
     const cfg = this.d.watermarkConfig?.()
+    const qr = { ...DEFAULT_QR, ...s.qr }
     this.d.overlay.push({
       type: 'style',
       visible: s.subtitlesVisible !== false,
       fontSize: subtitleFontSize(s),
       watermark: this.watermark ?? resolveWatermark(undefined, cfg),
-      qr: null
+      qr: this.qrCache && qr.display ? { svg: this.qrCache.svg, ...qr } : null
     })
   }
 
@@ -705,6 +711,10 @@ export class LiveController extends EventEmitter {
       }
       this.current = cur
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
+      const url = publicLink(s.instance, s.orgId, res.session.id)
+      // Failing to draw the QR code must not stop the show: it just stays off.
+      this.qrCache = this.qrCache?.url === url ? this.qrCache
+        : await this.d.qrSvg(url).then((svg) => ({ url, svg }), () => null)
       this.pushStyle()
       this.d.overlay.push({ type: 'reset' })
       const startedAt = Date.now()
@@ -742,6 +752,7 @@ export class LiveController extends EventEmitter {
     // The program scene stays on the camera: an open output window keeps showing it (only the captions go).
     this.current = null
     this.watermark = null
+    this.qrCache = null
     this.pushStyle()
     this.d.overlay.push({ type: 'reset' })
     this.setState({

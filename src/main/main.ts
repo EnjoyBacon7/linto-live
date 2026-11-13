@@ -7,6 +7,7 @@ import { rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import QRCode from 'qrcode'
 import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
 import { IPC, checkNewSessionOptions, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
@@ -198,6 +199,7 @@ function main(): void {
     overlay,
     settings,
     platform,
+    qrSvg: (url) => QRCode.toString(url, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }),
     watermarkConfig: () => watermarkCfg
   })
 

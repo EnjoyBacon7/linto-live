@@ -126,12 +126,13 @@ function setup(opts: { sessions?: Session[] } = {}) {
     setToken: vi.fn(),
     getToken: vi.fn(() => 'tok')
   }
-  const deps = { obs, controllerFactory, api, captions, overlay, settings, platform: 'darwin' as const } satisfies LiveDeps
+  const qrSvg = vi.fn(async (url: string) => `<svg>${url}</svg>`)
+  const deps = { obs, controllerFactory, api, captions, overlay, settings, qrSvg, platform: 'darwin' as const } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
   live.on('state', (s: LiveState) => states.push(s))
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
-  return { live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, log, states, last: () => live.getState() }
+  return { live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, qrSvg, log, states, last: () => live.getState() }
 }
 
 const flush = async (): Promise<void> => {
@@ -1286,5 +1287,28 @@ describe('subtitle language', () => {
     await t.live.boot()
     await t.live.start('Nouvelle', { translations: ['en'], visibility: 'public' })
     expect(t.api.createSession).toHaveBeenCalledWith('org1', 'Nouvelle', 3, { translations: ['en'], visibility: 'public' })
+  })
+})
+
+describe('QR code', () => {
+  const lastStyle = (t: ReturnType<typeof setup>) =>
+    t.overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style').at(-1)
+
+  it('qr is sent on air only when displayed', async () => {
+    const t = setup()
+    t.settings.update({ qr: { display: true, pinned: false, frequency: 60, duration: 15 } })
+    await t.live.boot()
+    await t.live.saveSettings({ subtitlesVisible: true })
+    expect(lastStyle(t)).toMatchObject({ qr: null })
+    await t.live.start('Conf')
+    expect(lastStyle(t)).toMatchObject({
+      qr: { svg: '<svg>https://studio.linto.ai/interface/org1/sessions/s1</svg>', display: true, pinned: false, frequency: 60, duration: 15 }
+    })
+    await t.live.saveSettings({ qr: { display: false, pinned: false, frequency: 60, duration: 15 } })
+    expect(lastStyle(t)).toMatchObject({ qr: null })
+    await t.live.saveSettings({ qr: { display: true, pinned: true, frequency: 30, duration: 5 } })
+    expect(lastStyle(t)).toMatchObject({ qr: { pinned: true, frequency: 30, duration: 5 } })
+    await t.live.stop()
+    expect(lastStyle(t)).toMatchObject({ qr: null })
   })
 })

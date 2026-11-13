@@ -114,6 +114,10 @@ export interface Bounds { x: number; y: number; width: number; height: number }
 /** Email + password kept for « Se souvenir de moi » (stored encrypted with the OS keychain). */
 export interface SavedLogin { email: string; password: string }
 
+/** Same display cycle as the watermark: every `frequency` s for `duration` s (always when pinned). */
+export interface QrSettings { display: boolean; pinned: boolean; frequency: number; duration: number }
+export const DEFAULT_QR: QrSettings = { display: false, pinned: false, frequency: 60, duration: 15 }
+
 export interface Settings {
   instance: string
   orgId?: string
@@ -127,6 +131,8 @@ export interface Settings {
   subtitleFontSize?: number
   /** Language shown in the subtitle band, per session id (absent = the original language). */
   subtitleLanguages?: Record<string, string>
+  /** QR code of the session's public link in the video (default: hidden). */
+  qr?: QrSettings
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
 }
