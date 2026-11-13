@@ -19,8 +19,14 @@ import { resolveWatermark, sameWatermark } from './linto/watermark'
 import { publicLink } from '../shared/publicLink'
 import type { SettingsStore } from './settings'
 
-/** OBS camera id of a source ('' = no camera: absent or not a device). */
-const deviceIdOf = (src?: VideoSource): string => (src?.kind === 'device' ? src.id : '')
+const NO_SOURCE: VideoSource = { kind: 'none' }
+/** Same video source (an absent setting counts as none). */
+function sameSource(a: VideoSource = NO_SOURCE, b: VideoSource = NO_SOURCE): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'device') return a.id === (b as typeof a).id
+  if (a.kind === 'image' || a.kind === 'video') return a.path === (b as typeof a).path
+  return true
+}
 
 export const MSG_NO_STREAM =
   "Impossible d'envoyer l'audio : LinTO ne le permet qu'au propriétaire de la session et aux gestionnaires de réunion de l'organisation."
@@ -67,7 +73,7 @@ export interface LiveObsProcess {
 }
 export type LiveObsController = Pick<
   ObsController,
-  | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
+  | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setAudioDevice' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect'
 >
@@ -398,10 +404,9 @@ export class LiveController extends EventEmitter {
       if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined || patch.qr !== undefined) this.pushStyle()
       const c = this.ctl
       if (!c) return
-      // '' = no camera (the plain LinTO client): the video source is emptied.
-      if (patch.primarySource !== undefined) {
-        const id = deviceIdOf(patch.primarySource)
-        if (id !== deviceIdOf(before.primarySource)) await c.setVideoDevice(id)
+      // 'none' (the plain LinTO client): the video source is emptied.
+      if (patch.primarySource !== undefined && !sameSource(patch.primarySource, before.primarySource)) {
+        await c.setSource('primary', patch.primarySource)
       }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
     })
@@ -490,8 +495,7 @@ export class LiveController extends EventEmitter {
     this.attachedConn = conn
     const s = this.d.settings.get()
     let warning: string | undefined
-    const camera = deviceIdOf(s.primarySource)
-    if (camera) await ready.setVideoDevice(camera).catch(() => {})
+    await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch(() => {})
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning

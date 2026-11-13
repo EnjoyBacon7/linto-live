@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { ObsController, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_OVERLAY, SRC_VIDEO, type ObsClient } from '../../src/main/obs/controller'
+import {
+  ObsController, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_VIDEO, type ObsClient
+} from '../../src/main/obs/controller'
 
 type Call = { req: string; data?: Record<string, unknown> }
 
@@ -9,13 +11,23 @@ class CodedError extends Error {
   }
 }
 
-function fakeClient(opts: { items?: unknown[]; failStart?: boolean; stopError?: Error; noAudio?: string[] } = {}) {
+function fakeClient(
+  opts: { items?: unknown[]; failStart?: boolean; stopError?: Error; noAudio?: string[]; lingerAfterRemove?: number } = {}
+) {
   let active = false
   let starting = false
+  let nextId = 1
+  let linger = 0
   const calls: Call[] = []
-  const scenes = new Set<string>()
-  const inputs = new Set<string>()
+  const scenes = new Map<string, { sourceName: string; sceneItemId: number; sceneItemEnabled: boolean }[]>()
+  const inputs = new Map<string, { inputKind: string; inputSettings: Record<string, unknown> }>()
   const handlers = new Map<string, Set<(d: unknown) => void>>()
+  const sceneOf = (name: unknown) => scenes.get(name as string) ?? []
+  const addItem = (sceneName: unknown, sourceName: string, enabled: unknown) => {
+    const sceneItemId = nextId++
+    sceneOf(sceneName).push({ sourceName, sceneItemId, sceneItemEnabled: enabled !== false })
+    return sceneItemId
+  }
   const client: ObsClient = {
     async call(req, data) {
       calls.push({ req, data })
@@ -25,19 +37,54 @@ function fakeClient(opts: { items?: unknown[]; failStart?: boolean; stopError?: 
       }
       switch (req) {
         case 'GetSceneList':
-          return { scenes: [...scenes].map((sceneName) => ({ sceneName })) }
+          return { scenes: [...scenes.keys()].map((sceneName) => ({ sceneName })) }
         case 'CreateScene':
-          scenes.add(data!.sceneName as string)
+          scenes.set(data!.sceneName as string, [])
           return {}
         case 'GetSceneItemList':
-          return { sceneItems: [...inputs].map((sourceName) => ({ sourceName })) }
+          return { sceneItems: sceneOf(data!.sceneName).map((it, sceneItemIndex) => ({ ...it, sceneItemIndex })) }
         case 'GetInputList':
-          return { inputs: [...inputs].map((inputName) => ({ inputName })) }
-        case 'CreateInput':
-          inputs.add(data!.inputName as string)
-          return { sceneItemId: 7 }
-        case 'GetSceneItemId':
-          return { sceneItemId: 7 }
+          return { inputs: [...inputs.keys()].map((inputName) => ({ inputName })) }
+        case 'GetInputSettings': {
+          const i = inputs.get(data!.inputName as string)
+          if (!i) throw new CodedError(600, 'No source was found by the name of `x`.')
+          return { inputKind: i.inputKind, inputSettings: i.inputSettings }
+        }
+        case 'CreateInput': {
+          const name = data!.inputName as string
+          if (linger > 0) {
+            linger--
+            throw new CodedError(601, 'A source already exists by that input name.')
+          }
+          inputs.set(name, { inputKind: data!.inputKind as string, inputSettings: (data!.inputSettings ?? {}) as Record<string, unknown> })
+          return { sceneItemId: addItem(data!.sceneName, name, data!.sceneItemEnabled) }
+        }
+        case 'CreateSceneItem':
+          return { sceneItemId: addItem(data!.sceneName, data!.sourceName as string, data!.sceneItemEnabled) }
+        case 'RemoveInput': {
+          const name = data!.inputName as string
+          inputs.delete(name)
+          for (const [k, items] of scenes) scenes.set(k, items.filter((it) => it.sourceName !== name))
+          linger = opts.lingerAfterRemove ?? 0
+          return {}
+        }
+        case 'GetSceneItemId': {
+          const it = sceneOf(data!.sceneName).find((x) => x.sourceName === data!.sourceName)
+          if (!it) throw new CodedError(600, 'No scene items were found.')
+          return { sceneItemId: it.sceneItemId }
+        }
+        case 'SetSceneItemIndex': {
+          const items = sceneOf(data!.sceneName)
+          const at = items.findIndex((x) => x.sceneItemId === data!.sceneItemId)
+          const [it] = items.splice(at, 1)
+          items.splice(data!.sceneItemIndex as number, 0, it)
+          return {}
+        }
+        case 'SetSceneItemEnabled': {
+          const it = sceneOf(data!.sceneName).find((x) => x.sceneItemId === data!.sceneItemId)
+          if (it) it.sceneItemEnabled = data!.sceneItemEnabled as boolean
+          return {}
+        }
         case 'GetInputPropertiesListPropertyItems':
           return { propertyItems: opts.items ?? [] }
         case 'GetSourceScreenshot':
@@ -72,7 +119,10 @@ function fakeClient(opts: { items?: unknown[]; failStart?: boolean; stopError?: 
   const setStarting = (v: boolean): void => {
     starting = v
   }
-  return { client, calls, emit, handlers, setStarting }
+  /** Source names of a scene, bottom first. */
+  const order = (sceneName: string) => sceneOf(sceneName).map((x) => x.sourceName)
+  const item = (sceneName: string, sourceName: string) => sceneOf(sceneName).find((x) => x.sourceName === sourceName)
+  return { client, calls, emit, handlers, setStarting, inputs, order, item }
 }
 const of = (calls: Call[], req: string) => calls.filter((c) => c.req === req)
 
@@ -83,17 +133,17 @@ describe('ObsController', () => {
     await c.ensureScene('darwin')
     await c.ensureScene('darwin')
     const created = of(f.calls, 'CreateInput').map((x) => x.data!.inputName)
-    expect(created).toEqual([SRC_VIDEO, SRC_OVERLAY, SRC_AUDIO])
+    expect(created).toEqual([SRC_VIDEO, SRC_OVERLAY, SRC_AUDIO, SRC_DEVICES])
     expect(of(f.calls, 'CreateScene').map((x) => x.data!.sceneName)).toEqual([SCENE, SCENE_PAUSE])
   })
 
   it('uses the platform specific input kinds', async () => {
     const d = fakeClient()
     await new ObsController(d.client).ensureScene('darwin')
-    expect(of(d.calls, 'CreateInput').map((x) => x.data!.inputKind)).toEqual(['macos-avcapture', 'browser_source', 'coreaudio_input_capture'])
+    expect(of(d.calls, 'CreateInput').map((x) => x.data!.inputKind)).toEqual(['macos-avcapture', 'browser_source', 'coreaudio_input_capture', 'macos-avcapture'])
     const l = fakeClient()
     await new ObsController(l.client).ensureScene('linux')
-    expect(of(l.calls, 'CreateInput').map((x) => x.data!.inputKind)).toEqual(['v4l2_input', 'browser_source', 'pulse_input_capture'])
+    expect(of(l.calls, 'CreateInput').map((x) => x.data!.inputKind)).toEqual(['v4l2_input', 'browser_source', 'pulse_input_capture', 'v4l2_input'])
   })
 
   it('puts only Micro on audio track 1 and mutes the others', async () => {
@@ -142,7 +192,7 @@ describe('ObsController', () => {
     const c = new ObsController(f.client)
     await c.ensureScene('darwin')
     expect(await c.listVideoDevices()).toEqual([{ name: 'Cam A', id: 'a' }, { name: 'Cam C', id: 'c' }])
-    expect(of(f.calls, 'GetInputPropertiesListPropertyItems')[0].data).toEqual({ inputName: SRC_VIDEO, propertyName: 'device' })
+    expect(of(f.calls, 'GetInputPropertiesListPropertyItems')[0].data).toEqual({ inputName: SRC_DEVICES, propertyName: 'device' })
   })
 
   it('drops OBS\'s blank placeholder item (empty value), which would show as an empty slot', async () => {
@@ -166,22 +216,9 @@ describe('ObsController', () => {
     await c.listAudioDevices()
     const p = of(f.calls, 'GetInputPropertiesListPropertyItems').map((x) => x.data)
     expect(p).toEqual([
-      { inputName: SRC_VIDEO, propertyName: 'device_id' },
+      { inputName: SRC_DEVICES, propertyName: 'device_id' },
       { inputName: SRC_AUDIO, propertyName: 'device_id' }
     ])
-  })
-
-  it('setVideoDevice sets device and fits transform to 1920x1080', async () => {
-    const f = fakeClient()
-    const c = new ObsController(f.client)
-    await c.ensureScene('darwin')
-    await c.setVideoDevice('cam1')
-    const s = of(f.calls, 'SetInputSettings').at(-1)!.data as { inputName: string; inputSettings: unknown }
-    expect(s).toMatchObject({ inputName: SRC_VIDEO, inputSettings: { device: 'cam1' } })
-    expect(of(f.calls, 'SetSceneItemTransform').at(-1)!.data).toMatchObject({
-      sceneName: SCENE,
-      sceneItemTransform: { boundsType: 'OBS_BOUNDS_SCALE_INNER', boundsWidth: 1920, boundsHeight: 1080 }
-    })
   })
 
   it('setAudioDevice sets device_id', async () => {
@@ -296,5 +333,154 @@ describe('ObsController output', () => {
     await c.showLive()
     await c.showPause()
     expect(of(f.calls, 'SetCurrentProgramScene').map((x) => x.data)).toEqual([{ sceneName: SCENE }, { sceneName: SCENE_PAUSE }])
+  })
+})
+
+describe('ObsController sources', () => {
+  const T = { boundsType: 'OBS_BOUNDS_SCALE_INNER', boundsWidth: 1920, boundsHeight: 1080 }
+
+  it('ensureScene adds a hidden camera-detection input to the pause scene, not the live one', async () => {
+    const f = fakeClient()
+    await new ObsController(f.client).ensureScene('darwin')
+    expect(f.item(SCENE_PAUSE, SRC_DEVICES)).toMatchObject({ sceneItemEnabled: false })
+    expect(f.order(SCENE)).not.toContain(SRC_DEVICES)
+    expect(f.order(SCENE)).not.toContain(SRC_BACKUP)
+    const muted = of(f.calls, 'SetInputMute').map((x) => x.data!.inputName)
+    expect(muted).toContain(SRC_DEVICES)
+  })
+
+  it('setSource image replaces a device input', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('primary', { kind: 'image', path: '/a.png' })
+    const reqs = f.calls.map((x) => x.req)
+    const remove = f.calls.findIndex((x) => x.req === 'RemoveInput' && x.data!.inputName === SRC_VIDEO)
+    expect(remove).toBeGreaterThan(-1)
+    const create = f.calls.findIndex((x, i) => i > remove && x.req === 'CreateInput')
+    expect(f.calls[create].data).toMatchObject({
+      sceneName: SCENE, inputName: SRC_VIDEO, inputKind: 'image_source', inputSettings: { file: '/a.png' }, sceneItemEnabled: true
+    })
+    expect(reqs).toContain('SetSceneItemTransform')
+    expect(of(f.calls, 'SetSceneItemTransform').at(-1)!.data).toMatchObject({
+      sceneName: SCENE, sceneItemId: f.item(SCENE, SRC_VIDEO)!.sceneItemId, sceneItemTransform: T
+    })
+    // primary at the bottom, subtitles on top
+    expect(f.order(SCENE)[0]).toBe(SRC_VIDEO)
+    expect(f.order(SCENE).indexOf(SRC_OVERLAY)).toBe(f.order(SCENE).length - 1)
+  })
+
+  it('setSource keeps the input when the kind is the same', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    const n = f.calls.length
+    await c.setSource('primary', { kind: 'device', id: 'cam1' })
+    const after = f.calls.slice(n)
+    expect(after.filter((x) => x.req === 'RemoveInput' || x.req === 'CreateInput')).toEqual([])
+    expect(after.filter((x) => x.req === 'SetInputSettings').map((x) => x.data)).toEqual([
+      { inputName: SRC_VIDEO, inputSettings: { device: 'cam1' } }
+    ])
+    expect(of(after, 'SetSceneItemTransform').at(-1)!.data).toMatchObject({ sceneName: SCENE, sceneItemTransform: T })
+  })
+
+  it('setSource none empties the device (linux: device_id)', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('linux')
+    await c.setSource('primary', { kind: 'none' })
+    expect(of(f.calls, 'SetInputSettings').at(-1)!.data).toEqual({ inputName: SRC_VIDEO, inputSettings: { device_id: '' } })
+    expect(of(f.calls, 'RemoveInput')).toEqual([])
+  })
+
+  it('setSource video goes back to a device input', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('primary', { kind: 'video', path: '/v.mp4' })
+    await c.setSource('primary', { kind: 'device', id: 'cam1' })
+    expect(f.inputs.get(SRC_VIDEO)).toEqual({ inputKind: 'macos-avcapture', inputSettings: { device: 'cam1' } })
+    expect(f.order(SCENE)[0]).toBe(SRC_VIDEO)
+  })
+
+  it('backup is created hidden and above the primary', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('backup', { kind: 'video', path: '/b.mp4' })
+    expect(of(f.calls, 'CreateInput').at(-1)!.data).toEqual({
+      sceneName: SCENE,
+      inputName: SRC_BACKUP,
+      inputKind: 'ffmpeg_source',
+      inputSettings: { local_file: '/b.mp4', is_local_file: true, looping: true, restart_on_activate: false },
+      sceneItemEnabled: false
+    })
+    const idx = Object.fromEntries(
+      of(f.calls, 'SetSceneItemIndex').map((x) => [x.data!.sceneItemId, x.data!.sceneItemIndex as number])
+    )
+    const id = (n: string) => f.item(SCENE, n)!.sceneItemId
+    expect(idx[id(SRC_BACKUP)]).toBeGreaterThan(idx[id(SRC_VIDEO)])
+    expect(idx[id(SRC_OVERLAY)]).toBeGreaterThan(idx[id(SRC_BACKUP)])
+    const o = f.order(SCENE)
+    expect(o.indexOf(SRC_VIDEO)).toBeLessThan(o.indexOf(SRC_BACKUP))
+    expect(o.indexOf(SRC_BACKUP)).toBeLessThan(o.indexOf(SRC_OVERLAY))
+    expect(o.indexOf(SRC_OVERLAY)).toBe(o.length - 1)
+    // sound off: muted, on no track
+    expect(of(f.calls, 'SetInputMute').at(-1)!.data).toEqual({ inputName: SRC_BACKUP, inputMuted: true })
+    expect(of(f.calls, 'SetInputAudioTracks').at(-1)!.data).toMatchObject({ inputName: SRC_BACKUP })
+    expect(of(f.calls, 'SetSceneItemTransform').at(-1)!.data).toMatchObject({ sceneItemId: id(SRC_BACKUP), sceneItemTransform: T })
+    expect(f.item(SCENE, SRC_BACKUP)!.sceneItemEnabled).toBe(false)
+  })
+
+  it('setBackupVisible toggles the backup scene item', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('backup', { kind: 'image', path: '/b.png' })
+    await c.setBackupVisible(true)
+    expect(of(f.calls, 'SetSceneItemEnabled').at(-1)!.data).toEqual({
+      sceneName: SCENE, sceneItemId: f.item(SCENE, SRC_BACKUP)!.sceneItemId, sceneItemEnabled: true
+    })
+    expect(f.item(SCENE, SRC_BACKUP)!.sceneItemEnabled).toBe(true)
+    await c.setBackupVisible(false)
+    expect(f.item(SCENE, SRC_BACKUP)!.sceneItemEnabled).toBe(false)
+  })
+
+  it('a backup recreated while shown stays shown', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('backup', { kind: 'image', path: '/b.png' })
+    await c.setBackupVisible(true)
+    await c.setSource('backup', { kind: 'video', path: '/b.mp4' })
+    expect(f.item(SCENE, SRC_BACKUP)!.sceneItemEnabled).toBe(true)
+  })
+
+  it('resetProjectorState forgets cached scene item ids', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('backup', { kind: 'image', path: '/b.png' })
+    await c.setBackupVisible(true)
+    c.resetProjectorState()
+    const n = of(f.calls, 'GetSceneItemId').length
+    await c.setBackupVisible(true)
+    expect(of(f.calls, 'GetSceneItemId').slice(n).map((x) => x.data)).toEqual([{ sceneName: SCENE, sourceName: SRC_BACKUP }])
+  })
+
+  it('retries creating the input while OBS still holds the removed name', async () => {
+    const f = fakeClient({ lingerAfterRemove: 2 })
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('primary', { kind: 'image', path: '/a.png' })
+    expect(f.inputs.get(SRC_VIDEO)?.inputKind).toBe('image_source')
+    expect(of(f.calls, 'CreateInput').filter((x) => x.data!.inputName === SRC_VIDEO)).toHaveLength(4) // ensureScene + 2 failed + 1
+  })
+
+  it('probePrimary takes a tiny png of the primary input alone', async () => {
+    const f = fakeClient()
+    const img = await new ObsController(f.client).probePrimary()
+    expect(img).toBe('data:image/jpeg;base64,AAAA')
+    expect(of(f.calls, 'GetSourceScreenshot')[0].data).toEqual({ sourceName: SRC_VIDEO, imageFormat: 'png', imageWidth: 32 })
   })
 })

@@ -33,7 +33,7 @@ function fakeController(log: string[]) {
     ensureScene: vi.fn(async () => {}),
     listVideoDevices: vi.fn(async () => [{ id: 'cam', name: 'Cam' }]),
     listAudioDevices: vi.fn(async () => [{ id: 'mic', name: 'Mic' }]),
-    setVideoDevice: vi.fn(async () => {}),
+    setSource: vi.fn(async () => {}),
     setAudioDevice: vi.fn(async () => {}),
     setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}),
@@ -154,7 +154,7 @@ describe('LiveController', () => {
     expect(t.obs.start).toHaveBeenCalledTimes(1)
     expect(t.ctl().ensureScene).toHaveBeenCalledWith('darwin')
     expect(t.ctl().resetProjectorState).toHaveBeenCalled()
-    expect(t.ctl().setVideoDevice).toHaveBeenCalledWith('cam')
+    expect(t.ctl().setSource).toHaveBeenCalledWith('primary', { kind: 'device', id: 'cam' })
     expect(t.ctl().setAudioDevice).toHaveBeenCalledWith('mic')
     expect(t.ctl().setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
     expect(t.last().obs).toBe('running')
@@ -253,7 +253,7 @@ describe('LiveController', () => {
     expect(c).not.toBe(first)
     expect(c.ensureScene).toHaveBeenCalledWith('darwin')
     expect(c.resetProjectorState).toHaveBeenCalled()
-    expect(c.setVideoDevice).toHaveBeenCalledWith('cam')
+    expect(c.setSource).toHaveBeenCalledWith('primary', { kind: 'device', id: 'cam' })
     expect(c.setAudioDevice).toHaveBeenCalledWith('mic')
     expect(c.setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
     expect(c.startStream).toHaveBeenCalledWith({ streamServiceType: 'rtmp_custom', streamServiceSettings: { server: SRT_A, key: '' } })
@@ -676,7 +676,7 @@ describe('LiveController final fixes', () => {
       const t = setup()
       await t.live.saveSettings({ primarySource: { kind: 'none' } })
       await t.live.boot()
-      expect(t.ctl().setVideoDevice).not.toHaveBeenCalled()
+      expect(t.ctl().setSource).toHaveBeenCalledWith('primary', { kind: 'none' })
       await t.live.start('Conf')
       expect(t.ctl().startStream).toHaveBeenCalled()
       expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
@@ -692,7 +692,7 @@ describe('LiveController final fixes', () => {
       await t.live.boot()
       await t.live.start('Conf')
       await t.live.saveSettings({ primarySource: { kind: 'device', id: 'cam' } })
-      expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('cam')
+      expect(t.ctl().setSource).toHaveBeenLastCalledWith('primary', { kind: 'device', id: 'cam' })
       expect(t.ctl().openOutputWindow).not.toHaveBeenCalled()
       expect(t.last().output).toBe('off')
     })
@@ -702,7 +702,20 @@ describe('LiveController final fixes', () => {
     const t = setup()
     await t.live.boot()
     await t.live.saveSettings({ primarySource: { kind: 'none' } })
-    expect(t.ctl().setVideoDevice).toHaveBeenLastCalledWith('')
+    expect(t.ctl().setSource).toHaveBeenLastCalledWith('primary', { kind: 'none' })
+  })
+
+  it('an image as primary source is applied once, and again when its file changes', async () => {
+    const t = setup()
+    await t.live.boot()
+    const n = t.ctl().setSource.mock.calls.length
+    await t.live.saveSettings({ primarySource: { kind: 'image', path: '/a.png' } })
+    await t.live.saveSettings({ primarySource: { kind: 'image', path: '/a.png' } })
+    await t.live.saveSettings({ primarySource: { kind: 'image', path: '/b.png' } })
+    expect(t.ctl().setSource.mock.calls.slice(n)).toEqual([
+      ['primary', { kind: 'image', path: '/a.png' }],
+      ['primary', { kind: 'image', path: '/b.png' }]
+    ])
   })
 
   describe('camera preview only while someone looks at it', () => {

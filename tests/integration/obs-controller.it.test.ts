@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
 import { afterAll, describe, expect, it } from 'vitest'
-import { ObsController, SRC_AUDIO, SRC_OVERLAY, SRC_VIDEO } from '../../src/main/obs/controller'
+import { ObsController, SCENE, SRC_AUDIO, SRC_BACKUP, SRC_OVERLAY, SRC_VIDEO } from '../../src/main/obs/controller'
 import { obsExecutable } from '../../src/main/obs/locate'
 import { ObsProcess } from '../../src/main/obs/process'
 import { appPaths } from '../../src/main/paths'
@@ -24,6 +24,7 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     platform
   })
   let ctl: ObsController | undefined
+  let conn: { port: number; password: string } | undefined
   afterAll(async () => {
     await ctl?.disconnect().catch(() => {})
     await obs.stop()
@@ -31,7 +32,7 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
   })
 
   it('builds the scene, lists audio devices, sets overlay, screenshots', async () => {
-    const conn = await obs.start()
+    conn = await obs.start()
 
     const raw = new OBSWebSocket()
     await raw.connect(`ws://127.0.0.1:${conn.port}`, conn.password)
@@ -57,4 +58,43 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     expect(shot).toMatch(/^data:image\/jpe?g;base64,/)
     expect([SRC_VIDEO, SRC_AUDIO, SRC_OVERLAY]).toHaveLength(3)
   }, 90_000)
+
+  it('swaps the primary to an image and back, stacks a hidden backup above it', async () => {
+    // 1×1 white PNG
+    const png = join(userData, 'white.png')
+    writeFileSync(
+      png,
+      Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64')
+    )
+    await ctl!.setSource('primary', { kind: 'image', path: png })
+    await ctl!.setSource('backup', { kind: 'image', path: png })
+    await ctl!.setBackupVisible(true)
+    await ctl!.setBackupVisible(false)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(await ctl!.probePrimary()).toMatch(/^data:image\/png;base64,/)
+
+    const raw = new OBSWebSocket()
+    await raw.connect(`ws://127.0.0.1:${conn!.port}`, conn!.password)
+    try {
+      const kind = async (inputName: string) => (await raw.call('GetInputSettings', { inputName })).inputKind
+      expect(await kind(SRC_VIDEO)).toBe('image_source')
+      expect(await kind(SRC_BACKUP)).toBe('image_source')
+      const order = async () =>
+        ((await raw.call('GetSceneItemList', { sceneName: SCENE })).sceneItems as { sourceName: string }[]).map((i) => i.sourceName)
+      let o = await order()
+      expect(o.indexOf(SRC_VIDEO)).toBeLessThan(o.indexOf(SRC_BACKUP))
+      expect(o.indexOf(SRC_BACKUP)).toBeLessThan(o.indexOf(SRC_OVERLAY))
+
+      // Back to a device input and to an image again: the input is recreated under the same name.
+      await ctl!.setSource('primary', { kind: 'none' })
+      expect(await kind(SRC_VIDEO)).not.toBe('image_source')
+      await ctl!.setSource('primary', { kind: 'image', path: png })
+      expect(await kind(SRC_VIDEO)).toBe('image_source')
+      o = await order()
+      expect(o[0]).toBe(SRC_VIDEO)
+      expect(o.indexOf(SRC_BACKUP)).toBeLessThan(o.indexOf(SRC_OVERLAY))
+    } finally {
+      await raw.disconnect().catch(() => {})
+    }
+  }, 60_000)
 })
