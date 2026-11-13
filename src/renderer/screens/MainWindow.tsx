@@ -44,7 +44,7 @@ type SheetState =
   | { kind: 'login' }
   | { kind: 'watermark' }
   /** « Nouvelle session » hit an existing session: `usable` offers to use it, otherwise the name is refused. */
-  | { kind: 'exists'; name: string; usable: boolean; terminated?: boolean }
+  | { kind: 'exists'; name: string; usable: boolean; terminated?: boolean; rtmpOnly?: boolean }
   | null
 
 const REFRESH_MS = 30_000
@@ -259,7 +259,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     }
     if (sheetRef.current?.kind !== 'new') return // cancelled meanwhile
     if (found !== 'none') {
-      setSheet({ kind: 'exists', name, usable: found === 'usable', terminated: found === 'terminated' })
+      setSheet({
+        kind: 'exists', name, usable: found === 'usable', terminated: found === 'terminated', rtmpOnly: found === 'rtmp-only'
+      })
       return
     }
     const target: Selection = { name, pending: { profileId } }
@@ -449,7 +451,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           <p className="sheet-detail">
             {sheet?.kind === 'exists' && sheet.terminated
               ? 'Elle est terminée et ne peut pas être reprise. Choisis un autre nom.'
-              : "Tu n'as pas les droits suffisants pour l'utiliser. Choisis un autre nom."}
+              : sheet?.kind === 'exists' && sheet.rtmpOnly
+                ? 'Elle ne propose que le protocole RTMP, non pris en charge (SRT requis). Choisis un autre nom.'
+                : "Tu n'as pas les droits suffisants pour l'utiliser. Choisis un autre nom."}
           </p>
         </Sheet>
       )}

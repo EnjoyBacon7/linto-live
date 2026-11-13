@@ -39,7 +39,7 @@ export interface WatermarkConfig {
   duration: number
 }
 /** An exact-name check before « Nouvelle session »: see lookupSession. */
-export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'terminated'
+export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'rtmp-only' | 'terminated'
 /** `rights`: what the user may do there (absent when LinTO did not say: then LinTO alone decides). */
 export interface Organization { id: string; name: string; rights?: OrgRights }
 export interface TranscriberProfile { id: number; name: string; languages?: string[] }
@@ -116,13 +116,15 @@ export const SUBTITLE_FONT_SIZE_MAX = 96
 export interface TranscriptSegment { id: number; text: string; at: number; endAt?: number; lang?: string; locutor?: string }
 /**
  * Finalized segments (oldest first) and the segment still being transcribed; `sessionName` / `startedAt`
- * (ms epoch): the show they belong to (absent before the first one).
+ * (ms epoch): the show they belong to (absent before the first one). `dropped`: how many older finals of the
+ * show this copy no longer holds (absent when none).
  */
 export interface Transcript {
   finals: TranscriptSegment[]
   partial: TranscriptSegment | null
   sessionName?: string
   startedAt?: number
+  dropped?: number
 }
 /** Change to the transcript: a segment finalized, the partial changed (null = none), or a new show began. */
 export type TranscriptUpdate =

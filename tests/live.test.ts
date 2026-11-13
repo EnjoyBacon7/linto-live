@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
-  LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_START_CANCELLED, MSG_OBS_HUNG, WATCHDOG_MS, WATCHDOG_MISSES, MSG_NO_STREAM, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
+  LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_START_CANCELLED, MSG_OBS_HUNG, WATCHDOG_MS, WATCHDOG_MISSES, MSG_NO_STREAM, MSG_RTMP_ONLY, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
   MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
@@ -238,6 +238,16 @@ describe('LiveController', () => {
     expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
     expect(t.last()).toMatchObject({ phase: 'live', stream: 'unavailable', warning: MSG_NO_STREAM })
     expect(MSG_NO_STREAM).toMatch(/propriétaire de la session et aux gestionnaires de réunion/)
+  })
+
+  it('does not stream to an RTMP-only session (RTMP KO towards LinTO) and says why', async () => {
+    const rtmpOnly = { ...session({}, null), channels: [{ id: 7, name: 'Conf', streamEndpoints: { rtmp: 'rtmp://linto:1935/live/k' } }] }
+    const t = setup({ sessions: [rtmpOnly] })
+    await t.live.boot()
+    const r = await t.live.start('Conf')
+    expect(r).toEqual({ ok: true, reused: true, canStream: false })
+    expect(t.ctl().startStream).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'live', stream: 'unavailable', warning: MSG_RTMP_ONLY })
   })
 
   it('reapplies live state after obs restart', async () => {
