@@ -90,7 +90,10 @@ flatpak:
   finishArgs:
     - --share=ipc
     - --share=network
-    # The bundled OBS always runs on X11 (QT_QPA_PLATFORM=xcb, XWayland under Wayland).
+    # Electron 45 goes native Wayland in a Wayland session and crashes at launch without this socket.
+    - --socket=wayland
+    # Not fallback-x11: the bundled OBS only ships Qt's xcb plugin (QT_QPA_PLATFORM=xcb), so it needs
+    # XWayland even in a Wayland session; fallback-x11 would hide the X11 socket there.
     - --socket=x11
     - --socket=pulseaudio
     # GPU (OBS rendering, captions browser) and V4L2 cameras / capture cards.
