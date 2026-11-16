@@ -4,6 +4,13 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## Non publié
+
+### Modifié
+
+- **Ubuntu 22.04** : pris en charge par le Flatpak, installé et vérifié sur Ubuntu 22.04 à chaque
+  build de la CI (le `.deb` et l'AppImage demandent toujours glibc 2.39).
+
 ## [0.3.1] - 2026-11-16
 
 ### Corrigé

@@ -36,7 +36,7 @@ $changes
 |---|---|
 | macOS, Apple Silicon (M1 et suivants) | \`LinTO-Live-$VERSION-arm64.dmg\` |
 | Linux : Ubuntu 24.04+, Debian 13+ (recommandé) | \`LinTO-Live-$VERSION-amd64.deb\` |
-| Linux : toute distribution avec Flatpak | \`LinTO-Live-$VERSION-x86_64.flatpak\` |
+| Linux : Ubuntu 22.04 et toute distribution avec Flatpak | \`LinTO-Live-$VERSION-x86_64.flatpak\` |
 | Linux : autres distributions x86_64 (glibc ≥ 2.39, ex. Arch) | \`LinTO-Live-$VERSION-x86_64.AppImage\` |
 
 Les sommes de contrôle sont dans \`SHA256SUMS.txt\`.
@@ -54,7 +54,7 @@ sudo apt install ./LinTO-Live-$VERSION-amd64.deb
 \`\`\`
 \`apt\` installe toutes les dépendances : il n'y a rien d'autre à faire.
 
-**Linux (Flatpak)** : le runtime Freedesktop est téléchargé depuis Flathub à l'installation :
+**Linux (Flatpak, dont Ubuntu 22.04)** : le runtime Freedesktop est téléchargé depuis Flathub à l'installation (sur Ubuntu 22.04, d'abord \`sudo apt install flatpak\`) :
 \`\`\`bash
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install --user ./LinTO-Live-$VERSION-x86_64.flatpak
@@ -71,5 +71,5 @@ Les détails (paquets, utilisation, désinstallation) sont dans le [README](http
 ## Limites connues
 
 - macOS : pas de signature Apple ni de notarisation, pas de version pour Mac Intel.
-- Linux : seule Ubuntu 24.04 (X11) a été testée ; les autres distributions sont « au mieux ». L'incrustation des sous-titres demande une accélération graphique qui fonctionne.
+- Linux : seule Ubuntu 24.04 (X11) a été testée sur une vraie machine ; le Flatpak est installé et vérifié sur Ubuntu 22.04 par la CI ; les autres distributions sont « au mieux ». L'incrustation des sous-titres demande une accélération graphique qui fonctionne.
 EOF

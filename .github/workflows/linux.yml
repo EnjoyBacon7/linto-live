@@ -1,6 +1,7 @@
 name: Build
 
-# Every push / PR: Linux packages (AppImage, .deb, Flatpak) + macOS typecheck and tests.
+# Every push / PR: Linux packages (AppImage, .deb, Flatpak), the Flatpak installed on Ubuntu 22.04,
+# macOS typecheck and tests.
 # Tags v*: also the macOS dmg, then a GitHub release with all four packages, SHA256SUMS.txt and the
 # notes from CHANGELOG.md (scripts/release-notes.sh).
 
@@ -173,6 +174,63 @@ jobs:
             dist/*.flatpak
           if-no-files-found: error
 
+  # Ubuntu 22.04 (glibc 2.35) is covered by the Flatpak only: the .deb and AppImage need glibc 2.39,
+  # and OBS 32.1 cannot be built there (FFmpeg >= 6.1, CMake >= 3.28). Installs the bundle with the
+  # distribution's own flatpak (1.12) and checks every OBS library resolves inside the sandbox.
+  flatpak-ubuntu-2204:
+    name: Flatpak on Ubuntu 22.04
+    needs: [linux]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LinTO-Live-linux-x86_64
+          path: dist
+
+      - name: Install flatpak (Ubuntu 22.04 package) and the bundle
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends flatpak
+          flatpak --version
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive --bundle "$(ls dist/*.flatpak)"
+          flatpak info --user ai.linto.live
+
+      - name: Check permissions and OBS libraries
+        run: |
+          set -euo pipefail
+          perms="$(flatpak info --user --show-permissions ai.linto.live)"
+          echo "$perms"
+          grep -Eq '^sockets=.*\bwayland\b' <<<"$perms"
+          grep -Eq '^sockets=.*(^|;|=)x11\b' <<<"$perms"
+          flatpak run --command=sh ai.linto.live -c '
+            set -eu
+            cd /app/lib/ai.linto.live/resources/obs
+            missing=0
+            for f in bin/obs lib/obs-plugins/*.so; do
+              if ldd "$f" | grep "not found"; then echo "^ in $f"; missing=1; fi
+            done
+            exit $missing
+          '
+
+      # Best-effort: the app starts and is still running after 20 s under Xvfb. Informational only
+      # (no GPU, audio or camera on CI).
+      - name: Smoke test app launch (Xvfb)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb dbus-x11
+          xvfb-run -a -s '-screen 0 1920x1080x24' dbus-run-session -- bash -c '
+            flatpak run ai.linto.live > /tmp/app.log 2>&1 & pid=$!
+            sleep 20
+            if kill -0 $pid 2>/dev/null; then echo "still running after 20 s"; rc=0; else echo "exited early"; rc=1; fi
+            flatpak kill ai.linto.live 2>/dev/null || kill $pid 2>/dev/null || true
+            tail -40 /tmp/app.log
+            exit $rc
+          '
+
   macos:
     name: macOS (macos-15, arm64)
     runs-on: macos-15
@@ -216,7 +274,7 @@ jobs:
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, macos]
+    needs: [linux, flatpak-ubuntu-2204, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
