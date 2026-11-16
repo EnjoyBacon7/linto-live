@@ -1,6 +1,6 @@
 import { Button } from '../ui/Button'
 import { StatusDot } from '../ui/StatusDot'
-import { DisplayIcon, PlayIcon, StopIcon } from '../ui/icons'
+import { DisplayIcon, PlayIcon, RecordIcon, StopIcon } from '../ui/icons'
 import { useElapsed } from './useLive'
 
 export type Busy = 'start' | 'stop' | 'terminate' | 'switch' | null
@@ -12,6 +12,8 @@ export interface ToolbarProps {
   title: string | null
   caption: string | null
   onAir: boolean
+  /** The show is being recorded to disk: red « REC » pill. */
+  recording?: boolean
   startedAt?: number
   busy: Busy
   canStart: boolean
@@ -56,6 +58,12 @@ export function Toolbar(p: ToolbarProps) {
         )}
       </div>
       <div className="toolbar-actions">
+        {p.recording && (
+          <span className="rec-pill" title="Enregistrement en cours">
+            <RecordIcon size={10} />
+            <span>REC</span>
+          </span>
+        )}
         {p.onAir ? (
           <>
             <LivePill startedAt={p.startedAt} />

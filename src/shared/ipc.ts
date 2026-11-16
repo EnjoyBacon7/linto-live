@@ -1,6 +1,6 @@
 import type {
-  AuthMethod, DeviceItem, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
-  TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, Watermark
+  AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
+  QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
 } from './types'
 
 export interface SetupData {
@@ -18,7 +18,8 @@ export type StartResult = { ok: true; reused: boolean; canStream: boolean } | { 
 
 export interface LiveState {
   phase: 'idle' | 'starting' | 'live' | 'stopping' | 'error'
-  session?: { name: string; status: SessionStatus }
+  /** languages: the « Langue affichée » options of the session on air (from the channel LinTO returned). */
+  session?: { name: string; status: SessionStatus; languages?: SubtitleLanguageOption[] }
   stream: 'off' | 'starting' | 'active' | 'error' | 'unavailable'
   captions: 'connecting' | 'live' | 'offline'
   obs: 'running' | 'restarting' | 'down'
@@ -26,6 +27,10 @@ export interface LiveState {
   output: 'shown' | 'off'
   /** ms epoch when the current session went live (absent when not live). */
   startedAt?: number
+  /** Video source shown in OBS; absent when no backup source is configured. */
+  videoOnAir?: 'primary' | 'backup'
+  /** Recording of the show to a file: 'error' when it could not start or stopped by itself (the show goes on). */
+  recording: 'off' | 'on' | 'error'
   warning?: string
 }
 
@@ -57,7 +62,14 @@ export interface LintoLiveApi {
     logout(): Promise<void>
     status(): Promise<{ loggedIn: boolean }>
   }
-  setup: { load(): Promise<SetupData>; save(s: Partial<Settings>): Promise<void> }
+  setup: {
+    load(): Promise<SetupData>
+    save(s: Partial<Settings>): Promise<void>
+    /** Lets the user pick an image or a video file (open dialog); its path, or null if they cancelled. */
+    pickMedia(kind: 'image' | 'video'): Promise<string | null>
+    /** Lets the user pick (or create) a folder; its path, or null if they cancelled. */
+    pickFolder(): Promise<string | null>
+  }
   sessions: {
     list(): Promise<SessionSummary[]>
     /** Does a session with exactly this name exist in the organisation, and can the user stream to it? */
@@ -66,7 +78,10 @@ export interface LintoLiveApi {
     setWatermark(sessionId: string, w: Watermark): Promise<void>
   }
   live: {
-    start(sessionName: string): Promise<StartResult>
+    /** `create`: options of the session created when none has this name (ignored when one is reused). */
+    start(sessionName: string, create?: NewSessionOptions): Promise<StartResult>
+    /** Saves the language shown in the subtitle band for this session; the band switches now if it is on air. */
+    setSubtitleLanguage(sessionId: string, choice: string): Promise<void>
     stop(): Promise<void>
     terminate(): Promise<void>
     /** Opens (another) OBS output window, even if one is already open. */
@@ -109,6 +124,8 @@ export const IPC = {
   authSavedLogin: 'auth:saved-login',
   setupLoad: 'setup:load',
   setupSave: 'setup:save',
+  setupPickMedia: 'setup:pick-media',
+  setupPickFolder: 'setup:pick-folder',
   sessionsList: 'sessions:list',
   sessionsLookup: 'sessions:lookup',
   sessionsSetWatermark: 'sessions:set-watermark',
@@ -120,6 +137,7 @@ export const IPC = {
   liveClearSubtitles: 'live:clear-subtitles',
   liveGetTranscript: 'live:get-transcript',
   liveExportTranscript: 'live:export-transcript',
+  liveSetSubtitleLanguage: 'live:set-subtitle-language',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
@@ -143,6 +161,57 @@ export const EVENT_CHANNELS: Record<EventName, string> = {
   transcript: IPC.evtTranscript
 }
 
+const VISIBILITIES: readonly unknown[] = ['private', 'organization', 'public', 'password'] satisfies NewSessionOptions['visibility'][]
+
+/** Main-side check of `live.start`'s `create` argument (it comes from the renderer); throws when malformed. */
+export function checkNewSessionOptions(raw: unknown): NewSessionOptions | undefined {
+  if (raw === undefined) return undefined
+  const bad = (): never => { throw new Error('Options de session invalides.') }
+  if (typeof raw !== 'object' || raw === null) return bad()
+  const o = raw as Record<string, unknown>
+  if (!Array.isArray(o.translations) || !o.translations.every((t) => typeof t === 'string')) return bad()
+  if (!VISIBILITIES.includes(o.visibility)) return bad()
+  const visibility = o.visibility as NewSessionOptions['visibility']
+  const out: NewSessionOptions = { translations: [...(o.translations as string[])], visibility }
+  if (visibility === 'password') {
+    if (typeof o.password !== 'string' || !o.password) return bad()
+    out.password = o.password
+  }
+  return out
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length > 0
+/** macOS and Linux only: an absolute path starts with « / ». */
+const absolute = (v: unknown): v is string => nonEmpty(v) && v.startsWith('/')
+const positive = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v > 0
+
+function isVideoSource(v: unknown): v is VideoSource {
+  if (!isObj(v)) return false
+  if (v.kind === 'none') return true
+  if (v.kind === 'device') return nonEmpty(v.id)
+  return (v.kind === 'image' || v.kind === 'video') && absolute(v.path)
+}
+
+const isQr = (v: unknown): v is QrSettings =>
+  isObj(v) && typeof v.display === 'boolean' && typeof v.pinned === 'boolean' && positive(v.frequency) && positive(v.duration)
+
+/**
+ * Main-side check of `setup.save`'s patch (it comes from the renderer); throws when malformed. The
+ * per-session subtitle languages are not writable this way (live.setSubtitleLanguage is).
+ */
+export function checkSettingsPatch(raw: unknown): Partial<Settings> {
+  const bad = (): never => { throw new Error('Réglages invalides.') }
+  if (!isObj(raw)) return bad()
+  if ('subtitleLanguages' in raw) return bad()
+  if ('primarySource' in raw && !isVideoSource(raw.primarySource)) return bad()
+  if ('backupSource' in raw && !isVideoSource(raw.backupSource)) return bad()
+  if ('recordDir' in raw && !absolute(raw.recordDir)) return bad()
+  if ('qr' in raw && !isQr(raw.qr)) return bad()
+  for (const k of ['blackIsAbsent', 'recordEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
+  return raw as Partial<Settings>
+}
+
 /** Minimal transport (ipcRenderer-shaped) so the bridge is testable without Electron. */
 export interface Transport {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
@@ -163,14 +232,20 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       logout: () => call(IPC.authLogout),
       status: () => call(IPC.authStatus)
     },
-    setup: { load: () => call(IPC.setupLoad), save: (s) => call(IPC.setupSave, s) },
+    setup: {
+      load: () => call(IPC.setupLoad),
+      save: (s) => call(IPC.setupSave, s),
+      pickMedia: (kind) => call(IPC.setupPickMedia, kind),
+      pickFolder: () => call(IPC.setupPickFolder)
+    },
     sessions: {
       list: () => call(IPC.sessionsList),
       lookup: (name) => call(IPC.sessionsLookup, name),
       setWatermark: (id, w) => call(IPC.sessionsSetWatermark, id, w)
     },
     live: {
-      start: (name) => call(IPC.liveStart, name),
+      start: (name, create) => (create === undefined ? call(IPC.liveStart, name) : call(IPC.liveStart, name, create)),
+      setSubtitleLanguage: (id, choice) => call(IPC.liveSetSubtitleLanguage, id, choice),
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput),

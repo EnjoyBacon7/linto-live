@@ -4,7 +4,17 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
-## Non publié
+## [0.4.0] - 2026-11-16
+
+### Ajouté
+
+- **Langues des sous-titres** : choix de la langue affichée sur la vidéo parmi celles de la
+  session, mémorisé par session, avec rappel quand la session n'est pas publique.
+- **QR code** vers la session sur la vidéo, affiché ou épinglé, avec ses paramètres.
+- **Source de secours** (caméra, image ou vidéo) : bascule automatique en 2 s environ quand la
+  principale disparaît, retour de même ; un écran noir (ATEM sans entrée) compte comme absence.
+- **Enregistrement du direct** en MKV 1920×1080 dans le dossier choisi (par défaut Vidéos (Films
+  sur macOS) › LinTO Live), avec pastille REC dans la barre d'outils.
 
 ### Modifié
 
@@ -98,6 +108,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.4.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.1.0...v0.2.0

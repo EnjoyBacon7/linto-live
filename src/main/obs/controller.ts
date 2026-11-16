@@ -1,7 +1,7 @@
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
 import type { ObsStreamService } from './streamTarget'
-import type { DeviceItem } from '../../shared/types'
+import type { DeviceItem, VideoSource } from '../../shared/types'
 import { guardClient, OBS_CALL_TIMEOUT_MS } from './guardedClient'
 
 export type StreamState = 'starting' | 'active' | 'stopped' | 'error'
@@ -13,6 +13,11 @@ export const SCENE_PAUSE = 'LinTO Pause'
 export const SRC_VIDEO = 'Salle'
 export const SRC_AUDIO = 'Micro'
 export const SRC_OVERLAY = 'Sous-titres'
+export const SRC_BACKUP = 'Secours'
+/** Hidden device input (pause scene) that only serves to list the cameras, whatever the sources are. */
+export const SRC_DEVICES = 'Détection caméras'
+
+export type SourceSlot = 'primary' | 'backup'
 
 /** Minimal slice of OBSWebSocket the controller needs (lets tests inject a fake). */
 export interface ObsClient {
@@ -32,17 +37,61 @@ const videoKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'macos-avcap
 const audioKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'coreaudio_input_capture' : 'pulse_input_capture')
 const videoProp = (p: NodeJS.Platform): string => (p === 'darwin' ? 'device' : 'device_id')
 
+/** OBS input kind and settings for a video source ('none' = a device input without device). */
+function sourceInput(src: VideoSource, p: NodeJS.Platform): { inputKind: string; inputSettings: Record<string, unknown> } {
+  switch (src.kind) {
+    case 'image':
+      return { inputKind: 'image_source', inputSettings: { file: src.path } }
+    case 'video':
+      return {
+        inputKind: 'ffmpeg_source',
+        inputSettings: { local_file: src.path, is_local_file: true, looping: true, restart_on_activate: false }
+      }
+    case 'device':
+      return { inputKind: videoKind(p), inputSettings: { [videoProp(p)]: src.id } }
+    default:
+      return { inputKind: videoKind(p), inputSettings: { [videoProp(p)]: '' } }
+  }
+}
+
+/** obs-websocket RequestStatus::ResourceNotFound / ResourceAlreadyExists. */
+const RESOURCE_NOT_FOUND = 600
+const RESOURCE_ALREADY_EXISTS = 601
+/** RemoveInput returns before OBS has released the name: CreateInput is retried meanwhile. */
+const CREATE_RETRIES = 5
+const CREATE_RETRY_MS = 100
+const codeOf = (e: unknown): unknown => (e as { code?: unknown })?.code
+
 /** obs-websocket RequestStatus.InvalidResourceState: what audio requests answer for an input without audio. */
 const INVALID_RESOURCE_STATE = 604
 
 function ignoreNoAudio(e: unknown): void {
-  if ((e as { code?: unknown })?.code === INVALID_RESOURCE_STATE) return
+  if (codeOf(e) === INVALID_RESOURCE_STATE) return
   throw e
+}
+
+const TRANSFORM_1080P = {
+  positionX: 0,
+  positionY: 0,
+  boundsType: 'OBS_BOUNDS_SCALE_INNER',
+  boundsAlignment: 0,
+  boundsWidth: 1920,
+  boundsHeight: 1080
+}
+
+/** File name base for a recording: no character OBS or a file system treats specially ('%' starts an OBS format specifier). */
+export function recordBaseName(sessionName: string): string {
+  // eslint-disable-next-line no-control-regex
+  const name = sessionName.replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]/g, '-').slice(0, 100).trim()
+  return name || 'LinTO Live'
 }
 
 export class ObsController {
   private platform: NodeJS.Platform = process.platform
-  private videoItemId: number | null = null
+  /** Scene item ids in SCENE, by source name (new OBS run = new ids, see resetProjectorState). */
+  private itemIds = new Map<string, number>()
+  /** Last visibility asked for the backup: kept when the backup input has to be recreated. */
+  private backupVisible = false
   private lastServer: string | null = null
   private stateListeners = new Set<(s: StreamState) => void>()
 
@@ -101,17 +150,18 @@ export class ObsController {
         await this.client.call('CreateSceneItem', { sceneName: SCENE, sourceName: inputName, sceneItemEnabled: true })
       }
     }
-    for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_AUDIO]) {
-      const isAudio = name === SRC_AUDIO
-      // Silencing a source that has no audio at all (Linux v4l2 camera) is already done.
-      const silence = (req: string, data: Record<string, unknown>): Promise<unknown> =>
-        isAudio ? this.client.call(req, data) : this.client.call(req, data).catch(ignoreNoAudio)
-      await silence('SetInputAudioTracks', {
-        inputName: name,
-        inputAudioTracks: isAudio ? { ...TRACKS_NONE, '1': true } : { ...TRACKS_NONE }
+    // Never shown: in the pause scene, disabled, with no device opened.
+    if (!existing.has(SRC_DEVICES)) {
+      await this.client.call('CreateInput', {
+        sceneName: SCENE_PAUSE,
+        inputName: SRC_DEVICES,
+        inputKind: videoKind(platform),
+        inputSettings: { [videoProp(platform)]: '' },
+        sceneItemEnabled: false
       })
-      if (!isAudio) await silence('SetInputMute', { inputName: name, inputMuted: true })
     }
+    await this.client.call('SetInputAudioTracks', { inputName: SRC_AUDIO, inputAudioTracks: { ...TRACKS_NONE, '1': true } })
+    for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_DEVICES]) await this.silence(name)
   }
 
   private async devices(inputName: string, propertyName: string): Promise<DeviceItem[]> {
@@ -124,31 +174,109 @@ export class ObsController {
   }
 
   listVideoDevices(): Promise<DeviceItem[]> {
-    return this.devices(SRC_VIDEO, videoProp(this.platform))
+    return this.devices(SRC_DEVICES, videoProp(this.platform))
   }
 
   listAudioDevices(): Promise<DeviceItem[]> {
     return this.devices(SRC_AUDIO, 'device_id')
   }
 
-  async setVideoDevice(id: string): Promise<void> {
-    await this.client.call('SetInputSettings', { inputName: SRC_VIDEO, inputSettings: { [videoProp(this.platform)]: id } })
-    if (this.videoItemId === null) {
-      const r = await this.client.call('GetSceneItemId', { sceneName: SCENE, sourceName: SRC_VIDEO })
-      this.videoItemId = r.sceneItemId as number
+  /** Mutes an input and takes it off every audio track (an input without audio, e.g. a Linux v4l2 camera, is already silent). */
+  private async silence(inputName: string): Promise<void> {
+    await this.client.call('SetInputAudioTracks', { inputName, inputAudioTracks: { ...TRACKS_NONE } }).catch(ignoreNoAudio)
+    await this.client.call('SetInputMute', { inputName, inputMuted: true }).catch(ignoreNoAudio)
+  }
+
+  private async itemId(sourceName: string): Promise<number> {
+    const cached = this.itemIds.get(sourceName)
+    if (cached !== undefined) return cached
+    const r = await this.client.call('GetSceneItemId', { sceneName: SCENE, sourceName })
+    this.itemIds.set(sourceName, r.sceneItemId as number)
+    return r.sceneItemId as number
+  }
+
+  private async createInput(data: Record<string, unknown>): Promise<number> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const r = await this.client.call('CreateInput', data)
+        return r.sceneItemId as number
+      } catch (e) {
+        if (codeOf(e) !== RESOURCE_ALREADY_EXISTS || attempt >= CREATE_RETRIES) throw e
+        await new Promise((r) => setTimeout(r, CREATE_RETRY_MS))
+      }
     }
+  }
+
+  /** Z-order in SCENE: primary at the bottom, backup above it, subtitles on top. */
+  private async restack(): Promise<void> {
+    const { sceneItems } = await this.client.call('GetSceneItemList', { sceneName: SCENE })
+    const items = sceneItems as { sourceName: string; sceneItemId: number }[]
+    for (const it of items) this.itemIds.set(it.sourceName, it.sceneItemId)
+    const at = (name: string, sceneItemIndex: number): Promise<unknown> | undefined => {
+      const it = items.find((i) => i.sourceName === name)
+      if (it) return this.client.call('SetSceneItemIndex', { sceneName: SCENE, sceneItemId: it.sceneItemId, sceneItemIndex })
+    }
+    await at(SRC_VIDEO, 0)
+    if (items.some((i) => i.sourceName === SRC_BACKUP)) await at(SRC_BACKUP, 1)
+    await at(SRC_OVERLAY, items.length - 1)
+  }
+
+  /**
+   * Points a source slot (primary = SRC_VIDEO, backup = SRC_BACKUP) at a device, an image or a video.
+   * The input is recreated when its OBS kind has to change; the backup is created hidden.
+   */
+  async setSource(slot: SourceSlot, src: VideoSource): Promise<void> {
+    const inputName = slot === 'primary' ? SRC_VIDEO : SRC_BACKUP
+    const { inputKind, inputSettings } = sourceInput(src, this.platform)
+    let current: string | null = null
+    try {
+      current = (await this.client.call('GetInputSettings', { inputName })).inputKind as string
+    } catch (e) {
+      if (codeOf(e) !== RESOURCE_NOT_FOUND) throw e
+    }
+    if (current === inputKind) {
+      await this.client.call('SetInputSettings', { inputName, inputSettings })
+    } else {
+      if (current !== null) {
+        await this.client.call('RemoveInput', { inputName })
+        this.itemIds.delete(inputName)
+      }
+      const sceneItemId = await this.createInput({
+        sceneName: SCENE,
+        inputName,
+        inputKind,
+        inputSettings,
+        sceneItemEnabled: slot === 'primary' || this.backupVisible
+      })
+      this.itemIds.set(inputName, sceneItemId)
+    }
+    await this.silence(inputName)
     await this.client.call('SetSceneItemTransform', {
       sceneName: SCENE,
-      sceneItemId: this.videoItemId,
-      sceneItemTransform: {
-        positionX: 0,
-        positionY: 0,
-        boundsType: 'OBS_BOUNDS_SCALE_INNER',
-        boundsAlignment: 0,
-        boundsWidth: 1920,
-        boundsHeight: 1080
-      }
+      sceneItemId: await this.itemId(inputName),
+      sceneItemTransform: TRANSFORM_1080P
     })
+    await this.restack()
+  }
+
+  /** Shows or hides the backup above the primary (the primary itself always stays visible). */
+  async setBackupVisible(on: boolean): Promise<void> {
+    this.backupVisible = on
+    let sceneItemId: number
+    try {
+      sceneItemId = await this.itemId(SRC_BACKUP)
+    } catch (e) {
+      // No backup yet: it will be created with this visibility.
+      if (codeOf(e) === RESOURCE_NOT_FOUND) return
+      throw e
+    }
+    await this.client.call('SetSceneItemEnabled', { sceneName: SCENE, sceneItemId, sceneItemEnabled: on })
+  }
+
+  /** A tiny picture of the primary input alone, to tell whether it is absent (data URL). */
+  async probePrimary(): Promise<string> {
+    const r = await this.client.call('GetSourceScreenshot', { sourceName: SRC_VIDEO, imageFormat: 'png', imageWidth: 32 })
+    return r.imageData as string
   }
 
   async setAudioDevice(id: string): Promise<void> {
@@ -246,6 +374,40 @@ export class ObsController {
     }
   }
 
+  /** Records the output as `<baseName> <date time>` in dir (OBS appends the extension of the profile's format). */
+  async startRecord(dir: string, baseName: string): Promise<void> {
+    await this.client.call('SetRecordDirectory', { recordDirectory: dir })
+    await this.client.call('SetProfileParameter', {
+      parameterCategory: 'Output',
+      parameterName: 'FilenameFormatting',
+      parameterValue: `${baseName} %CCYY-%MM-%DD %hh-%mm-%ss`
+    })
+    await this.client.call('StartRecord')
+  }
+
+  /** Stops the recording; resolves the file path, or null when no recording was running. */
+  async stopRecord(): Promise<string | null> {
+    try {
+      const r = await this.client.call('StopRecord')
+      return (r?.outputPath as string | undefined) ?? null
+    } catch (e) {
+      if (codeOf(e) === OUTPUT_NOT_RUNNING) return null
+      throw e
+    }
+  }
+
+  /** Recording started ({active: true}) or stopped ({active: false, path}); the STARTING/STOPPING steps are not reported. */
+  recordState$(cb: (s: { active: boolean; path?: string }) => void): () => void {
+    const handler = (d: { outputState?: string; outputPath?: string | null }): void => {
+      if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED') cb({ active: true })
+      else if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') cb({ active: false, path: d.outputPath ?? undefined })
+    }
+    this.client.on('RecordStateChanged', handler)
+    return () => {
+      this.client.off('RecordStateChanged', handler)
+    }
+  }
+
   /**
    * Opens a windowed program projector (no monitor index: a normal window the user places freely).
    * No request can close or list projectors, so every call opens a new window.
@@ -264,7 +426,8 @@ export class ObsController {
 
   /** Called by LiveController after an OBS restart: forget cached scene item ids. */
   resetProjectorState(): void {
-    this.videoItemId = null
+    this.itemIds.clear()
+    this.backupVisible = false
   }
 
   async disconnect(): Promise<void> {

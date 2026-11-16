@@ -7,17 +7,28 @@ export interface SeedOptions {
 }
 
 /**
- * The stream only carries the room audio to LinTO: its video is scaled down and cheap to encode.
- * The canvas stays full HD for the projector (output window).
+ * Advanced output mode: two encoders on the full HD canvas. The stream only carries the room audio to
+ * LinTO, so its encoder rescales to 640×360 at a low bitrate; the recording keeps the full output
+ * (QR code readable, sharp subtitles).
  */
 const STREAM = { width: 640, height: 360, videoKbps: 200 }
+const RECORD = { videoKbps: 6000 }
+const AUDIO_KBPS = 128
+/** OBS_SCALE_DISABLE / OBS_SCALE_BILINEAR (libobs enum obs_scale_type). */
+const SCALE_DISABLE = 0
+const SCALE_BILINEAR = 3
 
 /**
- * Simple output mode encoder (OBS 32 frontend ids): the hardware H.264 encoder (VideoToolbox) on macOS —
- * the app ships for Apple Silicon only — and x264 at its cheapest preset on Linux.
+ * Advanced-mode encoder ids (OBS 32 encoder ids, not the Simple-mode aliases): the hardware H.264
+ * encoder (VideoToolbox) on macOS — the app ships for Apple Silicon only — and x264 on Linux.
  */
-const streamEncoder = (p: NodeJS.Platform): [string, string][] =>
-  p === 'darwin' ? [['StreamEncoder', 'apple_h264']] : [['StreamEncoder', 'x264'], ['Preset', 'ultrafast']]
+const videoEncoder = (p: NodeJS.Platform): string => (p === 'darwin' ? 'com.apple.videotoolbox.videoencoder.ave.avc' : 'obs_x264')
+
+/** Encoder settings, read by OBS from streamEncoder.json / recordEncoder.json in the profile directory. */
+function encoderSettings(p: NodeJS.Platform, kbps: number, x264Preset: string): Record<string, unknown> {
+  const common = { rate_control: 'CBR', bitrate: kbps, keyint_sec: 2 }
+  return p === 'darwin' ? { ...common, profile: 'high' } : { ...common, preset: x264Preset, profile: 'high' }
+}
 
 /** INI content we own: section → ordered [key, value] pairs. Other keys/sections belong to OBS or the user. */
 type IniSpec = [section: string, keys: [string, string][]][]
@@ -59,14 +70,30 @@ function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
         [
           ['BaseCX', String(width)],
           ['BaseCY', String(height)],
-          ['OutputCX', String(STREAM.width)],
-          ['OutputCY', String(STREAM.height)],
+          ['OutputCX', String(width)],
+          ['OutputCY', String(height)],
           ['FPSType', '0'],
           ['FPSCommon', String(fps)]
         ]
       ],
-      ['Output', [['Mode', 'Simple']]],
-      ['SimpleOutput', [['VBitrate', String(STREAM.videoKbps)], ['ABitrate', '128'], ...streamEncoder(o.platform)]]
+      ['Output', [['Mode', 'Advanced']]],
+      [
+        'AdvOut',
+        [
+          ['Encoder', videoEncoder(o.platform)],
+          ['TrackIndex', '1'],
+          ['Rescale', 'true'],
+          ['RescaleFilter', String(SCALE_BILINEAR)],
+          ['RescaleRes', `${STREAM.width}x${STREAM.height}`],
+          ['RecType', 'Standard'],
+          ['RecEncoder', videoEncoder(o.platform)],
+          ['RecFormat2', 'mkv'],
+          ['RecTracks', '1'],
+          ['RecRescale', 'false'],
+          ['RecRescaleFilter', String(SCALE_DISABLE)],
+          ['Track1Bitrate', String(AUDIO_KBPS)]
+        ]
+      ]
     ]
   }
 }
@@ -74,10 +101,22 @@ function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
 const renderSection = ([name, keys]: IniSpec[number]): string => `[${name}]\n${keys.map(([k, v]) => `${k}=${v}`).join('\n')}\n`
 const renderIni = (spec: IniSpec): string => spec.map(renderSection).join('\n')
 
+const PROFILE_DIR = 'basic/profiles/LinTO Live/'
+
+/** Files we own entirely: rewritten on every launch (so updates reach existing installs). */
+function ownedFiles(o: SeedOptions): Record<string, string> {
+  const json = (v: unknown): string => JSON.stringify(v, null, 2)
+  return {
+    [PROFILE_DIR + 'streamEncoder.json']: json(encoderSettings(o.platform, STREAM.videoKbps, 'ultrafast')),
+    [PROFILE_DIR + 'recordEncoder.json']: json(encoderSettings(o.platform, RECORD.videoKbps, 'veryfast'))
+  }
+}
+
 export function seedFiles(o: SeedOptions): Record<string, string> {
   const ini = Object.fromEntries(Object.entries(iniSpecs(o)).map(([rel, spec]) => [rel, renderIni(spec)]))
   return {
     ...ini,
+    ...ownedFiles(o),
     'basic/scenes/LinTO Live.json': JSON.stringify(
       {
         name: 'LinTO Live',
@@ -151,6 +190,7 @@ export function mergeIni(existing: string, spec: IniSpec): string {
 
 export async function writeSeed(obsConfigDir: string, o: SeedOptions): Promise<void> {
   const specs = iniSpecs(o)
+  const owned = ownedFiles(o)
   for (const [rel, content] of Object.entries(seedFiles(o))) {
     const p = join(obsConfigDir, rel)
     await mkdir(dirname(p), { recursive: true })
@@ -164,6 +204,8 @@ export async function writeSeed(obsConfigDir: string, o: SeedOptions): Promise<v
         /* absent */
       }
       await writeFile(p, existing === null ? content : mergeIni(existing, spec))
+    } else if (rel in owned) {
+      await writeFile(p, content)
     } else {
       await writeFile(p, content, { flag: 'wx' }).catch((e: NodeJS.ErrnoException) => {
         if (e.code !== 'EEXIST') throw e

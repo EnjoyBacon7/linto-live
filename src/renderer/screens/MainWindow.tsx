@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LiveState, SetupData } from '../../shared/ipc'
-import type { SessionSummary, Settings, Watermark } from '../../shared/types'
+import { DEFAULT_QR, type NewSessionOptions, type SessionSummary, type Settings, type Watermark } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 import { Banner } from '../ui/Banner'
 import { Button } from '../ui/Button'
@@ -8,6 +8,7 @@ import { Sheet } from '../ui/Sheet'
 import { CloseIcon } from '../ui/icons'
 import { ConfirmSheet } from '../main/ConfirmSheet'
 import { Inspector, type WatermarkTarget } from '../main/Inspector'
+import { QrSheet } from '../main/QrSheet'
 import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
 import { Sidebar } from '../main/Sidebar'
@@ -36,13 +37,14 @@ export interface MainWindowProps {
 }
 
 /** Selected session: an existing one (by name), or a pending new one created on LinTO at Démarrer. */
-type Selection = { name: string; pending?: { profileId?: number } }
+type Selection = { name: string; pending?: { profileId?: number; create: NewSessionOptions } }
 type SheetState =
   | { kind: 'new' }
   | { kind: 'terminate' }
   | { kind: 'switch'; target: Selection }
   | { kind: 'login' }
   | { kind: 'watermark' }
+  | { kind: 'qr' }
   /** « Nouvelle session » hit an existing session: `usable` offers to use it, otherwise the name is refused. */
   | { kind: 'exists'; name: string; usable: boolean; terminated?: boolean; rtmpOnly?: boolean }
   | null
@@ -165,7 +167,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       if (target.pending?.profileId !== undefined) await window.lintoLive.setup.save({ profileId: target.pending.profileId })
       // Arrêter came while the profile was being saved: the switch is dropped, it must not go live after the stop.
       if (busyRef.current !== b) return
-      const r = await window.lintoLive.live.start(target.name)
+      const r = await window.lintoLive.live.start(target.name, ...(target.pending ? [target.pending.create] as const : []))
       if (r.ok) {
         setReused(r.reused)
         setSel({ name: target.name })
@@ -243,7 +245,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   }
   /** Asks LinTO about the name first: an existing session (listed or not, e.g. someone else's) is never re-created. */
   const lookingUp = useRef(false)
-  const submitNew = async (name: string, profileId: number | undefined): Promise<void> => {
+  const submitNew = async (name: string, profileId: number | undefined, create: NewSessionOptions): Promise<void> => {
     if (lookingUp.current) return
     if (name === liveName) { setSheet(null); return }
     lookingUp.current = true
@@ -264,7 +266,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       })
       return
     }
-    const target: Selection = { name, pending: { profileId } }
+    const target: Selection = { name, pending: { profileId, create } }
     if (onAir) { setSheet({ kind: 'switch', target }); return }
     setSheet(null)
     setReused(null)
@@ -293,6 +295,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       setError(ipcErrorMessage(e))
       void refresh()
     })
+  }
+  const saveLanguage = (choice: string): void => {
+    if (!summary) return
+    const id = summary.id
+    setSettings((s) => (s ? { ...s, subtitleLanguages: { ...s.subtitleLanguages, [id]: choice } } : s))
+    window.lintoLive.live.setSubtitleLanguage(id, choice).catch((e) => setError(ipcErrorMessage(e)))
   }
   const clearSubtitles = (): void => {
     window.lintoLive.live.clearSubtitles().catch((e) => setError(ipcErrorMessage(e)))
@@ -386,6 +394,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           title={title}
           caption={caption}
           onAir={onAir}
+          recording={state.recording === 'on'}
           startedAt={state.startedAt}
           busy={busy}
           canStart={canStart}
@@ -398,10 +407,15 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           {...(manageBlocked ? { terminateBlocked: manageBlocked } : {})}
         />
         <div className="content-body">
-          <Stage onAir={onAir} hasCamera={!!settings?.videoDeviceId} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
+          <Stage onAir={onAir} hasCamera={!!settings?.primarySource && settings.primarySource.kind !== 'none'} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
+            {...(state.videoOnAir ? { videoOnAir: state.videoOnAir } : {})}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
+            onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
+            {...(summary?.visibility ? { visibility: summary.visibility } : {})}
+            {...(summary ? { languages: (summary.name === liveName && state.session?.languages) || summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
+              onLanguageChange: saveLanguage } : {})}
             {...(manageBlocked ? { watermarkBlocked: manageBlocked } : {})}
             onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />
         </div>
@@ -414,7 +428,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         profiles={data?.profiles ?? []}
         profileId={settings?.profileId}
         onOrgChange={(id) => void switchOrg(id)}
-        onSubmit={(n, p) => void submitNew(n, p)}
+        onSubmit={(n, p, o) => void submitNew(n, p, o)}
         onCancel={() => setSheet(null)}
       />
       <ConfirmSheet
@@ -461,6 +475,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         open={sheet?.kind === 'watermark' && !!summary}
         watermark={summary?.watermark ?? null}
         onApply={(w) => { setSheet(null); saveWatermark(w) }}
+        onCancel={() => setSheet(null)}
+      />
+      <QrSheet
+        open={sheet?.kind === 'qr'}
+        qr={{ ...DEFAULT_QR, ...settings?.qr }}
+        onApply={(q) => { setSheet(null); saveSettings({ qr: { ...DEFAULT_QR, ...settings?.qr, ...q } }) }}
         onCancel={() => setSheet(null)}
       />
       <Sheet title="Se reconnecter à LinTO" open={sheet?.kind === 'login'} onClose={() => setSheet(null)} footer={null}>

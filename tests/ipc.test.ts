@@ -1,5 +1,5 @@
 import { describe, it, expect, expectTypeOf, vi } from 'vitest'
-import { EVENT_CHANNELS, IPC, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
+import { EVENT_CHANNELS, IPC, checkNewSessionOptions, checkSettingsPatch, createLintoLiveApi, type LintoLiveApi, type Transport } from '../src/shared/ipc'
 
 describe('IPC constants', () => {
   it('values are unique', () => {
@@ -12,9 +12,9 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
-        'setupLoad', 'setupSave', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
+        'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
-        'liveGetTranscript', 'liveExportTranscript', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
+        'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
       ].sort()
     )
   })
@@ -23,6 +23,10 @@ describe('IPC constants', () => {
     expectTypeOf<LintoLiveApi['live']['start']>().parameter(0).toBeString()
     expectTypeOf<LintoLiveApi['setup']['load']>().returns.resolves.not.toHaveProperty('displays')
     expectTypeOf<LintoLiveApi['live']['showOutputWindow']>().returns.resolves.toBeVoid()
+    expectTypeOf<LintoLiveApi['setup']['pickMedia']>().parameter(0).toEqualTypeOf<'image' | 'video'>()
+    expectTypeOf<LintoLiveApi['setup']['pickMedia']>().returns.resolves.toEqualTypeOf<string | null>()
+    expectTypeOf<LintoLiveApi['setup']['pickFolder']>().returns.resolves.toEqualTypeOf<string | null>()
+    expectTypeOf<LintoLiveApi['live']['getState']>().returns.resolves.toHaveProperty('recording')
     expectTypeOf<LintoLiveApi['live']['getState']>().returns.resolves.toHaveProperty('phase')
   })
 })
@@ -53,9 +57,13 @@ describe('createLintoLiveApi', () => {
     await api.auth.status()
     await api.setup.load()
     await api.setup.save({ instance: 'i' })
+    await api.setup.pickMedia('image')
+    await api.setup.pickFolder()
     await api.sessions.list()
     await api.sessions.lookup('S')
     await api.live.start('S')
+    await api.live.start('S', { translations: ['en'], visibility: 'public' })
+    await api.live.setSubtitleLanguage('s1', 'en')
     await api.live.stop()
     await api.live.terminate()
     await api.live.showOutputWindow()
@@ -76,9 +84,13 @@ describe('createLintoLiveApi', () => {
       [IPC.authStatus],
       [IPC.setupLoad],
       [IPC.setupSave, { instance: 'i' }],
+      ['setup:pick-media', 'image'],
+      ['setup:pick-folder'],
       [IPC.sessionsList],
       ['sessions:lookup', 'S'],
       [IPC.liveStart, 'S'],
+      [IPC.liveStart, 'S', { translations: ['en'], visibility: 'public' }],
+      ['live:set-subtitle-language', 's1', 'en'],
       [IPC.liveStop],
       [IPC.liveTerminate],
       ['live:show-output'],
@@ -119,5 +131,62 @@ describe('createLintoLiveApi', () => {
     api.on('auth-required', () => {})
     api.on('transcript', () => {})
     expect(on.mock.calls.map((c) => c[0])).toEqual([IPC.evtLiveState, IPC.evtPreview, IPC.evtAuthRequired, IPC.evtTranscript])
+  })
+})
+
+describe('checkNewSessionOptions (live.start create options)', () => {
+  it('accepts absent options and valid ones', () => {
+    expect(checkNewSessionOptions(undefined)).toBeUndefined()
+    expect(checkNewSessionOptions({ translations: ['en'], visibility: 'public' })).toEqual({ translations: ['en'], visibility: 'public' })
+    expect(checkNewSessionOptions({ translations: [], visibility: 'password', password: 'secret' }))
+      .toEqual({ translations: [], visibility: 'password', password: 'secret' })
+  })
+  it('rejects invalid options', () => {
+    expect(() => checkNewSessionOptions({ translations: [], visibility: 'x' })).toThrow()
+    expect(() => checkNewSessionOptions({ translations: 'en', visibility: 'public' })).toThrow()
+    expect(() => checkNewSessionOptions({ translations: [1], visibility: 'public' })).toThrow()
+    expect(() => checkNewSessionOptions({ translations: [], visibility: 'password' })).toThrow()
+    expect(() => checkNewSessionOptions('public')).toThrow()
+    expect(() => checkNewSessionOptions(null)).toThrow()
+  })
+})
+
+describe('checkSettingsPatch (setup.save patch)', () => {
+  it('accepts valid patches of the new fields, and other fields as they are', () => {
+    const ok = [
+      { primarySource: { kind: 'none' } },
+      { primarySource: { kind: 'device', id: 'cam' } },
+      { backupSource: { kind: 'image', path: '/Users/x/secours.png' } },
+      { backupSource: { kind: 'video', path: '/home/x/boucle.mp4' } },
+      { recordDir: '/Users/x/Movies/LinTO Live' },
+      { qr: { display: true, pinned: false, frequency: 60, duration: 15 } },
+      { blackIsAbsent: false, recordEnabled: true },
+      { instance: 'https://studio.linto.ai', profileId: 2, subtitleFontSize: 40 }
+    ]
+    for (const p of ok) expect(checkSettingsPatch(p)).toEqual(p)
+  })
+  it('rejects malformed patches', () => {
+    const bad: unknown[] = [
+      null, 'x', [],
+      { primarySource: { kind: 'camera', id: 'cam' } },
+      { primarySource: { kind: 'device', id: '' } },
+      { primarySource: { kind: 'device' } },
+      { primarySource: null },
+      { backupSource: { kind: 'image', path: 'relatif.png' } },
+      { backupSource: { kind: 'video', path: '' } },
+      { backupSource: { kind: 'image', path: 3 } },
+      { recordDir: 'Movies' },
+      { recordDir: '' },
+      { recordDir: 42 },
+      { qr: { display: 'yes', pinned: false, frequency: 60, duration: 15 } },
+      { qr: { display: true, pinned: false, frequency: 0, duration: 15 } },
+      { qr: { display: true, pinned: false, frequency: 60, duration: Infinity } },
+      { qr: { display: true, pinned: false, frequency: 60 } },
+      { qr: null },
+      { blackIsAbsent: 'true' },
+      { recordEnabled: 1 },
+      { subtitleLanguages: { s1: 'en' } }
+    ]
+    for (const p of bad) expect(() => checkSettingsPatch(p), JSON.stringify(p)).toThrow('Réglages invalides.')
   })
 })

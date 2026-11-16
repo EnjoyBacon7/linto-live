@@ -7,17 +7,30 @@ export interface StreamEndpoints {
 }
 
 export type SessionStatus = 'on_schedule' | 'ready' | 'active' | 'paused' | 'terminated'
-export interface Channel { id: number; name: string; streamEndpoints?: StreamEndpoints }
+export type SessionVisibility = 'private' | 'organization' | 'public'
+export interface Channel {
+  id: number; name: string; streamEndpoints?: StreamEndpoints
+  /** Spoken languages (e.g. `fr-FR`). */
+  languages?: string[]
+  /** Translation target codes. */
+  translations?: string[]
+}
 export interface Session {
   id: string; name: string; status: SessionStatus; channels: Channel[]; owner?: string; createdAt?: string; updatedAt?: string
+  visibility?: SessionVisibility
   /** Free-form session metadata (LinTO Studio keeps the watermark settings under `@watermark`). */
   meta?: Record<string, unknown>
 }
+/** A choice of language for the subtitle band: `value` is 'original', 'crossSubtitles' or a translation code. */
+export interface SubtitleLanguageOption { value: string; label: string }
 /** Sessions the user can stream to (the others of the organisation are not listed). */
 export interface SessionSummary {
   id: string; name: string; status: Exclude<SessionStatus, 'terminated'>; updatedAt?: string
   /** The session's watermark, completed with the instance defaults. */
   watermark: Watermark
+  visibility?: SessionVisibility
+  /** Choices for the language shown in the subtitle band (from the first channel). */
+  languages: SubtitleLanguageOption[]
 }
 
 /**
@@ -42,7 +55,21 @@ export interface WatermarkConfig {
 export type SessionLookup = 'none' | 'usable' | 'forbidden' | 'rtmp-only' | 'terminated'
 /** `rights`: what the user may do there (absent when LinTO did not say: then LinTO alone decides). */
 export interface Organization { id: string; name: string; rights?: OrgRights }
-export interface TranscriberProfile { id: number; name: string; languages?: string[] }
+export interface TranscriberProfile { id: number; name: string; languages?: string[]; translations?: string[] }
+/** A LinTO translation of a segment into `targetLang` (e.g. 'en'); `sourceLang`: the spoken language (e.g. 'fr-FR'). */
+export interface TranslationEvent {
+  segmentId: number
+  text: string
+  sourceLang?: string | null
+  targetLang: string
+  final: boolean
+  astart?: string | null
+  start?: number | null
+  end?: number | null
+  locutor?: string | null
+}
+/** Options of a new session: translation targets and who may see it (`password`: public + a password). */
+export interface NewSessionOptions { translations: string[]; visibility: SessionVisibility | 'password'; password?: string }
 export interface AuthMethod { path: string; from: string; name: string }
 /** LinTO rejected the token (expired, revoked…): logging in again is the fix. */
 export class UnauthorizedError extends Error {
@@ -87,17 +114,36 @@ export interface Bounds { x: number; y: number; width: number; height: number }
 /** Email + password kept for « Se souvenir de moi » (stored encrypted with the OS keychain). */
 export interface SavedLogin { email: string; password: string }
 
+/** Same display cycle as the watermark: every `frequency` s for `duration` s (always when pinned). */
+export interface QrSettings { display: boolean; pinned: boolean; frequency: number; duration: number }
+export const DEFAULT_QR: QrSettings = { display: false, pinned: false, frequency: 60, duration: 15 }
+
+export type VideoSource = { kind: 'none' } | { kind: 'device'; id: string } | { kind: 'image' | 'video'; path: string }
+
 export interface Settings {
   instance: string
   orgId?: string
   profileId?: number
-  videoDeviceId?: string
+  /** Main video source (absent = none). */
+  primarySource?: VideoSource
+  /** Fallback video source, shown when the main one is absent. */
+  backupSource?: VideoSource
+  /** A black picture counts as an absent source (default true). */
+  blackIsAbsent?: boolean
   audioDeviceId?: string
   lastSessionName?: string
   /** Subtitle band shown in the video (default true). */
   subtitlesVisible?: boolean
   /** Subtitle font size in px on the 1920×1080 canvas (default 48). */
   subtitleFontSize?: number
+  /** Language shown in the subtitle band, per session id (absent = the original language). */
+  subtitleLanguages?: Record<string, string>
+  /** QR code of the session's public link in the video (default: hidden). */
+  qr?: QrSettings
+  /** Record each show to a file, read at Démarrer (default false). */
+  recordEnabled?: boolean
+  /** Folder of the recordings (default: « LinTO Live » in the user's Videos folder); created when missing. */
+  recordDir?: string
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
 }

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type Settings, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
 import { PopUp } from '../ui/PopUp'
-import { CameraIcon, CaptionsIcon, MicIcon } from '../ui/icons'
+import { CameraIcon, CaptionsIcon, MicIcon, RecordIcon } from '../ui/icons'
 
 /** Watermark of the selected session; `pending` = the session does not exist on LinTO yet. */
 export type WatermarkTarget = { watermark: Watermark } | { pending: true } | null
@@ -25,9 +25,18 @@ export interface InspectorProps {
   onWatermarkSettings?(): void
   /** Why the watermark cannot be changed (it is stored on the LinTO session); absent = it can. */
   watermarkBlocked?: string
+  /** Subtitle languages of the selected session, the one shown, and its setter (absent languages = no session yet). */
+  languages?: SubtitleLanguageOption[]
+  language?: string
+  onLanguageChange?(v: string): void
+  /** Visibility of the selected session on LinTO (the public link needs 'public'). */
+  visibility?: SessionVisibility
+  onQrSettings?(): void
+  /** Which source is on air when a backup is configured (absent otherwise). */
+  videoOnAir?: 'primary' | 'backup'
 }
 
-function Check({ label, checked, disabled, onChange }: {
+export function Check({ label, checked, disabled, onChange }: {
   label: string; checked: boolean; disabled?: boolean; onChange(v: boolean): void
 }) {
   return (
@@ -61,21 +70,71 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
   )
 }
 
+/** Path cut in the middle (CSS only truncates the end): the tail (folder name) stays visible. */
+function MiddleEllipsis({ text }: { text: string }) {
+  const tail = Math.min(18, Math.floor(text.length / 2))
+  return (
+    <>
+      <span className="path-head">{text.slice(0, text.length - tail)}</span>
+      <span className="path-tail">{text.slice(text.length - tail)}</span>
+    </>
+  )
+}
+
+const baseName = (path: string): string => path.split(/[/\\]/).filter(Boolean).pop() ?? path
+
+const encodeSource = (s: VideoSource | undefined): string =>
+  !s || s.kind === 'none' ? 'none' : s.kind === 'device' ? `device:${s.id}` : `file:${s.path}`
+
+/** Video source menu: Aucune, each device, the current file (kept selectable), then the pickers. */
+function SourcePopUp({ label, source, devices, disabled, onChange }: {
+  label: string; source: VideoSource | undefined; devices: { id: string; name: string }[]; disabled: boolean
+  onChange(s: VideoSource): void
+}) {
+  const options = [
+    { value: 'none', label: 'Aucune' },
+    ...devices.map((d) => ({ value: `device:${d.id}`, label: d.name })),
+    ...(source && (source.kind === 'image' || source.kind === 'video')
+      ? [{ value: `file:${source.path}`, label: baseName(source.path) }] : []),
+    { value: 'pick:image', label: 'Image…' },
+    { value: 'pick:video', label: 'Vidéo…' }
+  ]
+  const change = (v: string): void => {
+    if (v === 'none') onChange({ kind: 'none' })
+    else if (v.startsWith('device:')) onChange({ kind: 'device', id: v.slice(7) })
+    else if (v.startsWith('pick:')) {
+      const kind = v === 'pick:image' ? 'image' : 'video'
+      void window.lintoLive.setup.pickMedia(kind).then((path) => { if (path) onChange({ kind, path }) }, () => {})
+    }
+  }
+  return <PopUp label={label} className="inspector-control" value={encodeSource(source)} placeholder="Choisir…"
+    options={options} disabled={disabled} onChange={change} />
+}
+
 /** Right pane (inspector): camera (optional), micro + level, transcription profile (read-only here), subtitles. */
 export function Inspector(p: InspectorProps) {
   const { data, settings, profile, onChange } = p
   const opts = (items: { id: string; name: string }[] = []) => items.map((d) => ({ value: d.id, label: d.name }))
   const shown = settings?.subtitlesVisible !== false
   const wm = p.watermark && 'watermark' in p.watermark ? p.watermark.watermark : null
+  const qr = { ...DEFAULT_QR, ...settings?.qr }
+  const language = p.languages?.some((l) => l.value === p.language) ? p.language! : 'original'
   const wmEditable = !!wm && p.watermarkBlocked === undefined
   return (
     <aside className="inspector" aria-label="Réglages">
       <section className="inspector-group">
-        <h3 className="inspector-label"><CameraIcon size={14} />Caméra</h3>
-        {/* Optional: without a camera the app is a plain LinTO client (audio only, transcript here). */}
-        <PopUp label="Caméra" className="inspector-control" value={settings?.videoDeviceId ?? ''}
-          placeholder="Choisir…" options={[{ value: '', label: 'Aucune' }, ...opts(data?.videoDevices)]} disabled={!data}
-          onChange={(v) => onChange({ videoDeviceId: v })} />
+        <h3 className="inspector-label"><CameraIcon size={14} />Vidéo</h3>
+        {/* Optional: without a source the app is a plain LinTO client (audio only, transcript here). */}
+        <SourcePopUp label="Source principale" source={settings?.primarySource} devices={data?.videoDevices ?? []}
+          disabled={!data} onChange={(v) => onChange({ primarySource: v })} />
+        <SourcePopUp label="Source de secours" source={settings?.backupSource} devices={data?.videoDevices ?? []}
+          disabled={!data} onChange={(v) => onChange({ backupSource: v })} />
+        <Check label="Écran noir = source absente" checked={settings?.blackIsAbsent !== false}
+          disabled={!settings || !settings.backupSource || settings.backupSource.kind === 'none'}
+          onChange={(v) => onChange({ blackIsAbsent: v })} />
+        {p.videoOnAir && (
+          <p className="inspector-note">À l’antenne : {p.videoOnAir === 'backup' ? 'secours' : 'principale'}</p>
+        )}
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><MicIcon size={14} />Micro</h3>
@@ -93,6 +152,15 @@ export function Inspector(p: InspectorProps) {
           onChange={(v) => onChange({ subtitlesVisible: v })} />
         {shown && (
           <>
+            <label className="field inspector-inline">
+              <span className="field-label">Langue affichée</span>
+              <PopUp label="Langue affichée" value={language}
+                options={p.languages ?? [{ value: 'original', label: 'Langue originale' }]} disabled={!p.languages}
+                onChange={(v) => p.onLanguageChange?.(v)} />
+            </label>
+            {!data?.watermarkEnabled && p.watermark && 'pending' in p.watermark && (
+              <p className="inspector-note">Réglable une fois la session créée sur LinTO (au démarrage).</p>
+            )}
             <FontSize value={settings?.subtitleFontSize ?? DEFAULT_SUBTITLE_FONT_SIZE} disabled={!settings}
               onChange={(v) => onChange({ subtitleFontSize: v })} />
             {data?.watermarkEnabled && (
@@ -115,6 +183,35 @@ export function Inspector(p: InspectorProps) {
             </Button>
           </>
         )}
+        <div className="inspector-subgroup">
+          <Check label="Afficher le QR code" checked={qr.display} disabled={!settings}
+            onChange={(v) => onChange({ qr: { ...qr, display: v } })} />
+          <Check label="Épingler le QR code" checked={qr.pinned} disabled={!settings || !qr.display}
+            onChange={(v) => onChange({ qr: { ...qr, pinned: v } })} />
+          <Button className="inspector-control" disabled={!settings} onClick={() => p.onQrSettings?.()}>
+            Paramètres du QR code…
+          </Button>
+          {qr.display && p.visibility !== undefined && p.visibility !== 'public' && (
+            <p className="inspector-note">
+              Le public devra se connecter à LinTO pour ouvrir ce lien : rendre la session publique dans LinTO Studio.
+            </p>
+          )}
+        </div>
+      </section>
+      <section className="inspector-group" aria-label="Enregistrement">
+        <h3 className="inspector-label"><RecordIcon size={14} />Enregistrement</h3>
+        <Check label="Enregistrer le direct" checked={settings?.recordEnabled === true} disabled={!settings}
+          onChange={(v) => onChange({ recordEnabled: v })} />
+        {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
+        <p className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
+          title={settings?.recordDir}>
+          {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Vidéos (Films sur macOS) › LinTO Live'}
+        </p>
+        <Button className="inspector-control" disabled={!settings} onClick={() => {
+          void window.lintoLive.setup.pickFolder().then((dir) => { if (dir) onChange({ recordDir: dir }) }, () => {})
+        }}>
+          Choisir…
+        </Button>
       </section>
     </aside>
   )

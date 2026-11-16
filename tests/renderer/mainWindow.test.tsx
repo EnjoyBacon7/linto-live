@@ -11,15 +11,16 @@ import { makeApi, withEvents } from './helpers'
 const fn = (x: unknown) => x as ReturnType<typeof vi.fn>
 
 const WM: Watermark = { display: false, pinned: false, content: 'Transcription by LinTO.ai $linto', frequency: 600, duration: 10 }
+const LANGS = [{ value: 'original', label: 'Langue originale' }]
 const SESSIONS: SessionSummary[] = [
-  { id: 's1', name: 'Conférence', status: 'ready', watermark: WM },
-  { id: 's2', name: 'Atelier', status: 'paused', watermark: WM },
-  { id: 's3', name: 'Externe', status: 'on_schedule', watermark: WM },
-  { id: 's4', name: 'Plénière', status: 'active', watermark: WM }
+  { id: 's1', name: 'Conférence', status: 'ready', watermark: WM, languages: LANGS },
+  { id: 's2', name: 'Atelier', status: 'paused', watermark: WM, languages: LANGS },
+  { id: 's3', name: 'Externe', status: 'on_schedule', watermark: WM, languages: LANGS },
+  { id: 's4', name: 'Plénière', status: 'active', watermark: WM, languages: LANGS }
 ]
 
 const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<SetupData> = {}): SetupData => ({
-  settings: { instance: 'https://studio.linto.ai', orgId: 'o1', profileId: 1, videoDeviceId: 'v1', audioDeviceId: 'a1', ...over },
+  settings: { instance: 'https://studio.linto.ai', orgId: 'o1', profileId: 1, primarySource: { kind: 'device', id: 'v1' }, audioDeviceId: 'a1', ...over },
   organizations: [{ id: 'o1', name: 'Org' }],
   profiles: [{ id: 1, name: 'Français' }, { id: 2, name: 'Anglais' }],
   videoDevices: [{ id: 'v1', name: 'Capture HDMI' }, { id: 'v2', name: 'FaceTime HD' }],
@@ -28,10 +29,10 @@ const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<Set
   ...extra
 })
 
-const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off' }
+const IDLE: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off' }
 const live = (over: Partial<LiveState> = {}): LiveState => ({
   phase: 'live', session: { name: 'Conférence', status: 'active' }, stream: 'active', captions: 'live', obs: 'running',
-  output: 'shown', startedAt: Date.now() - 5000, ...over
+  output: 'shown', recording: 'off', startedAt: Date.now() - 5000, ...over
 })
 
 let api: LintoLiveApi
@@ -136,12 +137,12 @@ describe('Sidebar', () => {
 
 describe('Démarrer', () => {
   it('is disabled without a session or a micro; the camera is optional', async () => {
-    setup({}, setupData({ videoDeviceId: undefined, audioDeviceId: undefined }))
+    setup({}, setupData({ primarySource: undefined, audioDeviceId: undefined }))
     await renderMain()
     expect(startBtn().disabled).toBe(true)
     await userEvent.click(row('Conférence'))
     expect(startBtn().disabled).toBe(true)
-    expect((screen.getByLabelText('Caméra') as HTMLSelectElement).value).toBe('') // « Aucune »
+    expect((screen.getByLabelText('Source principale') as HTMLSelectElement).value).toBe('none') // « Aucune »
     await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
     expect(startBtn().disabled).toBe(false)
   })
@@ -149,8 +150,8 @@ describe('Démarrer', () => {
   it('the camera can be set back to « Aucune »', async () => {
     setup()
     await renderMain()
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
-    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: '' })
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'Aucune')
+    expect(api.setup.save).toHaveBeenCalledWith({ primarySource: { kind: 'none' } })
   })
 
   it('starts an existing session and shows « réutilisée », then refreshes the list', async () => {
@@ -189,6 +190,86 @@ describe('Démarrer', () => {
   })
 })
 
+describe('Nouvelle session… options', () => {
+  const withTr = () => setupData({}, { profiles: [{ id: 1, name: 'Français', translations: ['en', 'de'] }] })
+  it('new session sends translations and visibility on Démarrer', async () => {
+    setup({}, withTr())
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    await userEvent.type(within(sheet).getByLabelText('Nom'), 'Débat')
+    await userEvent.click(within(sheet).getByRole('checkbox', { name: 'Anglais' }))
+    await userEvent.selectOptions(within(sheet).getByLabelText('Visibilité'), 'public')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'OK' }))
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: ['en'], visibility: 'public' })
+  })
+
+  it('password visibility needs a password', async () => {
+    setup({}, withTr())
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    await userEvent.type(within(sheet).getByLabelText('Nom'), 'Débat')
+    await userEvent.selectOptions(within(sheet).getByLabelText('Visibilité'), 'password')
+    const ok = within(sheet).getByRole('button', { name: 'OK' }) as HTMLButtonElement
+    expect(ok.disabled).toBe(true)
+    await userEvent.type(within(sheet).getByLabelText('Mot de passe'), 'x')
+    expect(ok.disabled).toBe(false)
+    await userEvent.click(ok)
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { visibility: 'password', password: 'x', translations: [] })
+  })
+})
+
+describe('Langue affichée', () => {
+  it('lists the session languages and saves the choice', async () => {
+    const langs = [{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }]
+    setup({}, setupData(), [{ ...SESSIONS[0]!, languages: langs }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect(pop.value).toBe('original')
+    await userEvent.selectOptions(pop, 'en')
+    expect(api.live.setSubtitleLanguage).toHaveBeenCalledWith('s1', 'en')
+    expect((screen.getByLabelText('Langue affichée') as HTMLSelectElement).value).toBe('en')
+  })
+})
+
+describe('Langue affichée (no session)', () => {
+  it('the disabled fallback reads like the option it stands for', async () => {
+    setup()
+    await renderMain()
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect(pop.disabled).toBe(true)
+    expect([...pop.options].map((o) => o.text)).toEqual(['Langue originale'])
+  })
+})
+
+describe('Langue affichée (session on air)', () => {
+  it('prefers the on-air session options over the session list ones', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const onAir = [{ value: 'original', label: 'Langue originale' }, { value: 'de', label: 'allemand' }]
+    act(() => emit('live-state', live({ session: { name: 'Conférence', status: 'active', languages: onAir } })))
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect([...pop.options].map((o) => o.value)).toEqual(['original', 'de'])
+    await userEvent.selectOptions(pop, 'de')
+    expect(api.live.setSubtitleLanguage).toHaveBeenCalledWith('s1', 'de')
+  })
+
+  it('falls back to the session list options while the on-air ones are not known', async () => {
+    const langs = [{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }]
+    setup({}, setupData(), [{ ...SESSIONS[0]!, languages: langs }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    act(() => emit('live-state', live()))
+    const pop = screen.getByLabelText('Langue affichée') as HTMLSelectElement
+    expect([...pop.options].map((o) => o.value)).toEqual(['original', 'en'])
+  })
+})
+
 describe('Nouvelle session…', () => {
   it('selects a pending session (not created) and saves the profile before starting it', async () => {
     setup()
@@ -206,7 +287,7 @@ describe('Nouvelle session…', () => {
 
     await userEvent.click(startBtn())
     expect(api.setup.save).toHaveBeenCalledWith({ profileId: 2 })
-    expect(api.live.start).toHaveBeenCalledWith('Débat')
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: [], visibility: 'organization' })
     const saveOrder = fn(api.setup.save).mock.invocationCallOrder.at(-1)!
     expect(saveOrder).toBeLessThan(fn(api.live.start).mock.invocationCallOrder[0]!)
   })
@@ -467,7 +548,7 @@ describe('Switch while live', () => {
     expect(screen.getByText('Basculer le direct sur « Débat » ?')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
     expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
-    expect(api.live.start).toHaveBeenCalledWith('Débat')
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: [], visibility: 'organization' })
   })
 
   it('Arrêter during the profile save of a switch: the new session is not started after the stop', async () => {
@@ -488,17 +569,17 @@ describe('Switch while live', () => {
 
 describe('Stage, inspector and status bar', () => {
   it('shows the camera preview above the transcript once a camera is chosen', async () => {
-    setup({}, setupData({ videoDeviceId: undefined }))
+    setup({}, setupData({ primarySource: undefined }))
     await renderMain()
     expect(screen.queryByText('Aperçu en attente…')).toBeNull()
     expect(api.preview.subscribe).not.toHaveBeenCalled() // no camera: no screenshot polling
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'FaceTime HD')
     expect(api.preview.subscribe).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Aperçu en attente…')).toBeTruthy()
     act(() => emit('preview', 'data:image/jpeg;base64,AAA'))
     expect((screen.getByRole('img', { name: 'Aperçu de la caméra' }) as HTMLImageElement).src).toBe('data:image/jpeg;base64,AAA')
     expect(screen.getByText('La transcription s’affichera ici au démarrage du direct.')).toBeTruthy() // transcript still there
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'Aucune')
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'Aucune')
     expect(api.preview.unsubscribe).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('img', { name: 'Aperçu de la caméra' })).toBeNull()
   })
@@ -597,9 +678,9 @@ describe('Stage, inspector and status bar', () => {
     setup()
     await renderMain()
     act(() => emit('live-state', live()))
-    expect((screen.getByLabelText('Caméra') as HTMLSelectElement).disabled).toBe(false)
-    await userEvent.selectOptions(screen.getByLabelText('Caméra'), 'v2')
-    expect(api.setup.save).toHaveBeenCalledWith({ videoDeviceId: 'v2' })
+    expect((screen.getByLabelText('Source principale') as HTMLSelectElement).disabled).toBe(false)
+    await userEvent.selectOptions(screen.getByLabelText('Source principale'), 'FaceTime HD')
+    expect(api.setup.save).toHaveBeenCalledWith({ primarySource: { kind: 'device', id: 'v2' } })
   })
 
   it('shows the warning carried by live-state, also while idle, and clears it', async () => {
@@ -830,13 +911,49 @@ describe('Devices at launch', () => {
     setup({ live: { getState: vi.fn().mockResolvedValue({ ...IDLE, obs: 'down' }) } as never, setup: { load } as never })
     await renderMain()
     expect(load).toHaveBeenCalledTimes(1)
-    const cam = () => screen.getByLabelText('Caméra') as HTMLSelectElement
+    const cam = () => screen.getByLabelText('Source principale') as HTMLSelectElement
     expect(cam().selectedOptions[0]?.textContent).toBe('Choisir…')
     act(() => emit('live-state', IDLE))
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(cam().selectedOptions[0]?.textContent).toBe('Capture HDMI'))
     act(() => emit('live-state', { ...IDLE, output: 'shown' }))
     expect(load).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('Inspector: sources vidéo', () => {
+  const noBackup = () => screen.getByLabelText('Source de secours') as HTMLSelectElement
+
+  it('choosing Image… stores an image source', async () => {
+    setup({ setup: { pickMedia: vi.fn().mockResolvedValue('/x/logo.png') } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Image…')
+    expect(api.setup.pickMedia).toHaveBeenCalledWith('image')
+    expect(api.setup.save).toHaveBeenCalledWith({ backupSource: { kind: 'image', path: '/x/logo.png' } })
+    await waitFor(() => expect(noBackup().selectedOptions[0]?.textContent).toBe('logo.png'))
+  })
+
+  it('cancelled picker keeps the previous source', async () => {
+    setup({ setup: { pickMedia: vi.fn().mockResolvedValue(null) } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Vidéo…')
+    expect(api.setup.pickMedia).toHaveBeenCalledWith('video')
+    expect(api.setup.save).not.toHaveBeenCalled()
+    expect(noBackup().value).toBe('none')
+  })
+
+  it('on-air status shows secours', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ videoOnAir: 'backup' })) } as never })
+    await renderMain()
+    expect(await screen.findByText('À l’antenne : secours')).toBeTruthy()
+  })
+
+  it('the black-screen check is ticked by default and disabled without a backup', async () => {
+    setup()
+    await renderMain()
+    const box = screen.getByRole('checkbox', { name: 'Écran noir = source absente' }) as HTMLInputElement
+    expect(box.checked).toBe(true)
+    expect(box.disabled).toBe(true)
   })
 })
 
@@ -858,6 +975,32 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     await userEvent.click(box('Afficher le sous-titre'))
     expect(fn(api.setup.save)).toHaveBeenCalledWith({ subtitlesVisible: false })
     expect(screen.queryByRole('spinbutton', { name: 'Taille de la police (px)' })).toBeNull()
+  })
+
+  it('QR note when the session is not public', async () => {
+    const NOTE = /Le public devra se connecter à LinTO/
+    setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'organization' }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    expect(screen.queryByText(NOTE)).toBeNull()
+    await userEvent.click(box('Afficher le QR code'))
+    expect(fn(api.setup.save)).toHaveBeenCalledWith({ qr: { display: true, pinned: false, frequency: 60, duration: 15 } })
+    expect(screen.getByText(NOTE)).toBeTruthy()
+  })
+
+  it('no QR note when the session is public', async () => {
+    setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'public' }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    await userEvent.click(box('Afficher le QR code'))
+    expect(screen.queryByText(/Le public devra se connecter à LinTO/)).toBeNull()
+  })
+
+  it('stored language not offered shows Langue originale', async () => {
+    setup({}, setupData({ subtitleLanguages: { s1: 'xx' } }), [{ ...SESSIONS[0], languages: [{ value: 'original', label: 'Langue originale' }, { value: 'en', label: 'Anglais' }] }])
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    expect((screen.getByRole('combobox', { name: 'Langue affichée' }) as HTMLSelectElement).value).toBe('original')
   })
 
   it('watermark controls need a session that exists on LinTO, and save on it', async () => {
@@ -982,5 +1125,46 @@ describe('organisation rights', () => {
     const dlg = screen.getByRole('dialog', { name: 'Nouvelle session' })
     expect((within(dlg).getByRole('button', { name: 'OK' }) as HTMLButtonElement).disabled).toBe(true)
     expect(within(dlg).getByText(/Aucun profil de transcription disponible/)).toBeTruthy()
+  })
+})
+
+describe('Enregistrement', () => {
+  it('choosing a folder saves recordDir', async () => {
+    setup({ setup: { pickFolder: vi.fn().mockResolvedValue('/Users/x/Rec') } as never })
+    await renderMain()
+    expect(screen.getByText('Vidéos (Films sur macOS) › LinTO Live')).toBeTruthy()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
+    expect(api.setup.pickFolder).toHaveBeenCalled()
+    expect(api.setup.save).toHaveBeenCalledWith({ recordDir: '/Users/x/Rec' })
+    await waitFor(() => expect(screen.getByTitle('/Users/x/Rec')).toBeTruthy())
+  })
+
+  it('cancelled folder picker saves nothing', async () => {
+    setup({ setup: { pickFolder: vi.fn().mockResolvedValue(null) } as never })
+    await renderMain()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
+    expect(api.setup.save).not.toHaveBeenCalled()
+  })
+
+  it('the checkbox saves recordEnabled; on air it applies at the next Démarrer', async () => {
+    setup()
+    await renderMain()
+    expect(screen.queryByText('S’applique au prochain Démarrer.')).toBeNull()
+    await userEvent.click(screen.getByLabelText('Enregistrer le direct'))
+    expect(api.setup.save).toHaveBeenCalledWith({ recordEnabled: true })
+    act(() => emit('live-state', live()))
+    expect(await screen.findByText('S’applique au prochain Démarrer.')).toBeTruthy()
+  })
+
+  it('REC pill shows while recording', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'on' })) } as never })
+    await renderMain()
+    expect(within(toolbar()).getByText('REC')).toBeTruthy()
+  })
+
+  it('no REC pill when not recording', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'off' })) } as never })
+    await renderMain()
+    expect(within(toolbar()).queryByText('REC')).toBeNull()
   })
 })

@@ -92,13 +92,15 @@ function setup(meta?: Record<string, unknown>) {
   })
   const ctl = {
     ensureScene: vi.fn(async () => {}), listVideoDevices: vi.fn(async () => []), listAudioDevices: vi.fn(async () => []),
-    setVideoDevice: vi.fn(async () => {}), setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
+    setSource: vi.fn(async () => {}), setBackupVisible: vi.fn(async () => {}), probePrimary: vi.fn(async () => ''),
+    setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}), screenshot: vi.fn(async () => ''), startStream: vi.fn(async () => {}),
     stopStream: vi.fn(async () => true), streamState$: vi.fn(() => () => {}), openOutputWindow: vi.fn(async () => {}),
-    showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {}), ping: vi.fn(async () => {})
+    showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {}), ping: vi.fn(async () => {}),
+    startRecord: vi.fn(async () => {}), stopRecord: vi.fn(async () => null), recordState$: vi.fn(() => () => {})
   }
   const overlay = { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) }
-  let data: Settings = { instance: 'https://x', orgId: 'o', profileId: 1, videoDeviceId: 'v', audioDeviceId: 'a' }
+  let data: Settings = { instance: 'https://x', orgId: 'o', profileId: 1, primarySource: { kind: 'device', id: 'v' }, audioDeviceId: 'a' }
   const settings = { get: vi.fn(() => ({ ...data })), update: vi.fn((p: Partial<Settings>) => { data = { ...data, ...p } }), setToken: vi.fn() }
   const deps = {
     obs, controllerFactory: vi.fn(async () => ctl),
@@ -107,7 +109,8 @@ function setup(meta?: Record<string, unknown>) {
       createSession: vi.fn(async () => sessions[0]!), terminateSession: vi.fn(async () => {})
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
-    overlay, settings, platform: 'darwin' as const, watermarkConfig: () => CFG
+    overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', decodeLuma: () => null, watermarkConfig: () => CFG,
+    mkdirp: async () => {}, defaultRecordDir: '/rec'
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const styles = () => overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')
@@ -121,7 +124,7 @@ describe('LiveController subtitle style', () => {
   it('boot sends the local settings with no watermark', async () => {
     const t = setup()
     await t.live.boot()
-    expect(t.styles()).toEqual([{ type: 'style', visible: true, fontSize: 48, watermark: resolveWatermark(undefined, CFG) }])
+    expect(t.styles()).toEqual([{ type: 'style', visible: true, fontSize: 48, watermark: resolveWatermark(undefined, CFG), qr: null }])
   })
 
   it('start uses the session watermark (before the reset), stop drops it', async () => {
@@ -130,7 +133,7 @@ describe('LiveController subtitle style', () => {
     t.overlay.push.mockClear()
     await t.live.start('Conf')
     const msgs = t.overlay.push.mock.calls.map((c) => c[0])
-    expect(msgs[0]).toEqual({ type: 'style', visible: true, fontSize: 48, watermark: WM })
+    expect(msgs[0]).toEqual({ type: 'style', visible: true, fontSize: 48, watermark: WM, qr: null })
     expect(msgs[1]).toEqual({ type: 'reset' })
     const stopped = t.live.stop()
     await vi.advanceTimersByTimeAsync(10_000) // the fake OBS never reports the stream stopped
@@ -144,7 +147,7 @@ describe('LiveController subtitle style', () => {
     await t.live.saveSettings({ subtitleFontSize: 60, subtitlesVisible: false })
     expect(t.styles().at(-1)).toMatchObject({ visible: false, fontSize: 60 })
     const n = t.styles().length
-    await t.live.saveSettings({ videoDeviceId: 'v2' })
+    await t.live.saveSettings({ primarySource: { kind: 'device', id: 'v2' } })
     expect(t.styles().length).toBe(n)
   })
 
@@ -157,10 +160,10 @@ describe('LiveController subtitle style', () => {
     expect(t.styles().length).toBe(n)
     t.live.watermarkChanged('s1', WM)
     expect(t.styles().at(-1)!.watermark).toEqual(WM)
-    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: WM }])
+    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: WM, languages: [] }])
     expect(t.styles().length).toBe(n + 1) // unchanged: not sent again
     const pinned = { ...WM, pinned: true }
-    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: pinned }])
+    t.live.syncWatermarks([{ id: 's1', name: 'Conf', status: 'active', watermark: pinned, languages: [] }])
     expect(t.styles().at(-1)!.watermark).toEqual(pinned)
   })
 

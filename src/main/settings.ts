@@ -46,9 +46,14 @@ export class SettingsStore {
 
   private load(): Stored {
     try {
-      const j = JSON.parse(readFileSync(this.p.settingsFile, 'utf8')) as Stored & { output?: unknown }
+      const j = JSON.parse(readFileSync(this.p.settingsFile, 'utf8')) as Stored & { output?: unknown; videoDeviceId?: string }
       if (j && typeof j === 'object') {
         delete j.output // v1 output display: the output window is now placed freely
+        if ('videoDeviceId' in j) {
+          // v0.3 camera id: becomes the main video source.
+          if (!j.primarySource) j.primarySource = j.videoDeviceId ? { kind: 'device', id: j.videoDeviceId } : { kind: 'none' }
+          delete j.videoDeviceId
+        }
         return { ...j, instance: j.instance || DEFAULT_INSTANCE }
       }
     } catch { /* missing or corrupt: defaults */ }

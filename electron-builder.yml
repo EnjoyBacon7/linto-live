@@ -98,7 +98,7 @@ flatpak:
     - --socket=pulseaudio
     # GPU (OBS rendering, captions browser) and V4L2 cameras / capture cards.
     - --device=all
-    # Transcript export anywhere the user picks.
+    # Transcript export, backup/primary media files and recordings anywhere the user picks.
     - --filesystem=home
     - --talk-name=org.freedesktop.Notifications
     - --talk-name=org.kde.StatusNotifierWatcher

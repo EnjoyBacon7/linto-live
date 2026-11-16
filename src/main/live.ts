@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
-  type Channel, type DeviceItem, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
-  type Watermark, type WatermarkConfig
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
+  type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
+  type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
+import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
 import type { ObsConnection, ObsProcess } from './obs/process'
-import type { ObsController, StreamState } from './obs/controller'
+import { recordBaseName, type ObsController, type StreamState } from './obs/controller'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
+import { FallbackMonitor, type Luma } from './obs/fallback'
 import type { LintoApi } from './linto/api'
 import { type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
 import { resolveSession } from './linto/sessionResolver'
@@ -15,7 +17,17 @@ import { lintoErrorMessage } from './linto/accessMessages'
 import { TranscriptLog } from './linto/transcript'
 import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
+import { publicLink } from '../shared/publicLink'
 import type { SettingsStore } from './settings'
+
+const NO_SOURCE: VideoSource = { kind: 'none' }
+/** Same video source (an absent setting counts as none). */
+function sameSource(a: VideoSource = NO_SOURCE, b: VideoSource = NO_SOURCE): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === 'device') return a.id === (b as typeof a).id
+  if (a.kind === 'image' || a.kind === 'video') return a.path === (b as typeof a).path
+  return true
+}
 
 export const MSG_NO_STREAM =
   "Impossible d'envoyer l'audio : LinTO ne le permet qu'au propriétaire de la session et aux gestionnaires de réunion de l'organisation."
@@ -31,6 +43,10 @@ export const MSG_OVERLAY_FAILED = 'Sous-titres non affichés dans OBS : '
 export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
 export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
+export const MSG_RECORD_FAILED = 'Enregistrement impossible : '
+export const MSG_PRIMARY_FAILED = 'Source principale indisponible : '
+const MSG_RECORD_NOT_STARTED = "OBS n'a pas démarré l'enregistrement."
+const MSG_RECORD_STOPPED = "OBS a arrêté l'enregistrement."
 export const MSG_NO_ORG = 'Choisis une organisation.'
 export const MSG_START_CANCELLED = 'Démarrage annulé.'
 /** The caption socket was refused while the token is still valid: access to the session itself was lost. */
@@ -54,12 +70,31 @@ const OBS_START_DELAYS_MS = [2_000, 5_000, 10_000, 30_000]
 const CAPTIONS_STALE_MS = 30_000
 /** Caption socket refused with a still valid token: wait this long before joining again. */
 const CAPTIONS_REFUSED_RETRY_MS = 30_000
+/** StartRecord accepted but no « started » from OBS within this delay: the recording failed. */
+const RECORD_START_WAIT_MS = 5_000
+/** StartRecord refused because the previous recording output is still stopping: retries, this far apart. */
+const RECORD_RUNNING_RETRIES = 5
+const RECORD_RUNNING_RETRY_MS = 200
+/** obs-websocket RequestStatus::OutputRunning. */
+const OUTPUT_RUNNING = 500
 /** OBS liveness watchdog: a ping this often, outside the queue (it must work while the queue waits on OBS). */
 export const WATCHDOG_MS = 10_000
 /** Consecutive unanswered pings before OBS is deemed hung and killed (each one waits up to the call timeout). */
 export const WATCHDOG_MISSES = 3
 export const MSG_OBS_HUNG = 'OBS ne répondait plus : redémarrage…'
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+/** Runs `fn` with one deadline (`limit` resolves after `ms`) that all its waits share; the timer is cleared after. */
+async function withDeadline<T>(ms: number, fn: (limit: Promise<void>) => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const limit = new Promise<void>((r) => {
+    timer = setTimeout(r, ms)
+  })
+  try {
+    return await fn(limit)
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** Structural slices of the real modules, so tests can inject fakes. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,15 +108,17 @@ export interface LiveObsProcess {
 }
 export type LiveObsController = Pick<
   ObsController,
-  | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setVideoDevice' | 'setAudioDevice' | 'setOverlayUrl'
+  | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setBackupVisible' | 'probePrimary'
+  | 'setAudioDevice' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
+  | 'startRecord' | 'stopRecord' | 'recordState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
 export interface LiveCaptions {
   open: CaptionStream['open']
   close: CaptionStream['close']
-  on(event: 'status' | 'partial' | 'final' | 'authError', listener: Listener): unknown
+  on(event: 'status' | 'partial' | 'final' | 'translation' | 'authError', listener: Listener): unknown
 }
 export type LiveOverlay = Pick<OverlayServer, 'start' | 'push' | 'stop'>
 export type LiveSettings = Pick<SettingsStore, 'get' | 'update' | 'setToken'>
@@ -94,8 +131,16 @@ export interface LiveDeps {
   overlay: LiveOverlay
   settings: LiveSettings
   platform: NodeJS.Platform
+  /** SVG markup of a QR code for `url`. */
+  qrSvg: (url: string) => Promise<string>
+  /** Luma of a probePrimary() picture (null when it has no pixels: the source is absent). */
+  decodeLuma: (dataUrl: string) => Luma | null
   /** The instance's watermark defaults (config.js); LinTO Studio's defaults when absent. */
   watermarkConfig?: () => WatermarkConfig
+  /** `mkdir -p` (OBS does not create the record folder, and then silently records nothing). */
+  mkdirp: (dir: string) => Promise<void>
+  /** Record folder when Settings.recordDir is not set. */
+  defaultRecordDir: string
 }
 
 /** Font size actually used on the canvas: the saved one if valid, else the default. */
@@ -111,6 +156,8 @@ interface Current {
   session: Session
   channel: Channel
   service: ObsStreamService | null
+  /** Subtitle languages the channel offers (subtitleLanguageOptions values). */
+  languageChoices: Set<string>
 }
 
 /** Arrêter (or quit) was asked while this action waited on LinTO: it gives up so the stop runs now. */
@@ -125,7 +172,8 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /**
  * Orchestrates OBS, LinTO captions and the overlay for one live show.
- * Events: 'state'(LiveState) 'transcript'(TranscriptUpdate) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'().
+ * Events: 'state'(LiveState) 'transcript'(TranscriptUpdate) 'preview'(dataUrl) 'audio-level'(dB) 'auth-required'()
+ * 'recording-saved'(path).
  * start/stop/terminate/showOutputWindow and OBS (re)attachment run one at a time through a promise queue.
  * Arrêter does not wait behind a slow LinTO call: stop() cancels the start, terminate or stream retry queued
  * before it (their LinTO wait is abandoned, see abortable), so the stop runs right after.
@@ -133,16 +181,19 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * while OBS is attached, the renderer shows it (setPreviewSubscribed) and the window is visible
  * (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists
  * projectors: the output window only opens on demand (showOutputWindow), on or off air, and keeps showing the
- * camera after Arrêter.
+ * camera after Arrêter. The show is recorded when Settings.recordEnabled is set at Démarrer (a new file per
+ * session and per OBS run); recording never blocks nor fails the show.
  */
 export class LiveController extends EventEmitter {
-  private state: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off' }
+  private state: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off', recording: 'off' }
   private ctl: LiveObsController | null = null
   private unsubs: (() => void)[] = []
   private overlayUrl: string | null = null
   private current: Current | null = null
   /** Watermark of the session on air (null when off air: no watermark then). */
   private watermark: Watermark | null = null
+  /** QR code of the on-air session's public link (null when off air); computed once at start. */
+  private qrCache: { url: string; svg: string } | null = null
   private streamRunning = false
   private stopRequested = false
   private stopWaiters: (() => void)[] = []
@@ -172,6 +223,19 @@ export class LiveController extends EventEmitter {
   private cancelGen = 0
   private cancelListeners = new Set<() => void>()
   private transcript = new TranscriptLog()
+  /** Switches to the backup source when the primary is absent (only while a backup is configured and OBS attached). */
+  private monitor: FallbackMonitor | null = null
+  /** Settings.recordEnabled read at Démarrer: the show on air is recorded (fixed until it ends). */
+  private recordIntent = false
+  /** startRecord was sent and OBS has not reported the recording started yet. */
+  private recordAwaiting = false
+  private recordTimer: NodeJS.Timeout | null = null
+  /** stopRecord in progress: its own result announces the file, not OBS's « stopped » event. */
+  private recordStopping = false
+  /** stopRecord gave up waiting for OBS: OBS's « stopped » event, when it comes, announces the file. */
+  private recordAnnouncePending = false
+  /** Waiting for OBS's « stopped » recording event (StopRecord may answer before the output has stopped). */
+  private recordStopWaiters: (() => void)[] = []
 
   constructor(private readonly d: LiveDeps) {
     super()
@@ -190,9 +254,13 @@ export class LiveController extends EventEmitter {
       // OBS gave up: the show cannot continue. Tear it down like Arrêter (nothing left to stop in OBS)
       // so the UI is not stuck on a live session; the error phase and warning tell what happened.
       this.clearCaptionsTimer()
+      this.recordIntent = false
       if (this.current) {
         this.d.captions.close()
         this.current = null
+        this.watermark = null
+        this.qrCache = null
+        this.pushStyle()
         this.d.overlay.push({ type: 'reset' })
       }
       this.setState({
@@ -211,13 +279,17 @@ export class LiveController extends EventEmitter {
       this.setState({ captions: s, ...(recovered ? { warning: undefined } : {}) })
       this.superviseCaptions()
     })
+    // The transcript always keeps the originals; the band shows the chosen language only.
     d.captions.on('partial', (e: CaptionEvent) => {
-      this.d.overlay.push({ type: 'partial', text: e.text })
+      this.pushCaption(routeOriginal(this.subtitleLanguage(), false, e.text))
       this.sendTranscript(this.transcript.partial(e))
     })
     d.captions.on('final', (e: CaptionEvent) => {
-      this.d.overlay.push({ type: 'final', text: e.text })
+      this.pushCaption(routeOriginal(this.subtitleLanguage(), true, e.text))
       this.sendTranscript(this.transcript.final(e))
+    })
+    d.captions.on('translation', (e: TranslationEvent) => {
+      this.pushCaption(routeTranslation(this.subtitleLanguage(), this.current?.channel.languages, e))
     })
     d.captions.on('authError', () => void this.captionsRefused())
   }
@@ -257,9 +329,10 @@ export class LiveController extends EventEmitter {
     }
   }
 
-  start(sessionName: string): Promise<StartResult> {
+  /** `create`: options of the session created when none has this name. */
+  start(sessionName: string, create?: NewSessionOptions): Promise<StartResult> {
     const gen = this.cancelGen
-    return this.enqueue(() => this.doStart(sessionName, gen))
+    return this.enqueue(() => this.doStart(sessionName, gen, create))
   }
 
   /** Arrêter: cancels the actions queued before it (see abortable), then stops the show. */
@@ -279,7 +352,7 @@ export class LiveController extends EventEmitter {
         const wasLive = this.state.phase === 'live'
         this.setState({ phase: 'stopping' })
         this.clearRetry()
-        await this.stopStreamAndWait()
+        await withDeadline(STOP_WAIT_MS, (limit) => this.stopStreamAndWait(limit))
         try {
           await this.abortable(gen, this.d.api.terminateSession(cur.orgId, cur.session.id))
         } catch (e) {
@@ -375,6 +448,15 @@ export class LiveController extends EventEmitter {
     this.d.overlay.push({ type: 'reset' })
   }
 
+  /** Saves the language shown in the band for a session; if it is on air, the band empties and switches now. */
+  async setSubtitleLanguage(sessionId: string, choice: string): Promise<void> {
+    const saved = this.d.settings.get().subtitleLanguages
+    if ((saved?.[sessionId] ?? ORIGINAL) === choice) return
+    const subtitleLanguages = { ...saved, [sessionId]: choice }
+    this.d.settings.update({ subtitleLanguages })
+    if (this.current?.session.id === sessionId) this.d.overlay.push({ type: 'reset' })
+  }
+
   /** A session's watermark was saved or re-read from LinTO: the overlay follows if that session is on air. */
   watermarkChanged(sessionId: string, w: Watermark): void {
     if (this.current?.session.id !== sessionId || (this.watermark && sameWatermark(this.watermark, w))) return
@@ -405,12 +487,20 @@ export class LiveController extends EventEmitter {
     return this.enqueue(async () => {
       const before = this.d.settings.get()
       this.d.settings.update(patch)
-      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined) this.pushStyle()
+      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined || patch.qr !== undefined) this.pushStyle()
       const c = this.ctl
       if (!c) return
-      // '' = no camera (the plain LinTO client): the video source is emptied.
-      if (patch.videoDeviceId !== undefined && patch.videoDeviceId !== before.videoDeviceId) {
-        await c.setVideoDevice(patch.videoDeviceId)
+      // 'none' (the plain LinTO client): the video source is emptied.
+      if (patch.primarySource !== undefined && !sameSource(patch.primarySource, before.primarySource)) {
+        await c.setSource('primary', patch.primarySource)
+        if (this.state.warning?.startsWith(MSG_PRIMARY_FAILED)) this.setState({ warning: undefined })
+      }
+      // The monitor reads primarySource and blackIsAbsent live: only a backup change concerns it.
+      if (patch.backupSource !== undefined && !sameSource(patch.backupSource, before.backupSource)) {
+        await c.setSource('backup', patch.backupSource)
+        if (this.ctl !== c) return // OBS restarted meanwhile: attach re-applies everything
+        // Another backup file keeps the running monitor (the recreated input keeps its visibility).
+        if ((patch.backupSource.kind === 'none') !== (this.monitor === null)) this.syncMonitor(c)
       }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
     })
@@ -457,15 +547,28 @@ export class LiveController extends EventEmitter {
     this.emit('state', this.getState())
   }
 
+  /** Language shown in the band for the session on air; the original one when the saved choice is not offered. */
+  private subtitleLanguage(): string {
+    const cur = this.current
+    const choice = cur && this.d.settings.get().subtitleLanguages?.[cur.session.id]
+    return choice && cur.languageChoices.has(choice) ? choice : ORIGINAL
+  }
+
+  private pushCaption(r: Routed): void {
+    if (r) this.d.overlay.push({ type: r.kind, text: r.text })
+  }
+
   /** Sends the band's look (local settings + the on-air session's watermark) to the overlay. */
   private pushStyle(): void {
     const s = this.d.settings.get()
     const cfg = this.d.watermarkConfig?.()
+    const qr = { ...DEFAULT_QR, ...s.qr }
     this.d.overlay.push({
       type: 'style',
       visible: s.subtitlesVisible !== false,
       fontSize: subtitleFontSize(s),
-      watermark: this.watermark ?? resolveWatermark(undefined, cfg)
+      watermark: this.watermark ?? resolveWatermark(undefined, cfg),
+      qr: this.qrCache && qr.display ? { svg: this.qrCache.svg, ...qr } : null
     })
   }
 
@@ -476,6 +579,9 @@ export class LiveController extends EventEmitter {
 
   private dropController(): void {
     this.stopWatchdog()
+    this.monitor?.stop()
+    this.monitor = null
+    if (this.state.videoOnAir) this.setState({ videoOnAir: undefined })
     this.unsubs.forEach((u) => u())
     this.unsubs = []
     this.ctl = null
@@ -484,7 +590,12 @@ export class LiveController extends EventEmitter {
     this.clearRetry()
     this.stopPreview()
     this.flushStopWaiters()
+    this.flushRecordStopWaiters()
+    this.clearRecordTimer()
+    this.recordAnnouncePending = false // that OBS run will not report it any more
     if (this.state.output !== 'off') this.setState({ output: 'off' })
+    // The OBS run that recorded is gone: attach starts a new file if the show is still recorded.
+    if (this.state.recording !== 'off') this.setState({ recording: 'off' })
   }
 
   /** (Re)connects to a freshly started OBS and re-applies devices, overlay and — if live — the show. */
@@ -510,21 +621,64 @@ export class LiveController extends EventEmitter {
       })
     )
     this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
+    this.unsubs.push(ready.recordState$((s) => this.onRecordState(ready, s)))
     this.ctl = ready
     this.attachedConn = conn
     this.startWatchdog(ready)
     const s = this.d.settings.get()
     let warning: string | undefined
-    if (s.videoDeviceId) await ready.setVideoDevice(s.videoDeviceId).catch(() => {})
+    let sourceWarning: string | undefined
+    await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch((e) => (sourceWarning = MSG_PRIMARY_FAILED + errMsg(e)))
+    const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
+    this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
     const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)
+      || w0?.startsWith(MSG_PRIMARY_FAILED)
     if (!warning && this.crashRestart) warning = MSG_OBS_RESTARTED
+    // A stream/OBS warning matters more (same rule as the recording ones): the source one only takes a free slot.
+    if (!warning && sourceWarning && (!w0 || staleObsWarning)) warning = sourceWarning
     this.crashRestart = false
     this.setState({ obs: 'running', ...(warning ? { warning } : staleObsWarning ? { warning: undefined } : {}) })
     this.updatePreview()
-    if (this.state.phase === 'live' && this.current) await this.applyShow(ready, this.current)
+    const cur = this.current
+    if (this.state.phase === 'live' && cur) {
+      await this.applyShow(ready, cur)
+      if (this.recordIntent && ready === this.ctl && cur === this.current) await this.startRecordSafe(ready, cur)
+    }
+  }
+
+  /**
+   * Runs the fallback monitor on `c` when a backup source is configured (its start hides the backup);
+   * without one (or when it could not be set up: `backupSet` false), hides a backup an earlier OBS run may
+   * have left visible.
+   */
+  private syncMonitor(c: LiveObsController, backupSet = true): void {
+    this.monitor?.stop()
+    this.monitor = null
+    const settings = (): Settings => this.d.settings.get()
+    if (!backupSet || (settings().backupSource ?? NO_SOURCE).kind === 'none') {
+      c.setBackupVisible(false).catch(() => {})
+      if (this.state.videoOnAir) this.setState({ videoOnAir: undefined })
+      return
+    }
+    const m = new FallbackMonitor({
+      probe: () => c.probePrimary(),
+      decode: (d) => this.d.decodeLuma(d),
+      setBackup: (on) => c.setBackupVisible(on),
+      blackIsAbsent: () => settings().blackIsAbsent !== false,
+      primaryIsFile: () => {
+        const k = settings().primarySource?.kind
+        return k === 'image' || k === 'video'
+      },
+      onChange: (onBackup) => {
+        if (this.monitor === m) this.setState({ videoOnAir: onBackup ? 'backup' : 'primary' })
+      }
+    })
+    this.monitor = m
+    this.setState({ videoOnAir: 'primary' })
+    m.start()
   }
 
   /** Program scene, then the stream. The output window is the user's to open (showOutputWindow). */
@@ -700,7 +854,7 @@ export class LiveController extends EventEmitter {
     this.captionsRetryTimer = null
   }
 
-  private async doStart(rawName: string, gen: number): Promise<StartResult> {
+  private async doStart(rawName: string, gen: number, create?: NewSessionOptions): Promise<StartResult> {
     if (gen !== this.cancelGen) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
     const s = this.d.settings.get()
     if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
@@ -712,7 +866,7 @@ export class LiveController extends EventEmitter {
     // Resolve first: a failure here must leave a running show (transcript, stream supervision) untouched.
     let res: Awaited<ReturnType<typeof resolveSession>>
     try {
-      res = await this.abortable(gen, resolveSession(this.d.api, s.orgId, rawName, s.profileId))
+      res = await this.abortable(gen, resolveSession(this.d.api, s.orgId, rawName, s.profileId, create))
     } catch (e) {
       if (e instanceof CancelledError) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
       if (e instanceof UnauthorizedError) {
@@ -733,18 +887,31 @@ export class LiveController extends EventEmitter {
       this.captionsAuthLost = false
       this.authLost = false // resolveSession just succeeded: the token is valid
       if (this.current) this.d.captions.close()
-      if (this.streamRunning) await this.stopStreamAndWait()
+      // One file per session: the previous show's recording is closed; this show follows the setting read now.
+      await withDeadline(STOP_WAIT_MS, async (limit) => {
+        if (this.streamRunning) await this.stopStreamAndWait(limit)
+        if (this.recordIntent) await this.stopRecordSafe(limit)
+      })
+      this.recordIntent = s.recordEnabled === true
 
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
-      const cur: Current = { orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null }
+      const languages = subtitleLanguageOptions(res.channel)
+      const cur: Current = {
+        orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null,
+        languageChoices: new Set(languages.map((o) => o.value))
+      }
       this.current = cur
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())
+      const url = publicLink(s.instance, s.orgId, res.session.id)
+      // Failing to draw the QR code must not stop the show: it just stays off.
+      this.qrCache = this.qrCache?.url === url ? this.qrCache
+        : await this.d.qrSvg(url).then((svg) => ({ url, svg }), () => null)
       this.pushStyle()
       this.d.overlay.push({ type: 'reset' })
       const startedAt = Date.now()
       this.setState({
         phase: 'live',
-        session: { name: res.session.name, status: res.session.status },
+        session: { name: res.session.name, status: res.session.status, languages },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : res.blocker === 'rtmp-only' ? MSG_RTMP_ONLY : MSG_NO_STREAM,
         startedAt
@@ -753,7 +920,10 @@ export class LiveController extends EventEmitter {
       this.d.captions.open(res.session.id, res.channel.id)
 
       const c = this.ctl
-      if (c) await this.applyShow(c, cur)
+      if (c) {
+        await this.applyShow(c, cur)
+        if (this.recordIntent && c === this.ctl && cur === this.current) await this.startRecordSafe(c, cur)
+      }
     } catch (e) {
       if (this.state.phase !== 'live') {
         this.setState({ phase: 'error', warning: errMsg(e) })
@@ -772,10 +942,16 @@ export class LiveController extends EventEmitter {
     this.clearCaptionsTimer()
     this.authLost = false
     this.d.captions.close()
-    await this.stopStreamAndWait(streamWaitMs)
+    // One deadline for both: quitting stays within SHUTDOWN_STOP_WAIT_MS.
+    await withDeadline(streamWaitMs, async (limit) => {
+      await this.stopStreamAndWait(limit)
+      if (this.recordIntent) await this.stopRecordSafe(limit)
+    })
+    this.recordIntent = false
     // The program scene stays on the camera: an open output window keeps showing it (only the captions go).
     this.current = null
     this.watermark = null
+    this.qrCache = null
     this.pushStyle()
     this.d.overlay.push({ type: 'reset' })
     this.setState({
@@ -790,8 +966,8 @@ export class LiveController extends EventEmitter {
     this.sendTranscript(this.transcript.endPartial())
   }
 
-  /** Stops the OBS stream and waits for OBS to report it stopped (StopStream is asynchronous). */
-  private async stopStreamAndWait(waitMs = STOP_WAIT_MS): Promise<void> {
+  /** Stops the OBS stream and waits (until `limit`) for OBS to report it stopped (StopStream is asynchronous). */
+  private async stopStreamAndWait(limit: Promise<void>): Promise<void> {
     const c = this.ctl
     if (!c) return
     if (!this.streamRunning) {
@@ -799,11 +975,7 @@ export class LiveController extends EventEmitter {
       return
     }
     this.stopRequested = true
-    let timer: NodeJS.Timeout | undefined
-    const stopped = new Promise<void>((resolve) => {
-      this.stopWaiters.push(resolve)
-      timer = setTimeout(resolve, waitMs)
-    })
+    const stopped = Promise.race([new Promise<void>((resolve) => this.stopWaiters.push(resolve)), limit])
     try {
       // false: OBS had no running output (e.g. the SRT connect is still pending) — no 'stopped' will
       // come; if the connect succeeds later, onStreamState stops the unwanted stream.
@@ -811,10 +983,121 @@ export class LiveController extends EventEmitter {
     } catch {
       /* OBS gone or already stopped */
     } finally {
-      clearTimeout(timer)
       this.stopRequested = false
       this.streamRunning = false
     }
+  }
+
+  /** Never throws: a failure becomes recording 'error' + a warning, the show goes on. */
+  private async startRecordSafe(c: LiveObsController, cur: Current): Promise<void> {
+    const dir = this.d.settings.get().recordDir || this.d.defaultRecordDir
+    this.clearRecordTimer()
+    this.recordAnnouncePending = false // a new file: a stop OBS never reported is not waited for any more
+    this.recordAwaiting = true
+    try {
+      await this.d.mkdirp(dir)
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await c.startRecord(dir, recordBaseName(cur.session.name))
+          break
+        } catch (e) {
+          // The previous file's output is still stopping: it frees up shortly.
+          if ((e as { code?: unknown })?.code !== OUTPUT_RUNNING || attempt >= RECORD_RUNNING_RETRIES) throw e
+          await sleep(RECORD_RUNNING_RETRY_MS)
+          if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) return
+        }
+      }
+    } catch (e) {
+      if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) return
+      this.recordAwaiting = false
+      this.recordFailed(errMsg(e))
+      return
+    }
+    if (!this.recordAwaiting || c !== this.ctl) return // already reported started (or the show moved on)
+    this.recordTimer = setTimeout(() => {
+      this.recordTimer = null
+      if (!this.recordAwaiting || c !== this.ctl || cur !== this.current) return
+      this.recordAwaiting = false
+      this.recordFailed(MSG_RECORD_NOT_STARTED)
+    }, RECORD_START_WAIT_MS)
+  }
+
+  /**
+   * Stops the recording, announces the file and waits for OBS to report the output stopped (so a new
+   * StartRecord is not refused). Never throws, and never waits for OBS past `limit`: Arrêter and session
+   * switches must go on whatever happens to the recording.
+   */
+  private async stopRecordSafe(limit: Promise<void>): Promise<void> {
+    this.clearRecordTimer()
+    this.recordAwaiting = false
+    const c = this.ctl
+    if (c) {
+      this.recordStopping = true
+      const timedOut = Symbol('timed out')
+      // Registered before StopRecord: the « stopped » event may come before its answer.
+      const stopped = new Promise<void>((resolve) => this.recordStopWaiters.push(resolve))
+      try {
+        const r = await Promise.race([c.stopRecord(), limit.then(() => timedOut)])
+        if (r === timedOut) this.recordAnnouncePending = true
+        else if (r) {
+          this.emit('recording-saved', r)
+          await Promise.race([stopped, limit])
+        }
+      } catch {
+        /* OBS gone or not recording */
+      } finally {
+        this.recordStopping = false
+        this.flushRecordStopWaiters()
+      }
+    }
+    const failed = this.state.warning?.startsWith(MSG_RECORD_FAILED)
+    if (this.state.recording !== 'off' || failed) this.setState({ recording: 'off', ...(failed ? { warning: undefined } : {}) })
+  }
+
+  /** A stream/OBS warning matters more: it stays, the recording indicator alone tells the failure then. */
+  private recordFailed(detail: string): void {
+    const w = this.state.warning
+    const mayWarn = !w || w.startsWith(MSG_RECORD_FAILED)
+    this.setState({ recording: 'error', ...(mayWarn ? { warning: MSG_RECORD_FAILED + detail } : {}) })
+  }
+
+  private clearRecordTimer(): void {
+    if (this.recordTimer) clearTimeout(this.recordTimer)
+    this.recordTimer = null
+  }
+
+  private flushRecordStopWaiters(): void {
+    const w = this.recordStopWaiters
+    this.recordStopWaiters = []
+    w.forEach((r) => r())
+  }
+
+  private onRecordState(c: LiveObsController, s: { active: boolean; path?: string }): void {
+    if (c !== this.ctl) return
+    if (!s.active) this.flushRecordStopWaiters()
+    if (s.active) {
+      this.recordAnnouncePending = false
+      this.recordAwaiting = false
+      this.clearRecordTimer()
+      // Started while no show wants it (e.g. late, after Arrêter): no hidden recording left running.
+      if (!this.recordIntent) {
+        void c.stopRecord().catch(() => {})
+        return
+      }
+      const failed = this.state.warning?.startsWith(MSG_RECORD_FAILED)
+      this.setState({ recording: 'on', ...(failed ? { warning: undefined } : {}) })
+      return
+    }
+    if (this.recordAnnouncePending && !this.recordStopping) {
+      // The file of a stopRecord that gave up waiting.
+      this.recordAnnouncePending = false
+      if (s.path) this.emit('recording-saved', s.path)
+      return
+    }
+    // Our own stopRecord announces the file itself; after it, recording is already 'off'.
+    if (this.recordStopping || !this.recordIntent || this.state.recording !== 'on') return
+    if (s.path) this.emit('recording-saved', s.path)
+    this.recordFailed(MSG_RECORD_STOPPED)
   }
 
   private flushStopWaiters(): void {

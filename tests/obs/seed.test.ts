@@ -35,16 +35,35 @@ describe('seedFiles', () => {
     const u = seedFiles({ ...o, platform: 'linux' })['user.ini']
     for (const l of ['SysTrayEnabled=false', 'SysTrayWhenStarted=false', 'SaveProjectors=false', 'ProjectorAlwaysOnTop=true']) expect(u).toContain(l)
   })
-  it('basic.ini: full HD canvas (projector), small cheap stream (LinTO only uses the audio)', () => {
+  it('basic.ini: full HD canvas and output, Advanced output mode', () => {
     const b = f['basic/profiles/LinTO Live/basic.ini']
-    for (const l of ['BaseCX=1920', 'BaseCY=1080', 'OutputCX=640', 'OutputCY=360', 'FPSCommon=30', 'Mode=Simple', 'VBitrate=200', 'ABitrate=128'])
+    for (const l of ['BaseCX=1920', 'BaseCY=1080', 'OutputCX=1920', 'OutputCY=1080', 'FPSType=0', 'FPSCommon=30', '[Output]\nMode=Advanced'])
       expect(b).toContain(l)
   })
-  it('basic.ini: hardware H.264 on macOS, x264 ultrafast on Linux', () => {
-    expect(f['basic/profiles/LinTO Live/basic.ini']).toContain('[SimpleOutput]\nVBitrate=200\nABitrate=128\nStreamEncoder=apple_h264\n')
+  it('basic.ini: the stream (LinTO only uses its audio) is rescaled to 640×360, the mic is on track 1', () => {
+    const b = f['basic/profiles/LinTO Live/basic.ini']
+    for (const l of ['Rescale=true', 'RescaleRes=640x360', 'RescaleFilter=3', 'TrackIndex=1', 'Track1Bitrate=128']) expect(b).toContain(l)
+  })
+  it('basic.ini: records the full-resolution output to MKV with its own encoder, track 1 only', () => {
+    const b = f['basic/profiles/LinTO Live/basic.ini']
+    for (const l of ['RecType=Standard', 'RecFormat2=mkv', 'RecTracks=1', 'RecRescale=false', 'RecRescaleFilter=0']) expect(b).toContain(l)
+  })
+  it('basic.ini: hardware H.264 (VideoToolbox) on macOS, x264 on Linux, for both encoders', () => {
+    const mac = f['basic/profiles/LinTO Live/basic.ini']
+    expect(mac).toMatch(/^Encoder=com\.apple\.videotoolbox\.videoencoder\.ave\.avc$/m)
+    expect(mac).toContain('RecEncoder=com.apple.videotoolbox.videoencoder.ave.avc\n')
     const linux = seedFiles({ ...o, platform: 'linux' })['basic/profiles/LinTO Live/basic.ini']
-    expect(linux).toContain('StreamEncoder=x264\nPreset=ultrafast')
-    expect(linux).not.toContain('apple_h264')
+    expect(linux).toMatch(/^Encoder=obs_x264$/m)
+    expect(linux).toContain('RecEncoder=obs_x264\n')
+    expect(linux).not.toContain('videotoolbox')
+  })
+  it('encoder settings: cheap stream (200 kbps), ~6000 kbps recording; x264 presets on Linux', () => {
+    const dir = 'basic/profiles/LinTO Live/'
+    expect(JSON.parse(f[dir + 'streamEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 200, keyint_sec: 2 })
+    expect(JSON.parse(f[dir + 'recordEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 6000, keyint_sec: 2 })
+    const linux = seedFiles({ ...o, platform: 'linux' })
+    expect(JSON.parse(linux[dir + 'streamEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 200, preset: 'ultrafast' })
+    expect(JSON.parse(linux[dir + 'recordEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 6000, preset: 'veryfast' })
   })
   it('scene collection', () => {
     const s = JSON.parse(f['basic/scenes/LinTO Live.json'])
@@ -88,15 +107,24 @@ describe('writeSeed', () => {
     expect(b).toContain('BaseCX=1920')
     expect(b).not.toContain('BaseCX=1280')
     expect(b).toContain('ColorFormat=NV12')
-    expect(b).toContain('VBitrate=200')
-    expect(b).not.toContain('VBitrate=2500')
+    expect(b).toContain('VBitrate=2500') // Simple-mode section left to OBS (unused in Advanced mode)
     expect(b).toContain('FilePath=/tmp')
     expect(b).toContain('[Audio]\nSampleRate=48000')
-    expect(b).toContain('[Output]\nMode=Simple') // missing section added
+    expect(b).toContain('[Output]\nMode=Advanced') // missing section added
+    expect(b).toContain('[AdvOut]\n')
+    expect(b).toContain('OutputCX=1920')
     expect(b.match(/^\[Video\]$/gm)).toHaveLength(1)
     // idempotent
     await writeSeed(d, o)
     expect(await readFile(p, 'utf8')).toBe(b)
+  })
+  it('rewrites the encoder settings files on every launch (they are ours)', async () => {
+    const d = await tmp()
+    const p = join(d, 'basic/profiles/LinTO Live/recordEncoder.json')
+    await mkdir(join(d, 'basic/profiles/LinTO Live'), { recursive: true })
+    await writeFile(p, '{"bitrate":2500}')
+    await writeSeed(d, o)
+    expect(JSON.parse(await readFile(p, 'utf8')).bitrate).toBe(6000)
   })
   it('re-applies our user.ini keys on an existing install', async () => {
     const d = await tmp()

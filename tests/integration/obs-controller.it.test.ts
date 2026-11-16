@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync, spawn } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
 import { afterAll, describe, expect, it } from 'vitest'
-import { ObsController, SRC_AUDIO, SRC_OVERLAY, SRC_VIDEO } from '../../src/main/obs/controller'
+import { ObsController, SCENE, SRC_AUDIO, SRC_BACKUP, SRC_OVERLAY, SRC_VIDEO } from '../../src/main/obs/controller'
 import { obsExecutable } from '../../src/main/obs/locate'
 import { ObsProcess } from '../../src/main/obs/process'
 import { appPaths } from '../../src/main/paths'
@@ -15,6 +16,28 @@ const expectedKinds =
     ? ['macos-avcapture', 'coreaudio_input_capture', 'browser_source']
     : ['v4l2_input', 'pulse_input_capture', 'browser_source']
 
+/** Video stream size of a media file (ffprobe), or null when ffprobe is not installed. */
+function videoSize(file: string): { width: number; height: number } | null {
+  try {
+    const out = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', file], {
+      encoding: 'utf8'
+    })
+    const s = JSON.parse(out).streams[0]
+    return { width: s.width, height: s.height }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw e
+  }
+}
+const hasFfmpeg = ((): boolean => {
+  try {
+    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
 describe.skipIf(!run)('ObsController (real OBS)', () => {
   const userData = mkdtempSync(join(tmpdir(), 'linto-live-it-'))
   const paths = appPaths(userData, platform)
@@ -24,6 +47,7 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     platform
   })
   let ctl: ObsController | undefined
+  let conn: { port: number; password: string } | undefined
   afterAll(async () => {
     await ctl?.disconnect().catch(() => {})
     await obs.stop()
@@ -31,7 +55,7 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
   })
 
   it('builds the scene, lists audio devices, sets overlay, screenshots', async () => {
-    const conn = await obs.start()
+    conn = await obs.start()
 
     const raw = new OBSWebSocket()
     await raw.connect(`ws://127.0.0.1:${conn.port}`, conn.password)
@@ -57,4 +81,134 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     expect(shot).toMatch(/^data:image\/jpe?g;base64,/)
     expect([SRC_VIDEO, SRC_AUDIO, SRC_OVERLAY]).toHaveLength(3)
   }, 90_000)
+
+  it('swaps the primary to an image and back, stacks a hidden backup above it', async () => {
+    // 1×1 white PNG
+    const png = join(userData, 'white.png')
+    writeFileSync(
+      png,
+      Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64')
+    )
+    await ctl!.setSource('primary', { kind: 'image', path: png })
+    await ctl!.setSource('backup', { kind: 'image', path: png })
+    await ctl!.setBackupVisible(true)
+    await ctl!.setBackupVisible(false)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(await ctl!.probePrimary()).toMatch(/^data:image\/png;base64,/)
+
+    const raw = new OBSWebSocket()
+    await raw.connect(`ws://127.0.0.1:${conn!.port}`, conn!.password)
+    try {
+      const kind = async (inputName: string) => (await raw.call('GetInputSettings', { inputName })).inputKind
+      expect(await kind(SRC_VIDEO)).toBe('image_source')
+      expect(await kind(SRC_BACKUP)).toBe('image_source')
+      const order = async () =>
+        ((await raw.call('GetSceneItemList', { sceneName: SCENE })).sceneItems as { sourceName: string }[]).map((i) => i.sourceName)
+      let o = await order()
+      expect(o.indexOf(SRC_VIDEO)).toBeLessThan(o.indexOf(SRC_BACKUP))
+      expect(o.indexOf(SRC_BACKUP)).toBeLessThan(o.indexOf(SRC_OVERLAY))
+
+      // Back to a device input and to an image again: the input is recreated under the same name.
+      await ctl!.setSource('primary', { kind: 'none' })
+      expect(await kind(SRC_VIDEO)).not.toBe('image_source')
+      await ctl!.setSource('primary', { kind: 'image', path: png })
+      expect(await kind(SRC_VIDEO)).toBe('image_source')
+      o = await order()
+      expect(o[0]).toBe(SRC_VIDEO)
+      expect(o.indexOf(SRC_BACKUP)).toBeLessThan(o.indexOf(SRC_OVERLAY))
+    } finally {
+      await raw.disconnect().catch(() => {})
+    }
+  }, 60_000)
+
+  it('records the output to an mkv file in the chosen directory', async () => {
+    const dir = join(userData, 'rec')
+    mkdirSync(dir) // OBS does not create the record directory itself (the app must)
+    const ev: unknown[] = []
+    const off = ctl!.recordState$((x) => ev.push(x))
+    await ctl!.startRecord(dir, 'Test enreg')
+    await new Promise((r) => setTimeout(r, 2000))
+    off()
+    expect(ev).toEqual([{ active: true }]) // STARTING is not reported
+    const path = await ctl!.stopRecord()
+    expect(path).toMatch(/Test enreg \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.mkv$/)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(existsSync(path!)).toBe(true)
+    expect(path!.startsWith(dir)).toBe(true) // SetRecordDirectory applies in Advanced output mode
+    expect(statSync(path!).size).toBeGreaterThan(50_000)
+    const size = videoSize(path!)
+    console.log('recording video size', JSON.stringify(size), 'bytes', statSync(path!).size)
+    if (size) expect(size).toEqual({ width: 1920, height: 1080 }) // full canvas, not the 640×360 stream
+    expect(await ctl!.stopRecord()).toBeNull()
+  }, 30_000)
+
+  it('a new recording starts right after the previous one is stopped (session switch)', async () => {
+    const dir = join(userData, 'rec-switch')
+    mkdirSync(dir)
+    const ev: { active: boolean; path?: string }[] = []
+    const off = ctl!.recordState$((x) => ev.push(x))
+    const waitFor = async (pred: () => boolean, ms: number): Promise<void> => {
+      for (const end = Date.now() + ms; !pred(); ) {
+        if (Date.now() > end) throw new Error('timeout ' + JSON.stringify(ev))
+        await new Promise((r) => setTimeout(r, 20))
+      }
+    }
+    await ctl!.startRecord(dir, 'Session A')
+    await waitFor(() => ev.some((e) => e.active), 5000)
+    await new Promise((r) => setTimeout(r, 1000))
+    const first = await ctl!.stopRecord()
+    const stoppedAtAnswer = ev.some((e) => !e.active)
+    // What LiveController does: wait for « stopped », then start, retrying while OBS says OutputRunning.
+    await waitFor(() => ev.some((e) => !e.active), 5000)
+    let refused = 0
+    for (;;) {
+      try {
+        await ctl!.startRecord(dir, 'Session B')
+        break
+      } catch (e) {
+        if ((e as { code?: number }).code !== 500 || refused >= 5) throw e
+        refused++
+        await new Promise((r) => setTimeout(r, 200))
+      }
+    }
+    console.log('stopped event before StopRecord answer:', stoppedAtAnswer, '— OutputRunning refusals:', refused)
+    await waitFor(() => ev.filter((e) => e.active).length === 2, 5000)
+    await new Promise((r) => setTimeout(r, 1000))
+    const second = await ctl!.stopRecord()
+    off()
+    expect(first).toMatch(/Session A .*\.mkv$/)
+    expect(second).toMatch(/Session B .*\.mkv$/)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(existsSync(first!) && existsSync(second!)).toBe(true)
+  }, 30_000)
+
+  it.skipIf(!hasFfmpeg)('streams at 640×360 (rescaled stream encoder) while recording at full resolution', async () => {
+    const port = 19350 + Math.floor(Math.random() * 500)
+    const flv = join(userData, 'stream.flv')
+    // ffmpeg as a one-shot RTMP server: stands in for LinTO's ingest.
+    const ff = spawn('ffmpeg', ['-v', 'error', '-y', '-listen', '1', '-i', `rtmp://127.0.0.1:${port}/live/test`, '-c', 'copy', flv], {
+      stdio: 'ignore'
+    })
+    const exited = new Promise((r) => ff.once('exit', r))
+    try {
+      await new Promise((r) => setTimeout(r, 1000))
+      const states: string[] = []
+      const off = ctl!.streamState$((x) => states.push(x))
+      await ctl!.startStream({ streamServiceType: 'rtmp_custom', streamServiceSettings: { server: `rtmp://127.0.0.1:${port}/live`, key: 'test' } })
+      const dir = join(userData, 'rec2')
+      mkdirSync(dir)
+      await ctl!.startRecord(dir, 'Pendant le direct')
+      await new Promise((r) => setTimeout(r, 3000))
+      const path = await ctl!.stopRecord()
+      expect(states).toContain('active')
+      await ctl!.stopStream()
+      off()
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))])
+      expect(videoSize(flv)).toEqual({ width: 640, height: 360 })
+      await new Promise((r) => setTimeout(r, 500))
+      expect(videoSize(path!)).toEqual({ width: 1920, height: 1080 })
+    } finally {
+      ff.kill('SIGKILL')
+    }
+  }, 40_000)
 })

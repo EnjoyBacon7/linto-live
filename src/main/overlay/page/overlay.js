@@ -12,6 +12,7 @@ const band = document.getElementById('band')
 const l1 = document.getElementById('l1')
 const l2 = document.getElementById('l2')
 const wm = document.getElementById('wm')
+const qr = document.getElementById('qr')
 
 const ctx = document.createElement('canvas').getContext('2d')
 const fitsAt = (size) => {
@@ -26,6 +27,9 @@ let bandVisible = true
 let wmContent = null
 const model = new SubtitleModel(fitsAt(fontSize))
 const cycle = new WatermarkCycle((v) => band.classList.toggle('has-wm', v))
+const qrCycle = new WatermarkCycle((v) => qr.classList.toggle('is-shown', v))
+let qrSvg = null
+let qrHideTimer = 0
 
 function render() {
   const [a, b] = model.lines()
@@ -47,6 +51,32 @@ function renderWatermark(content) {
   wm.replaceChildren(...nodes)
 }
 
+function applyQr(q) {
+  if (!q || typeof q.svg !== 'string' || q.svg === '') {
+    qrCycle.update({ display: false })
+    qr.classList.remove('is-shown')
+    qrSvg = null
+    // Fade out (300 ms), then hide and empty, unless a QR code came back meanwhile.
+    clearTimeout(qrHideTimer)
+    qrHideTimer = setTimeout(() => {
+      if (qrSvg !== null) return
+      qr.hidden = true
+      qr.replaceChildren()
+    }, 300)
+    return
+  }
+  clearTimeout(qrHideTimer)
+  if (q.svg !== qrSvg) {
+    qrSvg = q.svg
+    qr.innerHTML = q.svg
+  }
+  if (qr.hidden) {
+    qr.hidden = false
+    void qr.offsetWidth // reflow: the opacity transition also runs on the first show
+  }
+  qrCycle.update(q)
+}
+
 function applyStyle(m) {
   if (typeof m.fontSize === 'number' && m.fontSize > 0 && m.fontSize !== fontSize) {
     fontSize = m.fontSize
@@ -58,6 +88,7 @@ function applyStyle(m) {
     renderWatermark(String(m.watermark.content ?? ''))
     cycle.update(m.watermark)
   }
+  applyQr(m.qr)
 }
 
 function connect() {

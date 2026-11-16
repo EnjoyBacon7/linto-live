@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { io as realIo } from 'socket.io-client'
 import type { LintoUrls } from './instance'
+import type { TranslationEvent } from '../../shared/types'
 
 /**
  * A LinTO caption. `astart`: the channel's absolute start (ISO date); `start` / `end`: the segment's bounds
@@ -15,6 +16,8 @@ export interface CaptionEvent {
   start?: number | null
   end?: number | null
 }
+
+export type { TranslationEvent } from '../../shared/types'
 
 type IoFn = typeof realIo
 type Socket = ReturnType<IoFn>
@@ -86,6 +89,7 @@ export class CaptionStream extends EventEmitter {
     socket.on('unauthorized', authFail)
     socket.on('partial', (e: CaptionEvent) => this.emit('partial', e))
     socket.on('final', (e: CaptionEvent) => this.emit('final', e))
+    socket.on('translation', (e: TranslationEvent) => this.emit('translation', e))
   }
 
   close(): void {

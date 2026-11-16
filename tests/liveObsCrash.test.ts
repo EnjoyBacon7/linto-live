@@ -66,7 +66,7 @@ it('OBS crashing during a camera change: the restarted OBS is re-attached and Ar
     start: vi.fn(async () => { const c = { port: obs1.port, password: 'pw' }; obs.emit('ready', c); return c }),
     stop: vi.fn(async () => {})
   })
-  let data: Settings = { instance: 'https://studio.linto.ai', orgId: 'org1', profileId: 3, videoDeviceId: 'cam', audioDeviceId: 'mic' }
+  let data: Settings = { instance: 'https://studio.linto.ai', orgId: 'org1', profileId: 3, primarySource: { kind: 'device', id: 'cam' }, audioDeviceId: 'mic' }
   const live = new LiveController({
     obs,
     controllerFactory: (c: { port: number; password: string }) => ObsController.connect(c),
@@ -77,13 +77,17 @@ it('OBS crashing during a camera change: the restarted OBS is re-attached and Ar
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
     overlay: { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) },
     settings: { get: () => ({ ...data }), update: (p: Partial<Settings>) => { data = { ...data, ...p } }, setToken: vi.fn() },
+    qrSvg: vi.fn(async (url: string) => `<svg>${url}</svg>`),
+    decodeLuma: vi.fn(() => null),
+    mkdirp: vi.fn(async () => {}),
+    defaultRecordDir: '/tmp/linto-live-rec',
     platform: 'linux'
   } satisfies LiveDeps)
   await live.boot()
   expect(live.getState().obs).toBe('running')
 
-  obs1.crashOn = 'SetInputSettings' // e.g. a capture card that crashes OBS
-  const save = live.saveSettings({ videoDeviceId: 'capture-card' })
+  obs1.crashOn = 'GetInputSettings' // first call of a source change; e.g. a capture card that crashes OBS
+  const save = live.saveSettings({ primarySource: { kind: 'device', id: 'capture-card' } })
   await new Promise((r) => setTimeout(r, 200))
   obs.emit('restarting', 1) // what ObsProcess does after the crash
   obs.emit('ready', { port: obs2.port, password: 'pw2' })
