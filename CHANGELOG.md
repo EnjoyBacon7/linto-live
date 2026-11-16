@@ -4,6 +4,20 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [0.3.1] - 2026-11-16
+
+### Corrigé
+
+- **Flatpak sous Wayland** : l'application plantait au lancement dans une session Wayland (GNOME,
+  KDE…). Le Flatpak a désormais accès à Wayland ; OBS embarqué continue de passer par XWayland.
+- **Arrêter / Démarrer ne se bloquent plus** quand OBS plante ou que LinTO ne répond pas : chaque
+  appel est borné dans le temps, Arrêter n'attend plus une action en cours, et un OBS figé est
+  relancé automatiquement.
+- **Diffusion en SRT uniquement** : une session LinTO sans point SRT n'est plus diffusée en RTMP
+  (qui ne fonctionnait pas) ; un message l'explique.
+- **Export de la transcription complet** : il n'est plus tronqué à 5 000 segments ; un export
+  incomplet le signale.
+
 ## [0.3.0] - 2026-11-10
 
 ### Ajouté
@@ -77,6 +91,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.3.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/EnjoyBacon7/linto-live/releases/tag/v0.1.0
