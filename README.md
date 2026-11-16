@@ -34,9 +34,11 @@ Les Mac Intel ne sont pas pris en charge.
 
 ### Linux (x86_64)
 
-L'application embarque son propre OBS Studio 32.1. Il faut une distribution avec
-**glibc 2.39 ou plus récente** : Debian 12 et les distributions plus anciennes ne sont **pas** prises
-en charge. Seule Ubuntu 24.04 a été testée ; les autres distributions sont « au mieux ».
+L'application embarque son propre OBS Studio 32.1. Le `.deb` et l'AppImage demandent
+**glibc 2.39 ou plus récente** (Ubuntu 24.04+, Debian 13+). Sur les distributions plus anciennes,
+dont **Ubuntu 22.04**, utiliser le **Flatpak**, qui apporte ses propres bibliothèques. Seule
+Ubuntu 24.04 a été testée sur une vraie machine ; le Flatpak est installé et vérifié sur Ubuntu
+22.04 par la CI ; les autres distributions sont « au mieux ».
 
 **Ubuntu 24.04+ / Debian 13+ : paquet `.deb` (recommandé)**
 
@@ -53,9 +55,10 @@ sudo apt install ./LinTO-Live-<version>-amd64.deb
 `apt` installe en même temps tout ce dont l'application a besoin : rien d'autre à faire.
 LinTO Live apparaît ensuite dans le menu des applications.
 
-**Toute distribution avec Flatpak**
+**Ubuntu 22.04 et toute distribution avec Flatpak**
 
-Le runtime Freedesktop est téléchargé depuis Flathub à l'installation :
+Sur Ubuntu 22.04, installer d'abord Flatpak : `sudo apt install flatpak`. Le runtime Freedesktop
+est téléchargé depuis Flathub à l'installation :
 
 ```bash
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
