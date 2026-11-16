@@ -141,6 +141,20 @@ describe('ObsProcess', () => {
     expect(children).toHaveLength(1)
   })
 
+  it('killHung() SIGKILLs a hung OBS and lets the crash path restart it', async () => {
+    const { p, children } = setup()
+    await p.start()
+    const restarting = vi.fn()
+    p.on('restarting', restarting)
+    const ready = new Promise((r) => p.once('ready', r))
+    p.killHung()
+    expect(children[0].killed).toEqual(['SIGKILL'])
+    await ready
+    expect(restarting).toHaveBeenCalledWith(1)
+    expect(children).toHaveLength(2)
+    await p.stop()
+  })
+
   it('stop() sends SIGTERM and does not restart', async () => {
     const { p, children, calls } = setup()
     await p.start()

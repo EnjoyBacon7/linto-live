@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { TranscriptLog } from '../../src/main/linto/transcript'
-import { applyTranscriptUpdate, clockTime, segmentLabels } from '../../src/shared/transcript'
+import {
+  applyTranscriptUpdate, clockTime, segmentLabels, TRANSCRIPT_LOG_MAX_SEGMENTS, TRANSCRIPT_VIEW_MAX_SEGMENTS, trimTranscript
+} from '../../src/shared/transcript'
 import type { Transcript, TranscriptSegment, TranscriptUpdate } from '../../src/shared/types'
 
 /** A log whose clock is `clock.t` (ms). */
@@ -53,6 +55,19 @@ describe('TranscriptLog', () => {
     const { t } = log(3)
     for (let i = 1; i <= 5; i++) t.final({ segmentId: i, text: `s${i}` })
     expect(t.snapshot().finals.map((s) => s.id)).toEqual([3, 4, 5])
+    expect(t.snapshot().dropped).toBe(2)
+    t.reset('Next')
+    expect(t.snapshot().dropped).toBeUndefined()
+  })
+
+  it('keeps far more than the window shows: a 5,001-final show loses nothing (issue #7)', () => {
+    expect(TRANSCRIPT_LOG_MAX_SEGMENTS).toBeGreaterThan(TRANSCRIPT_VIEW_MAX_SEGMENTS * 10)
+    const t = new TranscriptLog()
+    for (let i = 0; i <= TRANSCRIPT_VIEW_MAX_SEGMENTS; i++) t.final({ segmentId: i, text: `phrase ${i}` })
+    const snap = t.snapshot()
+    expect(snap.finals).toHaveLength(TRANSCRIPT_VIEW_MAX_SEGMENTS + 1)
+    expect(snap.finals[0].text).toBe('phrase 0')
+    expect(snap.dropped).toBeUndefined()
   })
 
   it('reset empties everything and records the new show', () => {
@@ -82,6 +97,21 @@ describe('applyTranscriptUpdate', () => {
     expect(copy).toEqual(l.snapshot())
     apply(l.reset())
     expect(copy).toEqual({ finals: [], partial: null })
+  })
+})
+
+describe('trimTranscript / view cap', () => {
+  it('keeps the newest finals and counts the dropped ones', () => {
+    const f = (id: number): TranscriptSegment => ({ id, text: `s${id}`, at: id })
+    const t: Transcript = { finals: [f(1), f(2), f(3)], partial: null, dropped: 4 }
+    expect(trimTranscript(t, 5)).toBe(t)
+    expect(trimTranscript(t, 2)).toEqual({ finals: [f(2), f(3)], partial: null, dropped: 5 })
+  })
+  it('the view copy stays capped while tracking what it no longer shows', () => {
+    let copy: Transcript = { finals: [], partial: null }
+    for (let i = 1; i <= 4; i++) copy = applyTranscriptUpdate(copy, { kind: 'final', segment: { id: i, text: 'x', at: i } }, 2)
+    expect(copy.finals.map((s) => s.id)).toEqual([3, 4])
+    expect(copy.dropped).toBe(2)
   })
 })
 

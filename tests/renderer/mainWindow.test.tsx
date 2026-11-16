@@ -320,6 +320,16 @@ describe('Nouvelle session…', () => {
     expect(row('Atelier').getAttribute('aria-selected')).toBe('false')
   })
 
+  it('refuses the name of an RTMP-only session, saying why', async () => {
+    setup({ sessions: { lookup: vi.fn().mockResolvedValue('rtmp-only') } })
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Vieille{Enter}')
+    const d = await screen.findByRole('dialog', { name: 'La session « Vieille » existe déjà.' })
+    expect(within(d).getByText(/ne propose que le protocole RTMP/)).toBeTruthy()
+    expect(within(d).queryByRole('button', { name: 'Utiliser' })).toBeNull()
+  })
+
   it('refuses the name of a session the user has no rights on (not listed)', async () => {
     setup({ sessions: { lookup: vi.fn().mockResolvedValue('forbidden') } })
     await renderMain()
@@ -448,7 +458,8 @@ describe('Terminer…', () => {
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Terminer' }))
     expect(terminate).toHaveBeenCalledTimes(1)
     expect((screen.getByRole('button', { name: 'Fin de session…' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(true)
+    // Arrêter stays available: it interrupts a termination stuck on LinTO (issue #6).
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
     const lists = fn(api.sessions.list).mock.calls.length
     await act(async () => release())
     await waitFor(() => expect(fn(api.sessions.list).mock.calls.length).toBeGreaterThan(lists))
@@ -490,13 +501,29 @@ describe('Switch while live', () => {
     act(() => emit('live-state', live()))
     await userEvent.click(row('Atelier'))
     await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
-    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement).disabled).toBe(true)
     await userEvent.click(row('Plénière'))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(start).toHaveBeenCalledTimes(1)
     await act(async () => release({ ok: true, reused: false, canStream: true }))
     expect((screen.getByRole('button', { name: 'Arrêter' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('Arrêter interrupts a switch stuck on LinTO; the cancelled start shows no error (issue #6)', async () => {
+    let release: (r: StartResult) => void = () => {}
+    const start = vi.fn(() => new Promise<StartResult>((r) => { release = r }))
+    const stop = vi.fn(async () => { release({ ok: false, message: 'Démarrage annulé.', cancelled: true }) })
+    setup({ live: { start, stop } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Atelier'))
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Arrêter' }))
+    expect(stop).toHaveBeenCalledTimes(1)
+    act(() => emit('live-state', { ...live(), phase: 'idle', session: undefined }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Démarrer' })).toBeTruthy())
+    expect(screen.queryByText('Démarrage annulé.')).toBeNull()
   })
 
   it('an existing name typed while live offers to switch to it', async () => {
@@ -522,6 +549,21 @@ describe('Switch while live', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
     expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
     expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: [], visibility: 'organization' })
+  })
+
+  it('Arrêter during the profile save of a switch: the new session is not started after the stop', async () => {
+    let saved: () => void = () => {}
+    setup({ setup: { load: vi.fn().mockResolvedValue(setupData()), save: vi.fn(() => new Promise<void>((r) => { saved = r })) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    await userEvent.type(screen.getByLabelText('Nom'), 'Débat{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect(api.setup.save).toHaveBeenCalledWith({ profileId: 1 })
+    await userEvent.click(screen.getByRole('button', { name: 'Arrêter' }))
+    expect(api.live.stop).toHaveBeenCalledTimes(1)
+    await act(async () => saved())
+    expect(api.live.start).not.toHaveBeenCalled()
   })
 })
 

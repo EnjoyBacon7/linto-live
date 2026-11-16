@@ -5,27 +5,19 @@ export interface ObsStreamService {
   streamServiceSettings: { server: string; key: string }
 }
 
-/** Default protocol: spikes/RESULTS.md has no protocol result yet, so SRT. */
-export const DEFAULT_PREFER: 'srt' | 'rtmp' = 'srt'
+/**
+ * Why a channel cannot be streamed to: no endpoint at all (LinTO hands them only to users with the right), or
+ * only an RTMP one. RTMP is not used: spikes/RESULTS.md (Spike B) found it KO towards LinTO (session flapping
+ * active/ready every ~3.5 s, empty `final` events).
+ */
+export type StreamBlocker = 'forbidden' | 'rtmp-only'
 
-const fromSrt = (url: string): ObsStreamService => ({
-  streamServiceType: 'rtmp_custom',
-  streamServiceSettings: { server: url, key: '' }
-})
-
-function fromRtmp(url: string): ObsStreamService {
-  const i = url.lastIndexOf('/')
-  return {
-    streamServiceType: 'rtmp_custom',
-    streamServiceSettings: { server: url.slice(0, i), key: url.slice(i + 1) }
-  }
+/** OBS stream settings for a LinTO channel: SRT only (see `StreamBlocker`), null when it has no SRT endpoint. */
+export function toObsStreamService(e: StreamEndpoints): ObsStreamService | null {
+  return e.srt ? { streamServiceType: 'rtmp_custom', streamServiceSettings: { server: e.srt, key: '' } } : null
 }
 
-export function toObsStreamService(e: StreamEndpoints, prefer: 'srt' | 'rtmp' = DEFAULT_PREFER): ObsStreamService | null {
-  const order: ('srt' | 'rtmp')[] = prefer === 'srt' ? ['srt', 'rtmp'] : ['rtmp', 'srt']
-  for (const p of order) {
-    const url = e[p]
-    if (url) return p === 'srt' ? fromSrt(url) : fromRtmp(url)
-  }
-  return null
+export function streamBlocker(e: StreamEndpoints): StreamBlocker | null {
+  if (toObsStreamService(e)) return null
+  return e.rtmp ? 'rtmp-only' : 'forbidden'
 }

@@ -172,7 +172,7 @@ export function Stage({ onAir, hasCamera, sessionName, banners }: StageProps) {
           <button type="button" className="transcript-resume" onClick={resume}>Revenir au direct</button>
         )}
       </div>
-      {!onAir && t.finals.length > 0 && <ExportBar count={t.finals.length} />}
+      {!onAir && t.finals.length > 0 && <ExportBar count={t.finals.length + (t.dropped ?? 0)} />}
     </section>
   )
 }

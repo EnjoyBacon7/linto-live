@@ -1,10 +1,27 @@
 import type { Transcript, TranscriptSegment, TranscriptUpdate } from './types'
 
-/** Finalized segments kept for the main window (a long day of speech is a few thousand). */
-export const TRANSCRIPT_MAX_SEGMENTS = 5000
+/**
+ * Finalized segments main keeps for the export: at the rate measured on LinTO (one every 3-5 s, see
+ * spikes/RESULTS.md) about 4 days of continuous speech, ~20 MB.
+ */
+export const TRANSCRIPT_LOG_MAX_SEGMENTS = 100_000
+/** Finalized segments the window displays (the export still has them all). */
+export const TRANSCRIPT_VIEW_MAX_SEGMENTS = 5000
+
+/** Appends a final, dropping the oldest ones past `max` (counted in `dropped`). */
+function pushFinal(t: Transcript, s: TranscriptSegment, max: number): Transcript {
+  return trimTranscript({ ...t, finals: [...t.finals, s], partial: null }, max)
+}
+
+/** `t` with at most `max` finals: the oldest ones go, counted in `dropped`. */
+export function trimTranscript(t: Transcript, max: number): Transcript {
+  const extra = t.finals.length - max
+  if (extra <= 0) return t
+  return { ...t, finals: t.finals.slice(extra), dropped: (t.dropped ?? 0) + extra }
+}
 
 /** Applies an update to a transcript (the renderer's copy). */
-export function applyTranscriptUpdate(t: Transcript, u: TranscriptUpdate, max = TRANSCRIPT_MAX_SEGMENTS): Transcript {
+export function applyTranscriptUpdate(t: Transcript, u: TranscriptUpdate, max = TRANSCRIPT_VIEW_MAX_SEGMENTS): Transcript {
   switch (u.kind) {
     case 'reset': {
       const r: Transcript = { finals: [], partial: null }
@@ -13,10 +30,7 @@ export function applyTranscriptUpdate(t: Transcript, u: TranscriptUpdate, max = 
       return r
     }
     case 'partial': return { ...t, partial: u.segment }
-    case 'final': {
-      const finals = t.finals.length >= max ? [...t.finals.slice(t.finals.length - max + 1), u.segment] : [...t.finals, u.segment]
-      return { ...t, finals, partial: null }
-    }
+    case 'final': return pushFinal(t, u.segment, max)
   }
 }
 

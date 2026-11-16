@@ -1,4 +1,4 @@
-import { TRANSCRIPT_MAX_SEGMENTS } from '../../shared/transcript'
+import { TRANSCRIPT_LOG_MAX_SEGMENTS } from '../../shared/transcript'
 import type { Transcript, TranscriptSegment, TranscriptUpdate } from '../../shared/types'
 import type { CaptionEvent } from './captions'
 
@@ -12,10 +12,12 @@ function absolute(astart: CaptionEvent['astart'], offset: CaptionEvent['start'])
 /** History of the show's transcription; each change returns the update to send to the renderer (null: none). */
 export class TranscriptLog {
   private finals: TranscriptSegment[] = []
+  /** Oldest finals of the show dropped past `max`. */
+  private dropped = 0
   private pending: TranscriptSegment | null = null
   private show: { sessionName?: string; startedAt?: number } = {}
 
-  constructor(private readonly max = TRANSCRIPT_MAX_SEGMENTS, private readonly now: () => number = Date.now) {}
+  constructor(private readonly max = TRANSCRIPT_LOG_MAX_SEGMENTS, private readonly now: () => number = Date.now) {}
 
   private segment(e: CaptionEvent, final: boolean): TranscriptSegment | null {
     const text = e.text?.trim() ?? ''
@@ -41,13 +43,18 @@ export class TranscriptLog {
     if (!s) return null
     this.pending = null
     this.finals.push(s)
-    if (this.finals.length > this.max) this.finals.splice(0, this.finals.length - this.max)
+    if (this.finals.length > this.max) {
+      const extra = this.finals.length - this.max
+      this.finals.splice(0, extra)
+      this.dropped += extra
+    }
     return { kind: 'final', segment: s }
   }
 
   /** A new show begins (its session name and start time go with the transcript, e.g. for the export). */
   reset(sessionName?: string, startedAt?: number): TranscriptUpdate {
     this.finals = []
+    this.dropped = 0
     this.pending = null
     this.show = {}
     if (sessionName !== undefined) this.show.sessionName = sessionName
@@ -63,6 +70,8 @@ export class TranscriptLog {
   }
 
   snapshot(): Transcript {
-    return { finals: [...this.finals], partial: this.pending, ...this.show }
+    const t: Transcript = { finals: [...this.finals], partial: this.pending, ...this.show }
+    if (this.dropped > 0) t.dropped = this.dropped
+    return t
   }
 }

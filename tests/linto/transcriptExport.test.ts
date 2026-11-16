@@ -59,6 +59,17 @@ describe('exportTranscript', () => {
   })
 })
 
+describe('exportTranscript: dropped segments are flagged', () => {
+  const short: Transcript = { sessionName: 'Conf', startedAt: T0, dropped: 12, finals: [transcript.finals[0]], partial: null }
+  it('txt, vtt and json say how many segments are missing; an untruncated export does not', () => {
+    expect(exportTranscript(short, 'txt')).toContain("les 12 premiers segments de la session n'ont pas été conservés")
+    expect(exportTranscript(short, 'vtt')).toMatch(/^WEBVTT\n\nNOTE Transcription incomplète/)
+    expect(JSON.parse(exportTranscript(short, 'json')).droppedSegments).toBe(12)
+    expect(JSON.parse(exportTranscript(transcript, 'json'))).not.toHaveProperty('droppedSegments')
+    expect(exportTranscript(transcript, 'txt')).not.toContain('incomplète')
+  })
+})
+
 describe('exportFileName', () => {
   it('session name and local date, file-system safe', () => {
     expect(exportFileName(transcript, 'srt')).toBe('Conf-du lundi - 2026-11-10.srt')

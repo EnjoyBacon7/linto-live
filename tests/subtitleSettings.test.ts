@@ -96,7 +96,7 @@ function setup(meta?: Record<string, unknown>) {
     setAudioDevice: vi.fn(async () => {}), setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}), screenshot: vi.fn(async () => ''), startStream: vi.fn(async () => {}),
     stopStream: vi.fn(async () => true), streamState$: vi.fn(() => () => {}), openOutputWindow: vi.fn(async () => {}),
-    showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {}),
+    showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {}), ping: vi.fn(async () => {}),
     startRecord: vi.fn(async () => {}), stopRecord: vi.fn(async () => null), recordState$: vi.fn(() => () => {})
   }
   const overlay = { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) }
