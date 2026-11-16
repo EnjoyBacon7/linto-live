@@ -203,8 +203,9 @@ jobs:
           set -euo pipefail
           perms="$(flatpak info --user --show-permissions ai.linto.live)"
           echo "$perms"
-          grep -Eq '^sockets=.*\bwayland\b' <<<"$perms"
-          grep -Eq '^sockets=.*(^|;|=)x11\b' <<<"$perms"
+          # Whole entries: "fallback-x11" must not count as "x11".
+          grep -Eq '^sockets=(.*;)?wayland;' <<<"$perms"
+          grep -Eq '^sockets=(.*;)?x11;' <<<"$perms"
           flatpak run --command=sh ai.linto.live -c '
             set -eu
             cd /app/lib/ai.linto.live/resources/obs
