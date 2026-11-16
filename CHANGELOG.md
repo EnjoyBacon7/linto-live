@@ -4,7 +4,7 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
-## Non publié
+## [0.4.0] - 2026-11-16
 
 ### Ajouté
 
@@ -15,6 +15,11 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   principale disparaît, retour de même ; un écran noir (ATEM sans entrée) compte comme absence.
 - **Enregistrement du direct** en MKV 1920×1080 dans le dossier choisi (par défaut Vidéos (Films
   sur macOS) › LinTO Live), avec pastille REC dans la barre d'outils.
+
+### Modifié
+
+- **Ubuntu 22.04** : pris en charge par le Flatpak, installé et vérifié sur Ubuntu 22.04 à chaque
+  build de la CI (le `.deb` et l'AppImage demandent toujours glibc 2.39).
 
 ## [0.3.1] - 2026-11-16
 
@@ -103,6 +108,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.4.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.1.0...v0.2.0
