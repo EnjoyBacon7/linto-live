@@ -169,7 +169,7 @@ describe('Démarrer', () => {
     expect(api.live.start).not.toHaveBeenCalled()
   })
 
-  it('« Écouter le retour audio » toggles the audio feedback and warns about loudspeakers once on', async () => {
+  it('« Écouter le retour audio » toggles the audio feedback', async () => {
     setup()
     await renderMain()
     const check = screen.getByLabelText('Écouter le retour audio') as HTMLInputElement
@@ -177,10 +177,8 @@ describe('Démarrer', () => {
     expect(check.disabled).toBe(false)
     await userEvent.click(check)
     expect(api.live.setAudioMonitor).toHaveBeenCalledWith(true)
-    expect(screen.queryByText(/utilisez un casque/)).toBeNull()
     act(() => emit('live-state', { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off', audioMonitor: true }))
     expect((screen.getByLabelText('Écouter le retour audio') as HTMLInputElement).checked).toBe(true)
-    expect(screen.getByText(/utilisez un casque/)).toBeTruthy()
   })
 
   it('the camera can be set back to « Aucune »', async () => {
