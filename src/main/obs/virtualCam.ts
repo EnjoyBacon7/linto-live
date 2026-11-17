@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { inApplicationsFolder } from './runtime'
 
 /**
  * OBS's virtual camera, per platform. When OBS fails to start it, OBS opens a modal error box (in its own,
@@ -15,6 +16,10 @@ const HOST_MODPROBE = 'sudo modprobe v4l2loopback exclusive_caps=1 card_label="O
 export const MSG_VCAM_MAC_NOT_ALLOWED =
   'Caméra virtuelle pas encore autorisée : dans Réglages Système → Général → Ouverture et extensions → ' +
   'Extensions de caméra, activez OBS, puis réessayez. Si OBS n’y figure pas, relancez LinTO Live.'
+export const MSG_VCAM_MAC_LOCATION =
+  'Caméra virtuelle indisponible : macOS ne l’autorise que pour une application placée dans le dossier ' +
+  'Applications, et LinTO Live n’a pas pu y copier OBS (droits d’administrateur nécessaires). Relancez ' +
+  'LinTO Live depuis un compte administrateur.'
 export const MSG_VCAM_MODPROBE_FAILED = 'Impossible de charger le module v4l2loopback (autorisation refusée ?).'
 
 /** Why OBS has no virtual camera at all (GetVirtualCamStatus « not available »): only Linux lacks it. */
@@ -54,13 +59,16 @@ const systemOps: PreflightOps = {
 
 /**
  * Before StartVirtualCam: null when OBS can start it, else why not (shown to the user).
- * macOS: the camera extension must be approved (a check that cannot run is no reason to refuse).
+ * macOS: OBS must run from /Applications (else macOS refuses to activate its camera extension and OBS fails
+ * with « OBS cannot activate the virtual camera unless it is placed in the Applications folder »), and the
+ * camera extension must be approved (a check that cannot run is no reason to refuse).
  * Linux: loads v4l2loopback as OBS would (pkexec), so a refusal is reported here instead of in OBS.
  */
 export async function virtualCamPreflight(
-  platform: NodeJS.Platform, flatpak: boolean, ops: PreflightOps = systemOps
+  platform: NodeJS.Platform, flatpak: boolean, ops: PreflightOps = systemOps, obsExe?: string
 ): Promise<string | null> {
   if (platform === 'darwin') {
+    if (obsExe !== undefined && !inApplicationsFolder(obsExe)) return MSG_VCAM_MAC_LOCATION
     let list: string
     try {
       list = await ops.run('systemextensionsctl', ['list'])

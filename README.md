@@ -174,7 +174,10 @@ l'application pendant un direct revient à cliquer sur Arrêter.
   diffusion, elle s'active immédiatement, direct ou non, et n'est pas mémorisée d'un lancement à
   l'autre.
   - macOS : à la première utilisation, autoriser l'extension caméra d'OBS dans Réglages Système →
-    Général → Ouverture et extensions → Extensions de caméra.
+    Général → Ouverture et extensions → Extensions de caméra. macOS n'active cette extension que
+    depuis le dossier Applications : LinTO Live y place sa copie d'OBS, dans le dossier masqué
+    `/Applications/.LinTO Live` (droits d'administrateur nécessaires ; supprimé à la
+    désinstallation).
   - Linux : nécessite le module `v4l2loopback` (paquet `v4l2loopback-dkms`), chargé à la demande
     (mot de passe administrateur). Avec le Flatpak, le module doit être chargé sur le système avant
     de lancer LinTO Live :

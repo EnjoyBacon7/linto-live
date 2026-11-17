@@ -23,17 +23,19 @@ describe('uninstallTargets darwin', () => {
       `${H}/Library/Logs/LinTO Live`,
       `${H}/Library/Preferences/ai.linto.live.plist`,
       `${H}/Library/Saved Application State/ai.linto.live.savedState`,
-      `${H}/Library/Preferences/com.obsproject.obs-studio.plist`
+      `${H}/Library/Preferences/com.obsproject.obs-studio.plist`,
+      '/Applications/.LinTO Live'
     ])
     expect(t.trash).toBe('/Applications/LinTO Live.app')
   })
   it('omits OBS plist when personal OBS installed', () => {
     const t = uninstallTargets({ ...base, personalObsInstalled: true })
     expect(t.remove.some((p) => p.includes('obsproject'))).toBe(false)
-    expect(t.remove).toHaveLength(6)
+    expect(t.remove).toHaveLength(7)
   })
-  it('never lists anything outside home', () => {
-    for (const p of uninstallTargets(base).remove) expect(p.startsWith(H + '/')).toBe(true)
+  it('lists nothing outside home but the OBS copy under /Applications', () => {
+    const outside = uninstallTargets(base).remove.filter((p) => !p.startsWith(H + '/'))
+    expect(outside).toEqual(['/Applications/.LinTO Live'])
   })
   it('trash is null in dev (electron in node_modules)', () => {
     const t = uninstallTargets({
