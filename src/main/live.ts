@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
   type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
@@ -121,7 +121,7 @@ export interface LiveObsProcess {
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setBackupVisible' | 'probePrimary'
-  | 'setAudioDevice' | 'setAudioMonitor' | 'setOverlayUrl'
+  | 'setAudioDevice' | 'setMicGain' | 'setAudioMonitor' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
   | 'startRecord' | 'startBroadcast' | 'stopRecord' | 'recordState$'
   | 'virtualCamAvailable' | 'setVirtualCam' | 'virtualCamState$'
@@ -710,6 +710,7 @@ export class LiveController extends EventEmitter {
         if ((patch.backupSource.kind === 'none') !== (this.monitor === null)) this.syncMonitor(c)
       }
       if (patch.audioDeviceId && patch.audioDeviceId !== before.audioDeviceId) await c.setAudioDevice(patch.audioDeviceId)
+      if (patch.micGainDb !== undefined && micGainDb(patch) !== micGainDb(before)) await c.setMicGain(micGainDb(patch))
     })
   }
 
@@ -852,6 +853,8 @@ export class LiveController extends EventEmitter {
     const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
     this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
+    // Always set (also 0 dB): OBS saves the filter with the scene collection.
+    await ready.setMicGain(micGainDb(s)).catch(() => {})
     // Always set (also off): OBS saves the monitoring type with the scene collection.
     await ready.setAudioMonitor(this.audioMonitor).catch(() => {
       if (this.audioMonitor) {

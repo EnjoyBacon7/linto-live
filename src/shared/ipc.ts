@@ -1,3 +1,4 @@
+import { MIC_GAIN_MAX, MIC_GAIN_MIN } from './types'
 import type {
   AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
   QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
@@ -241,6 +242,10 @@ export function checkSettingsPatch(raw: unknown): Partial<Settings> {
   if ('properNouns' in raw) {
     const v = raw.properNouns
     if (!Array.isArray(v) || v.length > 1000 || !v.every((n) => typeof n === 'string' && n.length <= 200)) return bad()
+  }
+  if ('micGainDb' in raw) {
+    const v = raw.micGainDb
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < MIC_GAIN_MIN || v > MIC_GAIN_MAX) return bad()
   }
   for (const k of ['blackIsAbsent', 'recordEnabled', 'properNounsEnabled', 'broadcastEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
   return raw as Partial<Settings>

@@ -828,6 +828,26 @@
   background: var(--bad);
 }
 
+/* Micro gain slider (under the level meter). */
+.mic-gain {
+  margin-top: 6px;
+}
+
+.mic-gain .field-label {
+  display: flex;
+  justify-content: space-between;
+}
+
+.mic-gain-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.mic-gain input[type='range'] {
+  width: 100%;
+  margin: 2px 0 0;
+}
+
 /* ---------- Sheets ---------- */
 
 .sheet-form {

@@ -97,6 +97,23 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     }
   }, 30_000)
 
+  it('puts a gain then a limiter on the micro, and sets the gain', async () => {
+    const raw = new OBSWebSocket()
+    await raw.connect(`ws://127.0.0.1:${conn!.port}`, conn!.password)
+    try {
+      await ctl!.setMicGain(-6)
+      const { filters } = await raw.call('GetSourceFilterList', { sourceName: SRC_AUDIO })
+      const list = filters as unknown as { filterName: string; filterKind: string; filterEnabled: boolean; filterSettings: { db?: number } }[]
+      expect(list.map((f) => [f.filterName, f.filterKind, f.filterEnabled])).toEqual([
+        ['Gain', 'gain_filter', true], ['Limiteur', 'limiter_filter', true]
+      ])
+      expect(list[0].filterSettings.db).toBe(-6)
+      await ctl!.setMicGain(0)
+    } finally {
+      await raw.disconnect()
+    }
+  }, 30_000)
+
   it('swaps the primary to an image and back, stacks a hidden backup above it', async () => {
     // 1×1 white PNG
     const png = join(userData, 'white.png')

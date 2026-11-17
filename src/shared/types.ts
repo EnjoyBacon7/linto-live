@@ -131,6 +131,8 @@ export interface Settings {
   /** A black picture counts as an absent source (default true). */
   blackIsAbsent?: boolean
   audioDeviceId?: string
+  /** Gain applied to the micro in OBS, in dB (default 0), before a limiter that keeps it from clipping. */
+  micGainDb?: number
   lastSessionName?: string
   /** Subtitle band shown in the video (default true). */
   subtitlesVisible?: boolean
@@ -166,6 +168,16 @@ export interface DeviceItem { id: string; name: string }
 export const DEFAULT_SUBTITLE_FONT_SIZE = 48
 export const SUBTITLE_FONT_SIZE_MIN = 12
 export const SUBTITLE_FONT_SIZE_MAX = 96
+
+/** Micro gain range in dB (OBS's gain filter accepts -30..+30). */
+export const MIC_GAIN_MIN = -30
+export const MIC_GAIN_MAX = 20
+
+/** Micro gain actually applied: the saved one rounded to whole dB and within range, else 0. */
+export function micGainDb(s: Pick<Settings, 'micGainDb'>): number {
+  const v = s.micGainDb
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(MIC_GAIN_MAX, Math.max(MIC_GAIN_MIN, Math.round(v))) : 0
+}
 
 /**
  * One transcribed segment of the session on air. `at` / `endAt`: when it was said (ms epoch, from LinTO's

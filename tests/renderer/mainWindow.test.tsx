@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from '../../src/renderer/App'
 import { formatElapsed } from '../../src/renderer/main/useLive'
@@ -1024,6 +1024,21 @@ describe('Inspector: sources vidéo', () => {
     const box = screen.getByRole('checkbox', { name: 'Écran noir = source absente' }) as HTMLInputElement
     expect(box.checked).toBe(true)
     expect(box.disabled).toBe(true)
+  })
+})
+
+describe('Inspector: micro gain', () => {
+  it('the gain slider saves each step, and double-click resets it to 0 dB', async () => {
+    setup()
+    await renderMain()
+    const slider = screen.getByRole('slider', { name: 'Gain du micro' }) as HTMLInputElement
+    expect(slider.value).toBe('0')
+    expect(slider.getAttribute('aria-valuetext')).toBe('0 dB')
+    fireEvent.change(slider, { target: { value: '-8' } })
+    expect(fn(api.setup.save)).toHaveBeenCalledWith({ micGainDb: -8 })
+    expect(slider.getAttribute('aria-valuetext')).toBe('−8 dB')
+    fireEvent.doubleClick(slider)
+    expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ micGainDb: 0 })
   })
 })
 

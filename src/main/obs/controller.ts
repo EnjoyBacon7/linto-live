@@ -17,6 +17,11 @@ export const SRC_OVERLAY = 'Sous-titres'
 export const SRC_BACKUP = 'Secours'
 /** Hidden device input (pause scene) that only serves to list the cameras, whatever the sources are. */
 export const SRC_DEVICES = 'Détection caméras'
+/** Filters of SRC_AUDIO, in this order: the user's gain, then a limiter that catches what it pushes over. */
+export const FILTER_GAIN = 'Gain'
+export const FILTER_LIMITER = 'Limiteur'
+/** Ceiling of the micro's limiter (dBFS): just under clipping, so it only acts on peaks that would saturate. */
+export const LIMITER_THRESHOLD_DB = -1
 
 export type SourceSlot = 'primary' | 'backup'
 
@@ -176,7 +181,32 @@ export class ObsController {
       })
     }
     await this.client.call('SetInputAudioTracks', { inputName: SRC_AUDIO, inputAudioTracks: { ...TRACKS_NONE, '1': true } })
+    await this.ensureMicFilters()
     for (const name of [SRC_VIDEO, SRC_OVERLAY, SRC_DEVICES]) await this.silence(name)
+  }
+
+  /** Gain then limiter on the micro (created once, kept by OBS with the scene collection). */
+  private async ensureMicFilters(): Promise<void> {
+    const { filters } = await this.client.call('GetSourceFilterList', { sourceName: SRC_AUDIO })
+    const have = new Set<string>((filters as { filterName: string }[]).map((f) => f.filterName))
+    let count = have.size
+    const limiter = { threshold: LIMITER_THRESHOLD_DB, release_time: 60 }
+    if (!have.has(FILTER_GAIN)) {
+      await this.client.call('CreateSourceFilter', {
+        sourceName: SRC_AUDIO, filterName: FILTER_GAIN, filterKind: 'gain_filter', filterSettings: { db: 0 }
+      })
+      count++
+    }
+    if (!have.has(FILTER_LIMITER)) {
+      await this.client.call('CreateSourceFilter', {
+        sourceName: SRC_AUDIO, filterName: FILTER_LIMITER, filterKind: 'limiter_filter', filterSettings: limiter
+      })
+      count++
+    } else {
+      await this.client.call('SetSourceFilterSettings', { sourceName: SRC_AUDIO, filterName: FILTER_LIMITER, filterSettings: limiter })
+    }
+    await this.client.call('SetSourceFilterIndex', { sourceName: SRC_AUDIO, filterName: FILTER_GAIN, filterIndex: 0 })
+    await this.client.call('SetSourceFilterIndex', { sourceName: SRC_AUDIO, filterName: FILTER_LIMITER, filterIndex: count - 1 })
   }
 
   private async devices(inputName: string, propertyName: string): Promise<DeviceItem[]> {
@@ -296,6 +326,11 @@ export class ObsController {
 
   async setAudioDevice(id: string): Promise<void> {
     await this.client.call('SetInputSettings', { inputName: SRC_AUDIO, inputSettings: { device_id: id } })
+  }
+
+  /** Micro gain in dB (OBS's gain filter, ahead of the limiter: a boost cannot make it clip). */
+  async setMicGain(db: number): Promise<void> {
+    await this.client.call('SetSourceFilterSettings', { sourceName: SRC_AUDIO, filterName: FILTER_GAIN, filterSettings: { db } })
   }
 
   /**
