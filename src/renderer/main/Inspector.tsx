@@ -181,12 +181,6 @@ export function Inspector(p: InspectorProps) {
         <Check label="Écouter le retour audio" checked={p.audioMonitor === true}
           disabled={!p.onAudioMonitorChange || (!p.audioMonitor && !p.audioMonitorAvailable)}
           onChange={(v) => p.onAudioMonitorChange?.(v)} />
-        {p.audioMonitor && (
-          <p className="inspector-note">
-            Le son envoyé à LinTO et enregistré est joué sur la sortie audio du système : utilisez un casque (sur
-            haut-parleurs, le micro le reprend et provoque un larsen).
-          </p>
-        )}
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><CaptionsIcon size={14} />Profil de transcription</h3>
@@ -282,9 +276,6 @@ export function Inspector(p: InspectorProps) {
         <Button className="inspector-control" disabled={!settings} onClick={() => p.onBroadcastSettings?.()}>
           Paramètres de diffusion…
         </Button>
-        {!broadcasting && !hasServer && (
-          <p className="inspector-note">YouTube, Twitch… : saisir le serveur et la clé de stream de la plateforme.</p>
-        )}
       </section>
     </aside>
   )
