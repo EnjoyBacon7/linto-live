@@ -184,4 +184,23 @@ describe('Login', () => {
     expect((screen.getByLabelText('Email') as HTMLInputElement).value).toBe('a@b.c')
     expect((screen.getByRole('checkbox', { name: 'Se souvenir de moi' }) as HTMLInputElement).checked).toBe(false)
   })
+
+  it('a rejected instance reverts the display to the saved host, with the error shown', async () => {
+    const api = makeApi({
+      setup: {
+        load: vi.fn().mockResolvedValue({ settings: { instance: 'https://my.linto' }, organizations: [], profiles: [], videoDevices: [], audioDevices: [] }),
+        save: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'x': Error: URL refusée."))
+      }
+    })
+    window.lintoLive = api
+    render(<Login onLoggedIn={() => {}} />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Modifier' }))
+    const field = screen.getByLabelText('Instance LinTO')
+    await userEvent.clear(field)
+    await userEvent.type(field, 'http://studio.example.org')
+    await userEvent.tab()
+    expect((await screen.findByRole('alert')).textContent).toBe('URL refusée.')
+    expect(screen.getByText('my.linto')).toBeTruthy()
+    expect(screen.queryByText('studio.example.org')).toBeNull()
+  })
 })
