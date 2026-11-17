@@ -2128,3 +2128,25 @@ describe('stream state when OBS is lost (A-001)', () => {
     expect(t.last()).toMatchObject({ obs: 'down', stream: 'error' })
   })
 })
+
+describe('Arrêter during an OBS revive (A-005)', () => {
+  it('stops without waiting for the remaining obs.start retries', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.obs.emit('exit', 1)
+    t.obs.start.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 20_000))
+      throw new Error('no')
+    })
+    const s = t.live.start('Conf')
+    await flush()
+    let done = false
+    const p = t.live.stop().then(() => { done = true })
+    // the in-flight obs.start may finish (20 s), but no further attempt nor backoff is waited for
+    await vi.advanceTimersByTimeAsync(20_100)
+    expect(t.obs.start).toHaveBeenCalledTimes(2) // boot + the one revive attempt in flight at stop()
+    expect(done).toBe(true)
+    await expect(s).resolves.toMatchObject({ ok: false, cancelled: true })
+    await p
+  })
+})

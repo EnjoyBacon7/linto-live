@@ -719,14 +719,23 @@ export class LiveController extends EventEmitter {
   }
 
   /** obs.start() with backoff (5 attempts). Null when every attempt failed or a newer start/shutdown superseded it. */
-  private async startObsWithRetry(gen: number): Promise<ObsConnection | null> {
+  private async startObsWithRetry(gen: number, cancelGen?: number): Promise<ObsConnection | null> {
+    const cancelled = (): boolean => cancelGen !== undefined && cancelGen !== this.cancelGen
     for (let attempt = 0; ; attempt++) {
-      if (this.shuttingDown || gen !== this.restartGen) return null
+      if (this.shuttingDown || gen !== this.restartGen || cancelled()) return null
       try {
         return await this.d.obs.start()
       } catch {
-        if (attempt >= OBS_START_DELAYS_MS.length) return null
-        await sleep(OBS_START_DELAYS_MS[attempt])
+        if (attempt >= OBS_START_DELAYS_MS.length || cancelled()) return null
+        // stop()/shutdown() ends the backoff at once (an obs.start already in flight still runs to its end).
+        if (cancelGen === undefined) await sleep(OBS_START_DELAYS_MS[attempt])
+        else {
+          try {
+            await this.abortable(cancelGen, sleep(OBS_START_DELAYS_MS[attempt]))
+          } catch {
+            return null
+          }
+        }
       }
     }
   }
@@ -735,7 +744,7 @@ export class LiveController extends EventEmitter {
    * Runs inside the queue: OBS is down (restarts exhausted, boot or attach failed) — quit whatever is left,
    * start it again with backoff and attach right away (the queued 'ready' then finds it attached).
    */
-  private async reviveObs(): Promise<boolean> {
+  private async reviveObs(cancelGen: number): Promise<boolean> {
     this.intentionalObsStop = true
     try {
       await this.d.obs.stop().catch(() => {})
@@ -743,9 +752,13 @@ export class LiveController extends EventEmitter {
       this.intentionalObsStop = false
     }
     this.setState({ obs: 'restarting' })
-    const conn = await this.startObsWithRetry(++this.restartGen)
+    const conn = await this.startObsWithRetry(++this.restartGen, cancelGen)
     if (conn) await this.attach(conn)
     if (this.ctl) return true
+    if (cancelGen !== this.cancelGen) {
+      this.setState({ obs: 'down' }) // Arrêter cancelled the revive: not a boot failure
+      return false
+    }
     this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
     return false
   }
@@ -867,7 +880,10 @@ export class LiveController extends EventEmitter {
     if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
     if (!this.ctl) {
       if (this.state.obs === 'restarting' || this.booting) return { ok: false, message: MSG_OBS_NOT_READY }
-      if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
+      if (!(await this.reviveObs(gen))) {
+        if (gen !== this.cancelGen) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
+        return { ok: false, message: MSG_BOOT_FAILED }
+      }
     }
 
     // Resolve first: a failure here must leave a running show (transcript, stream supervision) untouched.
