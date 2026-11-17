@@ -2,7 +2,7 @@ import { MSG_NO_SESSION_PERMISSION } from '../../shared/rights'
 import { ForbiddenError, LintoHttpError, NotFoundError } from '../../shared/types'
 
 /** What the app was doing when LinTO refused: the message names it. */
-export type LintoAction = 'list' | 'read' | 'create' | 'modify' | 'terminate'
+export type LintoAction = 'list' | 'read' | 'create' | 'modify' | 'terminate' | 'clear'
 
 /** LinTO's messages (studio-api) for the two kinds of 403 the session routes give. */
 const ORG_PERMISSION_MISSING = 'Organization does not have the required permission'
@@ -20,7 +20,8 @@ const ROLE_REFUSED: Record<LintoAction, string> = {
   read: MSG_ORG_ACCESS_LOST,
   create: "Tu n'as pas le droit de créer une session dans cette organisation (il faut être gestionnaire de réunion).",
   modify: "Tu n'as pas le droit de modifier cette session (il faut être gestionnaire de réunion dans l'organisation).",
-  terminate: "Tu n'as pas le droit de terminer cette session (il faut être gestionnaire de réunion dans l'organisation)."
+  terminate: "Tu n'as pas le droit de terminer cette session (il faut être gestionnaire de réunion dans l'organisation).",
+  clear: "Tu n'as pas le droit d'effacer la transcription de cette session (il faut être gestionnaire de réunion dans l'organisation)."
 }
 
 /** User-facing text for a LinTO refusal or failure (null: not a LinTO HTTP error, keep the original message). */

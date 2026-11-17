@@ -72,7 +72,7 @@ it('OBS crashing during a camera change: the restarted OBS is re-attached and Ar
     controllerFactory: (c: { port: number; password: string }) => ObsController.connect(c),
     api: {
       searchSessions: vi.fn(async () => [SESSION]), getSession: vi.fn(async () => SESSION),
-      createSession: vi.fn(async () => SESSION), terminateSession: vi.fn(async () => {})
+      createSession: vi.fn(async () => SESSION), terminateSession: vi.fn(async () => {}), clearSession: vi.fn(async () => {})
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
     overlay: { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) },

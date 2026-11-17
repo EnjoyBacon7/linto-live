@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
-        'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearSubtitles',
+        'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
       ].sort()

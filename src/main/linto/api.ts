@@ -4,7 +4,7 @@ import {
 } from '../../shared/types'
 import { orgRights } from '../../shared/rights'
 import type { LintoUrls } from './instance'
-import { LINTO_TIMEOUT_MS, withTimeout } from './timeout'
+import { LINTO_TIMEOUT_MS, TERMINATE_TIMEOUT_MS, withTimeout } from './timeout'
 
 export { ForbiddenError, LintoHttpError, NotFoundError, UnauthorizedError }
 
@@ -78,12 +78,12 @@ export class LintoApi {
     private fetchFn: typeof fetch = fetch
   ) {}
 
-  private async request(url: string, init: RequestInit = {}, auth = true): Promise<any> {
+  private async request(url: string, init: RequestInit = {}, auth = true, timeoutMs = LINTO_TIMEOUT_MS): Promise<any> {
     const headers = new Headers(init.headers)
     if (init.body !== undefined) headers.set('Content-Type', 'application/json')
     const t = this.token()
     if (auth && t) headers.set('Authorization', `Bearer ${t}`)
-    const res = await withTimeout(() => this.fetchFn(url, { ...init, headers, signal: AbortSignal.timeout(LINTO_TIMEOUT_MS) }))
+    const res = await withTimeout(() => this.fetchFn(url, { ...init, headers, signal: AbortSignal.timeout(timeoutMs) }))
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       const { message, code } = errorBody(text)
@@ -208,7 +208,19 @@ export class LintoApi {
     })
   }
 
+  /**
+   * Empties the session's transcript, like Studio's « Effacer la transcription »: LinTO then tells every viewer
+   * (Studio, the public page, LinTO Live's caption socket) to clear it (`orga_<org>_session_cleared`).
+   */
+  async clearSession(orgId: string, id: string): Promise<void> {
+    await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}/clear`, { method: 'PUT' })
+  }
+
+  /**
+   * Stops the session and saves it, like Studio's « Arrêter et enregistrer »: the server stops it (waiting for the
+   * last captions), stores its captions and translations as a conversation, then deletes the session.
+   */
   async terminateSession(orgId: string, id: string): Promise<void> {
-    await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}/stop?force=true&waitFinal=true`, { method: 'PUT' })
+    await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}?force=true`, { method: 'DELETE' }, true, TERMINATE_TIMEOUT_MS)
   }
 }

@@ -123,7 +123,9 @@ Conseils :
 5. **Démarrer** (⌘↩ / Ctrl+Entrée) : les sous-titres apparaissent sur la vidéo.
 6. **Arrêter** (⌘. / Ctrl+.) coupe les sous-titres et l'envoi du son **sans terminer** la session
    LinTO, qui peut être reprise plus tard ; la fenêtre de sortie reste ouverte, sur la caméra.
-   **Terminer la session…** (menu Session) la clôt définitivement côté LinTO.
+   **Terminer la session…** (menu Session) la clôt définitivement côté LinTO, comme « Arrêter et
+   enregistrer » dans LinTO Studio : la transcription (et ses traductions) est enregistrée comme
+   média dans LinTO Studio, puis la session est supprimée.
 
 La barre d'état en bas indique si LinTO reçoit bien le son. L'icône LinTO Live dans la barre des
 menus (macOS) ou la zone de notification (Linux) signale quand un direct est en cours. Quitter
@@ -149,6 +151,10 @@ l'application pendant un direct revient à cliquer sur Arrêter.
   `LinTO Live`. Une pastille rouge **REC** s'affiche dans la barre d'outils pendant
   l'enregistrement. Le réglage s'applique au prochain Démarrer ; une panne d'enregistrement
   n'interrompt jamais le direct.
+- **Effacer la transcription…** (pendant un direct) fait comme le bouton du même nom dans LinTO
+  Studio : la transcription de la session est effacée sur LinTO, et disparaît à la fois des
+  sous-titres de LinTO Live et de LinTO Studio. À l'inverse, effacer la transcription depuis LinTO
+  Studio vide aussi les sous-titres et la transcription de LinTO Live. Le direct continue.
 
 ### Droits LinTO nécessaires
 
@@ -160,7 +166,7 @@ permis est grisé, avec la raison au survol :
 | Voir les sessions, recevoir les sous-titres | Membre | les sessions privées des autres ne sont visibles qu'à partir de Gestionnaire de réunion |
 | Envoyer le son à une session | — | être propriétaire de la session, ou Gestionnaire de réunion |
 | Lister les profils de transcription | Réunion rapide | |
-| Créer une session, régler son filigrane, la terminer | Gestionnaire de réunion | l'organisation doit avoir l'option « Sessions » activée |
+| Créer une session, régler son filigrane, effacer sa transcription, la terminer | Gestionnaire de réunion | l'organisation doit avoir l'option « Sessions » activée |
 
 Si l'accès à une session est perdu en plein direct (compte retiré de l'organisation), l'envoi du
 son continue mais les sous-titres s'arrêtent, avec un message : il ne s'agit pas d'une

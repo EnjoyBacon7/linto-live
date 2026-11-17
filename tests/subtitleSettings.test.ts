@@ -7,7 +7,7 @@ import { checkWatermark, resolveWatermark, WATERMARK_META_KEY } from '../src/mai
 import { LintoApi } from '../src/main/linto/api'
 import { toSessionSummaries } from '../src/main/setupData'
 import { LiveController, subtitleFontSize, type LiveDeps } from '../src/main/live'
-import type { Session, Settings, Watermark, WatermarkConfig } from '../src/shared/types'
+import { ForbiddenError, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
 
 const CFG: WatermarkConfig = { enabled: true, content: 'Par $linto', frequency: 30, duration: 5 }
 const WM: Watermark = { display: true, pinned: false, content: 'Hello $linto', frequency: 60, duration: 8 }
@@ -106,7 +106,8 @@ function setup(meta?: Record<string, unknown>) {
     obs, controllerFactory: vi.fn(async () => ctl),
     api: {
       searchSessions: vi.fn(async () => sessions), getSession: vi.fn(async () => sessions[0]!),
-      createSession: vi.fn(async () => sessions[0]!), terminateSession: vi.fn(async () => {})
+      createSession: vi.fn(async () => sessions[0]!), terminateSession: vi.fn(async () => {}),
+      clearSession: vi.fn(async (_o: string, _s: string) => {})
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
     overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', decodeLuma: () => null, watermarkConfig: () => CFG,
@@ -114,7 +115,7 @@ function setup(meta?: Record<string, unknown>) {
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const styles = () => overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')
-  return { live, overlay, settings, styles, captions: deps.captions }
+  return { live, overlay, settings, styles, captions: deps.captions, api: deps.api }
 }
 
 describe('LiveController subtitle style', () => {
@@ -175,13 +176,45 @@ describe('LiveController subtitle style', () => {
     expect(t.styles().length).toBe(n)
   })
 
-  it('clearSubtitles empties the band but keeps the transcript', async () => {
+  it('clearTranscript clears the session on LinTO, then the band and the transcript', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    expect(t.captions.open).toHaveBeenLastCalledWith('s1', 7, 'o')
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
+    const sent: unknown[] = []
+    t.live.on('transcript', (u) => sent.push(u))
+    await t.live.clearTranscript()
+    expect(t.api.clearSession).toHaveBeenCalledWith('o', 's1')
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'reset' })
+    const tr = t.live.getTranscript()
+    expect(tr.finals).toEqual([])
+    expect(tr.sessionName).toBe('Conf')
+    expect(sent).toEqual([{ kind: 'reset', sessionName: 'Conf', startedAt: tr.startedAt }])
+  })
+
+  it('clearTranscript keeps everything when LinTO refuses', async () => {
     const t = setup()
     await t.live.boot()
     await t.live.start('Conf')
     t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
-    t.live.clearSubtitles()
+    t.api.clearSession.mockRejectedValueOnce(new ForbiddenError(403, 'nope'))
+    const pushes = t.overlay.push.mock.calls.length
+    await expect(t.live.clearTranscript()).rejects.toThrow(/effacer la transcription/)
+    expect(t.overlay.push.mock.calls.length).toBe(pushes)
+    expect(t.live.getTranscript().finals).toHaveLength(1)
+  })
+
+  it('a clear announced by LinTO (e.g. from LinTO Studio) empties the band and the transcript', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour' })
+    t.captions.emit('cleared')
     expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'reset' })
-    expect(t.live.getTranscript().finals).toMatchObject([{ id: 1, text: 'Bonjour' }])
+    expect(t.live.getTranscript().finals).toEqual([])
+    expect(t.api.clearSession).not.toHaveBeenCalled()
+    t.captions.emit('final', { segmentId: 2, text: 'Reprise' })
+    expect(t.live.getTranscript().finals).toMatchObject([{ id: 2, text: 'Reprise' }])
   })
 })

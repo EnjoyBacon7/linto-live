@@ -447,7 +447,7 @@ function main(): void {
   })
   ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
   ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
-  ipcMain.handle(IPC.liveClearSubtitles, () => live.clearSubtitles())
+  ipcMain.handle(IPC.liveClearTranscript, () => live.clearTranscript())
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
