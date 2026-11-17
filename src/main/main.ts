@@ -1,6 +1,6 @@
 import {
   app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
-  shell, Tray
+  shell, systemPreferences, Tray
 } from 'electron'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
@@ -47,6 +47,9 @@ import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
+import {
+  TEST_NOTIFICATION, deferObsBoot, isMediaPermission, permissionsStatus, privacySettingsUrl, requestMediaAccess, type MediaAccessApi
+} from './permissions'
 import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
 } from './appLifecycle'
@@ -495,6 +498,32 @@ function main(): void {
     if (typeof on !== 'boolean') throw new Error('Réglage invalide.')
     return live.setVirtualCam(on)
   })
+
+  // ---- First-launch permissions page (macOS) ----
+  const mediaAccess: MediaAccessApi | null = platform === 'darwin' ? systemPreferences : null
+  const permissions = (): ReturnType<typeof permissionsStatus> =>
+    permissionsStatus(platform, settings.get().permissionsOnboarded === true, mediaAccess)
+  let bootObs: (() => void) | null = null
+  ipcMain.handle(IPC.permissionsStatus, () => permissions())
+  ipcMain.handle(IPC.permissionsRequest, (_e, kind: unknown) => {
+    if (!isMediaPermission(kind)) throw new Error('Autorisation inconnue.')
+    return mediaAccess ? requestMediaAccess(mediaAccess, kind) : 'granted'
+  })
+  ipcMain.handle(IPC.permissionsOpenSettings, async (_e, kind: unknown) => {
+    const url = platform === 'darwin' ? privacySettingsUrl(kind) : null
+    if (!url) throw new Error('Réglage système indisponible.')
+    await shell.openExternal(url)
+  })
+  ipcMain.handle(IPC.permissionsTestNotification, () => {
+    notify(TEST_NOTIFICATION, { always: true })
+  })
+  ipcMain.handle(IPC.permissionsFinish, () => {
+    if (settings.get().permissionsOnboarded !== true) settings.update({ permissionsOnboarded: true })
+    const boot = bootObs
+    bootObs = null
+    boot?.()
+  })
+
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
@@ -627,8 +656,13 @@ function main(): void {
     console.error('Tray icon unavailable', e)
     tray = null
   }
-  // OBS + overlay start before login so device lists are ready for the setup screen.
-  live.boot().catch((err) => console.error('OBS boot failed', err)) // state carries MSG_BOOT_FAILED
+  // OBS + overlay start before login so device lists are ready for the setup screen — after the
+  // first-launch permissions page when macOS never asked for the camera or the micro (see permissions.ts).
+  const boot = (): void => {
+    live.boot().catch((err) => console.error('OBS boot failed', err)) // state carries MSG_BOOT_FAILED
+  }
+  if (deferObsBoot(permissions())) bootObs = boot
+  else boot()
 }
 
 app.setName('LinTO Live')

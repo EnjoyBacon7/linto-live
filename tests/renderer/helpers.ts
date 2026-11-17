@@ -33,6 +33,12 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       ...over.live
     },
     preview: { subscribe: vi.fn().mockResolvedValue(undefined), unsubscribe: vi.fn().mockResolvedValue(undefined), ...over.preview },
+    permissions: {
+      status: vi.fn().mockResolvedValue({ needed: false, camera: 'granted', microphone: 'granted' }),
+      request: vi.fn().mockResolvedValue('granted'), openSettings: vi.fn().mockResolvedValue(undefined),
+      testNotification: vi.fn().mockResolvedValue(undefined), finish: vi.fn().mockResolvedValue(undefined),
+      ...over.permissions
+    },
     app: { uninstall: vi.fn().mockResolvedValue(undefined), reportShellState: vi.fn().mockResolvedValue(undefined), ...over.app },
     on: vi.fn().mockReturnValue(() => {})
   }

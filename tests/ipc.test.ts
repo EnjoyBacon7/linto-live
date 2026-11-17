@@ -15,7 +15,8 @@ describe('IPC constants', () => {
         'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveViewTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe',
-        'liveSetAudioMonitor', 'liveSetVirtualCam', 'setupSetBroadcast'
+        'liveSetAudioMonitor', 'liveSetVirtualCam', 'setupSetBroadcast',
+        'permissionsStatus', 'permissionsRequest', 'permissionsOpenSettings', 'permissionsTestNotification', 'permissionsFinish'
       ].sort()
     )
   })
@@ -77,6 +78,11 @@ describe('createLintoLiveApi', () => {
     await api.app.reportShellState({ loggedIn: true, sessionName: 'S', canStart: true })
     await api.preview.subscribe()
     await api.preview.unsubscribe()
+    await api.permissions.status()
+    await api.permissions.request('camera')
+    await api.permissions.openSettings('notifications')
+    await api.permissions.testNotification()
+    await api.permissions.finish()
     expect(invoke.mock.calls).toEqual([
       [IPC.authMethods],
       [IPC.authLoginLocal, 'a@b', 'pw'],
@@ -105,7 +111,12 @@ describe('createLintoLiveApi', () => {
       [IPC.appUninstall],
       ['shell:state', { loggedIn: true, sessionName: 'S', canStart: true }],
       ['preview:subscribe'],
-      ['preview:unsubscribe']
+      ['preview:unsubscribe'],
+      ['permissions:status'],
+      ['permissions:request', 'camera'],
+      ['permissions:open-settings', 'notifications'],
+      ['permissions:test-notification'],
+      ['permissions:finish']
     ])
   })
   it('passes the platform through', () => {
@@ -202,7 +213,8 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { broadcastEnabled: 'yes' },
       { broadcastServer: 'rtmp://a.rtmp.youtube.com/live2' }, // only with its key, via setup.setBroadcast
       { broadcastKeySet: true },
-      { micGainDb: '6' }, { micGainDb: 21 }, { micGainDb: -31 }, { micGainDb: NaN }, { micGainDb: null }
+      { micGainDb: '6' }, { micGainDb: 21 }, { micGainDb: -31 }, { micGainDb: NaN }, { micGainDb: null },
+      { permissionsOnboarded: true } // set by permissions.finish only
     ]
     for (const p of bad) expect(() => checkSettingsPatch(p), JSON.stringify(p)).toThrow('Réglages invalides.')
   })

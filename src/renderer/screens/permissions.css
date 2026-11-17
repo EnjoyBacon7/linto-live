@@ -1,0 +1,139 @@
+/* First-launch permissions page: a full native window like Login, a 480 px centred column. */
+
+.perm-window {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-content);
+}
+
+.perm-titlebar {
+  flex: none;
+  height: 52px;
+}
+
+.perm-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 4vh 24px 40px;
+}
+
+.perm-page {
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.perm-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.perm-logo {
+  width: 64px;
+  height: 64px;
+  -webkit-user-drag: none;
+}
+
+.perm-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.perm-lead {
+  margin: 0;
+  max-width: 380px;
+}
+
+.perm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-large);
+  background: var(--bg-inspector);
+}
+
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.perm-row + .perm-row {
+  border-top: 0.5px solid var(--separator);
+}
+
+.perm-icon {
+  flex: none;
+  display: flex;
+  color: var(--text-2);
+}
+
+.perm-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.perm-name {
+  font-weight: 600;
+}
+
+.perm-why {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.perm-action {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.perm-state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.perm-check {
+  color: var(--ok);
+}
+
+.perm-warn {
+  color: var(--warn);
+}
+
+.perm-error {
+  margin: 0;
+  color: var(--bad);
+  font-size: 12px;
+}
+
+.perm-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.perm-actions {
+  display: flex;
+  justify-content: flex-end;
+}

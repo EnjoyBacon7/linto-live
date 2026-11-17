@@ -161,6 +161,8 @@ export interface Settings {
   broadcastKeySet?: boolean
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
+  /** The first-launch permissions page was gone through (macOS): it is not shown again. */
+  permissionsOnboarded?: boolean
 }
 
 export interface DeviceItem { id: string; name: string }
@@ -210,3 +212,15 @@ export type TranscriptUpdate =
 /** Export formats of the transcript (« Exporter » once the show has ended). */
 export const TRANSCRIPT_EXPORT_FORMATS = ['txt', 'srt', 'vtt', 'json'] as const
 export type TranscriptExportFormat = (typeof TRANSCRIPT_EXPORT_FORMATS)[number]
+
+/** OS privacy permissions the app asks for at first launch (macOS). */
+export type MediaPermission = 'camera' | 'microphone'
+/** Electron's systemPreferences.getMediaAccessStatus, 'unknown' for anything else. */
+export type MediaAccess = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'
+
+export interface PermissionsStatus {
+  /** Show the first-launch permissions page. */
+  needed: boolean
+  camera: MediaAccess
+  microphone: MediaAccess
+}
