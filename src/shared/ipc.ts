@@ -1,7 +1,7 @@
 import { MIC_GAIN_MAX, MIC_GAIN_MIN } from './types'
 import type {
   AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
-  QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
+  MediaAccess, MediaPermission, PermissionsStatus, QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
 } from './types'
 
 export interface SetupData {
@@ -121,6 +121,18 @@ export interface LintoLiveApi {
     /** Saves the finalized transcript where the user picks (save dialog); false if they cancelled. */
     exportTranscript(format: TranscriptExportFormat): Promise<{ saved: boolean }>
   }
+  /** First-launch permissions page (macOS camera and microphone, notifications). */
+  permissions: {
+    status(): Promise<PermissionsStatus>
+    /** Shows the system prompt when the user was never asked; the access now. */
+    request(kind: MediaPermission): Promise<MediaAccess>
+    /** Opens the system settings pane of this permission (to grant one that was refused). */
+    openSettings(kind: MediaPermission | 'notifications'): Promise<void>
+    /** Shows a notification (macOS asks for the notification permission at the first one). */
+    testNotification(): Promise<void>
+    /** The page is done: never shown again, OBS starts if it was waiting for it. */
+    finish(): Promise<void>
+  }
   app: {
     uninstall(): Promise<void>
     reportShellState(s: ShellReport): Promise<void>
@@ -168,6 +180,11 @@ export const IPC = {
   liveSetSubtitleLanguage: 'live:set-subtitle-language',
   liveSetAudioMonitor: 'live:set-audio-monitor',
   liveSetVirtualCam: 'live:set-virtual-cam',
+  permissionsStatus: 'permissions:status',
+  permissionsRequest: 'permissions:request',
+  permissionsOpenSettings: 'permissions:open-settings',
+  permissionsTestNotification: 'permissions:test-notification',
+  permissionsFinish: 'permissions:finish',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
@@ -235,6 +252,8 @@ export function checkSettingsPatch(raw: unknown): Partial<Settings> {
   if (!isObj(raw)) return bad()
   // The broadcast server goes with its key (setup.setBroadcast), never alone.
   if ('subtitleLanguages' in raw || 'broadcastKeySet' in raw || 'broadcastServer' in raw) return bad()
+  // Set by permissions.finish only.
+  if ('permissionsOnboarded' in raw) return bad()
   if ('primarySource' in raw && !isVideoSource(raw.primarySource)) return bad()
   if ('backupSource' in raw && !isVideoSource(raw.backupSource)) return bad()
   if ('recordDir' in raw && !absolute(raw.recordDir)) return bad()
@@ -296,6 +315,13 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       getTranscript: () => call(IPC.liveGetTranscript),
       viewTranscript: (sessionId) => call(IPC.liveViewTranscript, sessionId),
       exportTranscript: (format) => call(IPC.liveExportTranscript, format)
+    },
+    permissions: {
+      status: () => call(IPC.permissionsStatus),
+      request: (kind) => call(IPC.permissionsRequest, kind),
+      openSettings: (kind) => call(IPC.permissionsOpenSettings, kind),
+      testNotification: () => call(IPC.permissionsTestNotification),
+      finish: () => call(IPC.permissionsFinish)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
     preview: { subscribe: () => call(IPC.previewSubscribe), unsubscribe: () => call(IPC.previewUnsubscribe) },

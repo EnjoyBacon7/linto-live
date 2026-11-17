@@ -78,3 +78,6 @@ export const SlidersIcon = (p: IconProps) => (
 export const LayersIcon = (p: IconProps) => (
   <Icon {...p}><path d="M8 2.5 14 5.75 8 9 2 5.75Z" /><path d="m2 9.25 6 3.25 6-3.25" /></Icon>
 )
+export const BellIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M4 11.25V7a4 4 0 0 1 8 0v4.25l1.25 1.5H2.75ZM6.5 14h3" /></Icon>
+)
