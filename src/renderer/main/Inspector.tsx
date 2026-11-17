@@ -326,10 +326,6 @@ export function Inspector(p: InspectorProps) {
           options={opts(data?.audioDevices)} disabled={!data} onChange={(v) => onChange({ audioDeviceId: v })} />
         <VuMeter />
         <MicGain value={micGainDb(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ micGainDb: v })} />
-        <p className="inspector-note">
-          Si le niveau atteint le rouge, baissez le gain. Un limiteur évite la saturation au-delà ; un micro qui
-          sature déjà à la source se règle dans les réglages son du système.
-        </p>
         <Check label="Écouter le retour audio" checked={p.audioMonitor === true}
           disabled={!p.onAudioMonitorChange || (!p.audioMonitor && !p.audioMonitorAvailable)}
           onChange={(v) => p.onAudioMonitorChange?.(v)} />
