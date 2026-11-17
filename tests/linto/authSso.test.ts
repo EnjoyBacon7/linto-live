@@ -85,3 +85,41 @@ describe('SSO browser storage', () => {
     expect(h.ses!.clearStorageData).toHaveBeenCalled()
   })
 })
+
+describe('SSO fetch timeout', () => {
+  const hang = (_url: string, init?: { signal?: AbortSignal }): Promise<never> =>
+    new Promise((_res, rej) => {
+      const sig = init?.signal
+      if (sig?.aborted) rej(sig.reason)
+      else sig?.addEventListener('abort', () => rej(sig.reason))
+    })
+
+  it('gives up on an organization resolve that never answers', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort(new DOMException('t', 'TimeoutError')))
+    try {
+      h.ses!.fetch = vi.fn(hang)
+      const p = ssoLogin(urls, { path: 'oidc/organization', from: '', name: 'Org' }, {} as never, { email: 'a@b.fr' })
+      const assertion = expect(p).rejects.toThrow('LinTO ne répond pas')
+      await assertion
+      expect(h.windows).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('gives up on a token exchange that never answers', async () => {
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => AbortSignal.abort(new DOMException('t', 'TimeoutError')))
+    try {
+      h.ses!.fetch = vi.fn(hang)
+      const p = ssoLogin(urls, method, {} as never)
+      await flush()
+      const assertion = expect(p).rejects.toThrow('LinTO ne répond pas')
+      Object.assign(lastWin(), { setTitle: vi.fn() })
+      Object.assign(lastWin().webContents, { getURL: () => '' })
+      lastWin().webContents.emit('did-navigate', {}, 'https://studio.linto.ai/login/oidc')
+      await assertion
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
