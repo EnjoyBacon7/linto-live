@@ -94,6 +94,7 @@ export function Sidebar(p: SidebarProps) {
                   >
                     <StatusDot tone={STATUS[s.status].tone} pulse={s.status === 'active'} />
                     <span className="sidebar-row-name">{s.name}</span>
+                    <span className="sr-only">, {STATUS[s.status].label}</span>
                   </li>
                 )
               })}
