@@ -291,15 +291,18 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     setSettings((s) => (s ? { ...s, ...patch } : s))
     window.lintoLive.setup.save(patch).catch((e) => setError(ipcErrorMessage(e)))
   }
-  /** Server in the settings; the stream key apart (encrypted in main, never sent back: only « saved » is known). */
+  /** Server and stream key saved together (the key encrypted in main, never sent back: only « saved » is known). */
   const saveBroadcast = ({ server, key }: BroadcastConfig): void => {
-    // No server left: nothing to broadcast to, the checkbox goes off with it.
-    if (server !== (settings?.broadcastServer ?? '')) {
-      saveSettings({ broadcastServer: server, ...(server === '' && settings?.broadcastEnabled ? { broadcastEnabled: false } : {}) })
-    }
-    if (key === undefined) return
-    setSettings((s) => (s ? { ...s, broadcastKeySet: key !== '' } : s))
-    window.lintoLive.setup.setBroadcastKey(key).catch((e) => setError(ipcErrorMessage(e)))
+    const sameServer = server === (settings?.broadcastServer ?? '')
+    if (sameServer && key === undefined) return
+    // A key belongs to its server: a new server without a new key forgets the old one (as main does).
+    const keySet = server !== '' && (key !== undefined ? key !== '' : sameServer && settings?.broadcastKeySet === true)
+    setSettings((s) => (s ? {
+      ...s, broadcastServer: server || undefined, broadcastKeySet: keySet || undefined,
+      ...(server === '' ? { broadcastEnabled: false } : {})
+    } : s))
+    const done = key === undefined ? window.lintoLive.setup.setBroadcast(server) : window.lintoLive.setup.setBroadcast(server, key)
+    done.catch((e) => setError(ipcErrorMessage(e)))
   }
   /** Saved on the LinTO session (like LinTO Studio); shown at once, rolled back by a refresh on failure. */
   const saveWatermark = (patch: Partial<Watermark>): void => {

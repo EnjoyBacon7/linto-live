@@ -1247,7 +1247,7 @@ describe('Diffusion en ligne', () => {
   })
 
   it('the sheet saves the server and the stream key apart; an invalid server is refused', async () => {
-    setup({ setup: { setBroadcastKey: vi.fn().mockResolvedValue(undefined) } as never })
+    setup({ setup: { setBroadcast: vi.fn().mockResolvedValue(undefined) } as never })
     await renderMain()
     await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
     const server = await screen.findByLabelText('Serveur (RTMP ou RTMPS)')
@@ -1258,8 +1258,8 @@ describe('Diffusion en ligne', () => {
     await userEvent.type(server, SERVER)
     await userEvent.type(screen.getByLabelText('Clé de stream'), 'abcd-1234')
     await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
-    expect(api.setup.save).toHaveBeenCalledWith({ broadcastServer: SERVER })
-    expect(api.setup.setBroadcastKey).toHaveBeenCalledWith('abcd-1234')
+    expect(api.setup.setBroadcast).toHaveBeenCalledWith(SERVER, 'abcd-1234')
+    expect(api.setup.save).not.toHaveBeenCalled()
     expect(within(region()).getByText('a.rtmp.youtube.com')).toBeTruthy()
     expect((within(region()).getByLabelText('Diffuser en ligne') as HTMLInputElement).disabled).toBe(false)
   })
@@ -1267,14 +1267,31 @@ describe('Diffusion en ligne', () => {
   it('a saved key is kept when the key field is left empty', async () => {
     setup({ setup: {
       load: vi.fn().mockResolvedValue(setupData({ broadcastServer: SERVER, broadcastKeySet: true })),
-      setBroadcastKey: vi.fn().mockResolvedValue(undefined)
+      setBroadcast: vi.fn().mockResolvedValue(undefined)
     } as never })
     await renderMain()
     await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
     expect((await screen.findByLabelText('Clé de stream') as HTMLInputElement).placeholder).toMatch(/Enregistrée/)
     await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
-    expect(api.setup.setBroadcastKey).not.toHaveBeenCalled()
+    expect(api.setup.setBroadcast).not.toHaveBeenCalled()
     expect(api.setup.save).not.toHaveBeenCalled()
+  })
+
+  it('a new server without a new key forgets the saved one (a key is never sent to another server)', async () => {
+    setup({ setup: {
+      load: vi.fn().mockResolvedValue(setupData({ broadcastServer: SERVER, broadcastKeySet: true })),
+      setBroadcast: vi.fn().mockResolvedValue(undefined)
+    } as never })
+    await renderMain()
+    await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
+    const server = await screen.findByLabelText('Serveur (RTMP ou RTMPS)')
+    await userEvent.clear(server)
+    await userEvent.type(server, 'rtmp://live.twitch.tv/app')
+    expect(screen.getByText(/appartient à l'ancien serveur/)).toBeTruthy()
+    expect((screen.getByLabelText('Clé de stream') as HTMLInputElement).placeholder).toBe('')
+    await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
+    expect(api.setup.setBroadcast).toHaveBeenCalledWith('rtmp://live.twitch.tv/app')
+    expect(within(region()).getByText(/\(sans clé\)/)).toBeTruthy()
   })
 
   it('EN LIGNE pill instead of REC while broadcasting', async () => {

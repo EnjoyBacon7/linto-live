@@ -120,21 +120,43 @@ describe('SettingsStore instance', () => {
 })
 
 describe('SettingsStore broadcast key', () => {
-  it('round-trips the stream key encrypted; get() only says one is set; blank forgets it', () => {
+  const YT = 'rtmp://a.rtmp.youtube.com/live2'
+  it('stores the key encrypted with its server; get() only says one is set', () => {
     const p = appPaths(dir, 'linux')
     const s = new SettingsStore(p, crypto)
     expect(s.getBroadcastKey()).toBeNull()
-    expect(s.get()).not.toHaveProperty('broadcastKeySet')
-    s.setBroadcastKey('  live-abcd-1234 ')
+    s.setBroadcast(YT, '  live-abcd-1234 ')
     expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('live-abcd-1234')
-    expect(s.get()).toMatchObject({ broadcastKeySet: true })
+    expect(s.get()).toMatchObject({ broadcastServer: YT, broadcastKeySet: true })
     expect(s.get()).not.toHaveProperty('broadcastKeyEnc')
     expect(new SettingsStore(p, crypto).getBroadcastKey()).toBe('live-abcd-1234')
-    s.update({ broadcastKeySet: false, broadcastServer: 'rtmp://x/live' }) // derived: not writable
-    expect(s.get()).toMatchObject({ broadcastKeySet: true, broadcastServer: 'rtmp://x/live' })
-    s.setBroadcastKey('  ')
+    s.setBroadcast(YT) // same server, no new key: kept
+    expect(s.getBroadcastKey()).toBe('live-abcd-1234')
+    s.update({ broadcastKeySet: false }) // derived: not writable
+    expect(s.get()).toMatchObject({ broadcastKeySet: true })
+    s.setBroadcast(YT, '')
     expect(s.getBroadcastKey()).toBeNull()
     expect(s.get()).not.toHaveProperty('broadcastKeySet')
+  })
+  it('a key is never kept for another server', () => {
+    const s = new SettingsStore(appPaths(dir, 'linux'), crypto)
+    s.setBroadcast(YT, 'yt-key')
+    s.setBroadcast('rtmp://evil.example/app')
+    expect(s.getBroadcastKey()).toBeNull()
+    s.setBroadcast(YT, 'yt-key')
+    s.update({ broadcastServer: 'rtmp://evil.example/app' }) // any path that changes the server
+    expect(s.getBroadcastKey()).toBeNull()
+    s.setBroadcast('rtmp://live.twitch.tv/app', 'tw-key') // a new server with its own key
+    expect(s.getBroadcastKey()).toBe('tw-key')
+  })
+  it('no server: no key, broadcast off', () => {
+    const s = new SettingsStore(appPaths(dir, 'linux'), crypto)
+    s.update({ broadcastEnabled: true })
+    s.setBroadcast(YT, 'k')
+    s.setBroadcast('')
+    expect(s.getBroadcastKey()).toBeNull()
+    expect(s.get()).toMatchObject({ broadcastEnabled: false })
+    expect(s.get()).not.toHaveProperty('broadcastServer')
   })
 })
 

@@ -30,6 +30,8 @@ export function BroadcastSheet({ open, server, keySet, onApply, onCancel }: Broa
 
   const trimmed = url.trim()
   const ok = trimmed === '' || isBroadcastServer(trimmed)
+  // The saved key belongs to the saved server: another server needs its own key.
+  const keyKept = keySet && trimmed === server
   const submit = (e?: FormEvent): void => {
     e?.preventDefault()
     if (!ok) return
@@ -48,9 +50,12 @@ export function BroadcastSheet({ open, server, keySet, onApply, onCancel }: Broa
           error={ok ? undefined : 'Saisissez une adresse commençant par rtmp:// ou rtmps://.'}
           onChange={(e) => setUrl(e.target.value)} />
         <TextField label="Clé de stream" type="password" autoComplete="off" value={key}
-          placeholder={keySet && !forget ? 'Enregistrée — laisser vide pour la garder' : ''}
+          placeholder={keyKept && !forget ? 'Enregistrée — laisser vide pour la garder' : ''}
           onChange={(e) => { setKey(e.target.value); setForget(false) }} />
-        {keySet && !key && (
+        {keySet && !keyKept && trimmed !== '' && !key && (
+          <p className="sheet-detail">La clé enregistrée appartient à l'ancien serveur : elle sera oubliée. Saisissez celle du nouveau.</p>
+        )}
+        {keyKept && !key && (
           <label className="check">
             <input type="checkbox" checked={forget} onChange={(e) => setForget(e.target.checked)} />
             <span>Oublier la clé enregistrée</span>

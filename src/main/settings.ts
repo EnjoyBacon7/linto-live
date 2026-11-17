@@ -73,7 +73,10 @@ export class SettingsStore {
     return broadcastKeyEnc ? { ...rest, broadcastKeySet: true } : { ...rest }
   }
 
-  /** Throws on an invalid instance URL; changing the instance drops the token and the saved login in the same write. */
+  /**
+   * Throws on an invalid instance URL; changing the instance drops the token and the saved login in the same
+   * write, changing the broadcast server drops its stream key (see setBroadcast).
+   */
   update(patch: Partial<Settings>): void {
     const clean = { ...patch }
     delete clean.broadcastKeySet // derived from the stored key
@@ -84,6 +87,7 @@ export class SettingsStore {
       delete next.tokenEnc
       delete next.savedLoginEnc
     }
+    if (clean.broadcastServer !== undefined && clean.broadcastServer !== this.data.broadcastServer) delete next.broadcastKeyEnc
     this.data = next
     this.save()
   }
@@ -137,11 +141,24 @@ export class SettingsStore {
     }
   }
 
-  /** null or blank: forgets the key. */
-  setBroadcastKey(k: string | null): void {
-    const key = k?.trim()
-    if (!key) delete this.data.broadcastKeyEnc
-    else this.data.broadcastKeyEnc = this.crypto.encrypt(key).toString('base64')
+  /**
+   * Sets the broadcast server and its stream key in one write. A key belongs to its server: a new server
+   * without a new key forgets the old one (it must never be sent to another server, as the LinTO token is
+   * dropped with its instance). `key` absent: kept if the server is unchanged; blank: forgotten. No server
+   * (''): no key, and the broadcast is turned off.
+   */
+  setBroadcast(server: string, key?: string): void {
+    const s = server.trim()
+    const k = key?.trim()
+    const next: Stored = { ...this.data }
+    if (s) next.broadcastServer = s
+    else {
+      delete next.broadcastServer
+      next.broadcastEnabled = false
+    }
+    if (!s || k === '' || (k === undefined && s !== this.data.broadcastServer)) delete next.broadcastKeyEnc
+    else if (k) next.broadcastKeyEnc = this.crypto.encrypt(k).toString('base64')
+    this.data = next
     this.save()
   }
 }

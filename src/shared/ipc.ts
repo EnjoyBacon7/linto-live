@@ -2,7 +2,6 @@ import type {
   AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
   QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
 } from './types'
-import { isBroadcastServer } from './broadcast'
 
 export interface SetupData {
   settings: Settings
@@ -77,8 +76,11 @@ export interface LintoLiveApi {
     pickMedia(kind: 'image' | 'video'): Promise<string | null>
     /** Lets the user pick (or create) a folder; its path, or null if they cancelled. */
     pickFolder(): Promise<string | null>
-    /** Saves the online broadcast's stream key (encrypted); blank forgets it. It is never read back. */
-    setBroadcastKey(key: string): Promise<void>
+    /**
+     * Saves the online broadcast's server and stream key together (the key encrypted, never read back).
+     * `key` absent: kept if the server is unchanged, forgotten otherwise; blank: forgotten.
+     */
+    setBroadcast(server: string, key?: string): Promise<void>
   }
   sessions: {
     list(): Promise<SessionSummary[]>
@@ -141,7 +143,7 @@ export const IPC = {
   setupSave: 'setup:save',
   setupPickMedia: 'setup:pick-media',
   setupPickFolder: 'setup:pick-folder',
-  setupSetBroadcastKey: 'setup:set-broadcast-key',
+  setupSetBroadcast: 'setup:set-broadcast',
   sessionsList: 'sessions:list',
   sessionsLookup: 'sessions:lookup',
   sessionsSetWatermark: 'sessions:set-watermark',
@@ -220,8 +222,8 @@ const isQr = (v: unknown): v is QrSettings =>
 export function checkSettingsPatch(raw: unknown): Partial<Settings> {
   const bad = (): never => { throw new Error('Réglages invalides.') }
   if (!isObj(raw)) return bad()
-  if ('subtitleLanguages' in raw || 'broadcastKeySet' in raw) return bad()
-  if ('broadcastServer' in raw && raw.broadcastServer !== '' && !isBroadcastServer(raw.broadcastServer)) return bad()
+  // The broadcast server goes with its key (setup.setBroadcast), never alone.
+  if ('subtitleLanguages' in raw || 'broadcastKeySet' in raw || 'broadcastServer' in raw) return bad()
   if ('primarySource' in raw && !isVideoSource(raw.primarySource)) return bad()
   if ('backupSource' in raw && !isVideoSource(raw.backupSource)) return bad()
   if ('recordDir' in raw && !absolute(raw.recordDir)) return bad()
@@ -259,7 +261,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       save: (s) => call(IPC.setupSave, s),
       pickMedia: (kind) => call(IPC.setupPickMedia, kind),
       pickFolder: () => call(IPC.setupPickFolder),
-      setBroadcastKey: (key) => call(IPC.setupSetBroadcastKey, key)
+      setBroadcast: (server, key) => (key === undefined ? call(IPC.setupSetBroadcast, server) : call(IPC.setupSetBroadcast, server, key))
     },
     sessions: {
       list: () => call(IPC.sessionsList),
