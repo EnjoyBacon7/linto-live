@@ -217,8 +217,8 @@ export function Inspector(p: InspectorProps) {
                 )}
               </div>
             )}
-            <Button className="inspector-control" disabled={!p.onAir || p.clearBlocked !== undefined}
-              title={p.clearBlocked} onClick={() => p.onClearTranscript?.()}>
+            <Button className="inspector-control" disabled={!p.onAir}
+              blockedReason={p.clearBlocked} onClick={() => p.onClearTranscript?.()}>
               Effacer la transcription…
             </Button>
           </>

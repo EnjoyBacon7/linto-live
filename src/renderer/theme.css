@@ -270,8 +270,18 @@ h3 {
   background: var(--control-bg-active);
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.45;
+}
+
+/* Blocked with a reason (aria-disabled, still focusable): no pressed feedback. */
+.btn[aria-disabled='true']:active {
+  background: var(--control-bg);
+}
+
+.btn-primary[aria-disabled='true']:active {
+  background: var(--accent-strong);
 }
 
 .btn-large {
