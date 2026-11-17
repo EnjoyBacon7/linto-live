@@ -6,6 +6,7 @@ import {
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
+import { createNameCorrector } from '../src/main/linto/properNouns'
 import type { Luma } from '../src/main/obs/fallback'
 import type { LiveState } from '../src/shared/ipc'
 import {
@@ -170,7 +171,8 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
   })
   const deps = {
     obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const,
-    mkdirp, defaultRecordDir: REC_DIR
+    mkdirp, defaultRecordDir: REC_DIR,
+    nameCorrector: (names: string[]) => createNameCorrector(names, new Set(['macro']))
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
@@ -293,6 +295,38 @@ describe('LiveController', () => {
     const restarted = { sessionName: 'Conf', startedAt: t.last().startedAt }
     expect(updates.at(-1)).toEqual({ kind: 'reset', ...restarted })
     expect(t.live.getTranscript()).toEqual({ finals: [], partial: null, ...restarted })
+  })
+
+  it('corrects the expected proper nouns in finals only (band and transcript), never in partials', async () => {
+    const t = setup({ settings: { properNouns: ['Linagora', 'Macron'], properNounsEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    const updates: TranscriptUpdate[] = []
+    t.live.on('transcript', (u: TranscriptUpdate) => updates.push(u))
+    t.captions.emit('partial', { segmentId: 1, text: 'chez lina gora' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'partial', text: 'chez lina gora' })
+    t.captions.emit('final', { segmentId: 1, text: 'chez lina gora une macro et macron' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'chez Linagora une macro et Macron' })
+    expect(updates.at(-1)).toMatchObject({ kind: 'final', segment: { text: 'chez Linagora une macro et Macron' } })
+    // The toggle and the list are read live: switched off, nothing is corrected (the list is kept)...
+    await t.live.saveSettings({ properNounsEnabled: false })
+    t.captions.emit('final', { segmentId: 2, text: 'chez lina gora' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'chez lina gora' })
+    await t.live.saveSettings({ properNounsEnabled: true })
+    t.captions.emit('final', { segmentId: 3, text: 'chez lina gora' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'chez Linagora' })
+    // ...and an empty list corrects nothing either.
+    await t.live.saveSettings({ properNouns: [] })
+    t.captions.emit('final', { segmentId: 4, text: 'chez lina gora' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'chez lina gora' })
+  })
+
+  it('does not correct proper nouns while the toggle is off (the default), even with a list', async () => {
+    const t = setup({ settings: { properNouns: ['Linagora'] } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.captions.emit('final', { segmentId: 1, text: 'chez lina gora' })
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'final', text: 'chez lina gora' })
   })
 
   it('terminated returns message and starts nothing', async () => {

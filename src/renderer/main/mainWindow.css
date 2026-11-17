@@ -679,6 +679,17 @@
   gap: 6px;
 }
 
+/* EXPERIMENTAL proper nouns list */
+.field-input.proper-nouns {
+  height: auto;
+  min-height: 84px;
+  resize: vertical;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  line-height: 1.35;
+  font-family: inherit;
+}
+
 .field-error {
   font-size: 11px;
   color: var(--bad);

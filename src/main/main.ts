@@ -2,7 +2,7 @@ import {
   app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
   shell, Tray
 } from 'electron'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -26,6 +26,7 @@ import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
 import { asLintoAction } from './linto/accessMessages'
 import { CaptionStream } from './linto/captions'
+import { createNameCorrector, parseCommonWords } from './linto/properNouns'
 import { EXPORT_FILTERS, exportFileName, exportTranscript } from './linto/transcriptExport'
 import { TRANSCRIPT_VIEW_MAX_SEGMENTS, trimTranscript } from '../shared/transcript'
 import { loadInstance, STUDIO_WATERMARK_DEFAULTS, type LintoUrls } from './linto/instance'
@@ -197,6 +198,19 @@ function main(): void {
     paths,
     platform
   })
+  // EXPERIMENTAL proper-noun correction: the everyday-word list is read on first use only.
+  let common: Set<string> | null = null
+  const commonWords = (): Set<string> => {
+    if (common) return common
+    const dir = app.isPackaged ? join(process.resourcesPath, 'proper-nouns') : join(app.getAppPath(), 'resources', 'proper-nouns')
+    try {
+      common = parseCommonWords(readFileSync(join(dir, 'fr-common-words.txt'), 'utf8'))
+    } catch (e) {
+      console.error('proper nouns: everyday-word list unreadable', e)
+      common = new Set()
+    }
+    return common
+  }
   const live = new LiveController({
     obs,
     controllerFactory: (c) => ObsController.connect(c),
@@ -211,7 +225,8 @@ function main(): void {
     mkdirp: async (dir) => {
       await mkdir(dir, { recursive: true })
     },
-    defaultRecordDir: join(app.getPath('videos'), 'LinTO Live')
+    defaultRecordDir: join(app.getPath('videos'), 'LinTO Live'),
+    nameCorrector: (names) => createNameCorrector(names, commonWords())
   })
 
   // ---- Native shell: app menu, menu-bar icon, notifications ----

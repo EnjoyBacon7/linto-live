@@ -144,6 +144,10 @@ export interface Settings {
   recordEnabled?: boolean
   /** Folder of the recordings (default: « LinTO Live » in the user's Videos folder); created when missing. */
   recordDir?: string
+  /** EXPERIMENTAL: proper nouns expected in the show, written as they must appear; LinTO's near-sounding words are replaced. */
+  properNouns?: string[]
+  /** EXPERIMENTAL: the proper-noun correction is on (default false); the list is kept when it is off. */
+  properNounsEnabled?: boolean
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
 }

@@ -164,6 +164,8 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { recordDir: '/Users/x/Movies/LinTO Live' },
       { qr: { display: true, pinned: false, frequency: 60, duration: 15 } },
       { blackIsAbsent: false, recordEnabled: true },
+      { properNounsEnabled: true, properNouns: ['LINAGORA', 'Issy-les-Moulineaux'] },
+      { properNouns: [] },
       { instance: 'https://studio.linto.ai', profileId: 2, subtitleFontSize: 40 }
     ]
     for (const p of ok) expect(checkSettingsPatch(p)).toEqual(p)
@@ -188,6 +190,10 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { qr: null },
       { blackIsAbsent: 'true' },
       { recordEnabled: 1 },
+      { properNounsEnabled: 'oui' },
+      { properNouns: 'LINAGORA' },
+      { properNouns: ['LINAGORA', 3] },
+      { properNouns: ['x'.repeat(201)] },
       { subtitleLanguages: { s1: 'en' } }
     ]
     for (const p of bad) expect(() => checkSettingsPatch(p), JSON.stringify(p)).toThrow('Réglages invalides.')
