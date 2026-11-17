@@ -11,6 +11,11 @@
   --accent: #11977c;
   --accent-hover: #0e8770;
   --accent-text: #ffffff;
+  /* Accent fill behind text (primary button, highlighted menu item): >= 4.5:1 with --accent-text. */
+  --accent-strong: #0d8068;
+  --accent-strong-hover: #0b7a63;
+  /* Focus indicator colour: >= 3:1 against every surface it sits on. */
+  --focus-color: var(--accent-strong);
   --live: #ff3b30;
   --ok: #28a745;
   --warn: #c77c02;
@@ -46,7 +51,7 @@
   --sheet-shadow: 0 12px 32px rgba(0, 0, 0, 0.22), 0 0 0 0.5px rgba(0, 0, 0, 0.18);
   --backdrop: rgba(0, 0, 0, 0.12);
 
-  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+  --focus-ring: 0 0 0 1px var(--bg-content), 0 0 0 3px var(--focus-color);
   --radius: 6px;
   --radius-large: 8px;
 
@@ -59,6 +64,7 @@
   :root {
     --accent: #1aa88b;
     --accent-hover: #22b796;
+    --focus-color: var(--accent);
     --live: #ff453a;
     --ok: #32d74b;
     --warn: #ffb340;
@@ -276,13 +282,13 @@ h3 {
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: var(--accent-strong);
   border-color: transparent;
   color: var(--accent-text);
 }
 
 .btn-primary:active:not(:disabled) {
-  background: var(--accent-hover);
+  background: var(--accent-strong-hover);
 }
 
 .btn-destructive {
