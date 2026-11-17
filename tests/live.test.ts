@@ -2056,3 +2056,24 @@ describe('LiveController recording', () => {
     expect(t.last().recording).toBe('off')
   })
 })
+
+describe('stream state when OBS is lost (A-001)', () => {
+  it('leaves "active" when OBS restarts, and shows "error" if the re-attach fails', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().emitState('active')
+    expect(t.last()).toMatchObject({ phase: 'live', stream: 'active' })
+    t.controllerFactory.mockImplementationOnce(async () => {
+      const c = fakeController(t.log)
+      c.ensureScene.mockRejectedValue(new Error('boom'))
+      t.ctls.push(c)
+      return c
+    })
+    t.obs.emit('restarting', 1)
+    expect(t.last().stream).toBe('starting')
+    t.obs.emit('ready', { port: 1, password: 'x' })
+    await t.live.settled()
+    expect(t.last()).toMatchObject({ obs: 'down', stream: 'error' })
+  })
+})

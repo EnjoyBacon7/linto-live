@@ -587,6 +587,10 @@ export class LiveController extends EventEmitter {
     this.ctl = null
     this.attachedConn = null
     this.streamRunning = false
+    // The output died with that OBS run: do not keep showing an active stream (attach's applyShow restarts it).
+    if (this.state.phase === 'live' && this.current?.service && (this.state.stream === 'active' || this.state.stream === 'error')) {
+      this.setState({ stream: 'starting' })
+    }
     this.clearRetry()
     this.stopPreview()
     this.flushStopWaiters()
@@ -611,7 +615,9 @@ export class LiveController extends EventEmitter {
       await c.ensureScene(this.d.platform)
     } catch (e) {
       await c?.disconnect().catch(() => {})
-      this.setState({ obs: 'down', warning: MSG_OBS_SETUP_FAILED + errMsg(e) })
+      // No OBS output to restart the stream on: say so instead of leaving a 'starting' stream hanging.
+      const lostStream = this.state.phase === 'live' && !!this.current?.service
+      this.setState({ obs: 'down', ...(lostStream ? { stream: 'error' as const } : {}), warning: MSG_OBS_SETUP_FAILED + errMsg(e) })
       return
     }
     const ready = c
