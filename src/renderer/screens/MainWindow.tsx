@@ -41,6 +41,7 @@ type Selection = { name: string; pending?: { profileId?: number; create: NewSess
 type SheetState =
   | { kind: 'new' }
   | { kind: 'terminate' }
+  | { kind: 'clear' }
   | { kind: 'switch'; target: Selection }
   | { kind: 'login' }
   | { kind: 'watermark' }
@@ -217,6 +218,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       void refresh()
     }
   }
+  const setAudioMonitor = (on: boolean): void => {
+    window.lintoLive.live.setAudioMonitor(on).catch((e) => setError(ipcErrorMessage(e)))
+  }
   const showOutput = (): void => {
     window.lintoLive.live.showOutputWindow().catch((e) => setError(ipcErrorMessage(e)))
   }
@@ -302,8 +306,14 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     setSettings((s) => (s ? { ...s, subtitleLanguages: { ...s.subtitleLanguages, [id]: choice } } : s))
     window.lintoLive.live.setSubtitleLanguage(id, choice).catch((e) => setError(ipcErrorMessage(e)))
   }
-  const clearSubtitles = (): void => {
-    window.lintoLive.live.clearSubtitles().catch((e) => setError(ipcErrorMessage(e)))
+  const askClearTranscript = (): void => {
+    if (!onAir || sheetRef.current || manageBlocked) return
+    setSheet({ kind: 'clear' })
+  }
+  const clearTranscript = (): void => {
+    setSheet(null)
+    setError(null)
+    window.lintoLive.live.clearTranscript().catch((e) => setError(ipcErrorMessage(e)))
   }
   const switchOrg = async (orgId: string): Promise<void> => {
     if (onAir) return // the show on air belongs to the current organisation
@@ -409,14 +419,16 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         <div className="content-body">
           <Stage onAir={onAir} hasCamera={!!settings?.primarySource && settings.primarySource.kind !== 'none'} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
-            onAir={onAir} onClearSubtitles={clearSubtitles}
+            onAir={onAir} onClearTranscript={askClearTranscript}
+            audioMonitor={state.audioMonitor === true} audioMonitorAvailable={state.obs === 'running'}
+            onAudioMonitorChange={setAudioMonitor}
             {...(state.videoOnAir ? { videoOnAir: state.videoOnAir } : {})}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
             {...(summary?.visibility ? { visibility: summary.visibility } : {})}
             {...(summary ? { languages: (summary.name === liveName && state.session?.languages) || summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
               onLanguageChange: saveLanguage } : {})}
-            {...(manageBlocked ? { watermarkBlocked: manageBlocked } : {})}
+            {...(manageBlocked ? { watermarkBlocked: manageBlocked, clearBlocked: manageBlocked } : {})}
             onWatermarkSettings={() => { if (!sheetRef.current) setSheet({ kind: 'watermark' }) }} />
         </div>
       </div>
@@ -433,10 +445,18 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       />
       <ConfirmSheet
         open={sheet?.kind === 'terminate'}
-        message={`Terminer définitivement « ${liveName ?? title ?? ''} » ?`}
+        message={`Terminer définitivement « ${liveName ?? title ?? ''} » ? La transcription sera enregistrée dans LinTO Studio.`}
         confirmLabel="Terminer"
         destructive
         onConfirm={() => void terminate()}
+        onCancel={() => setSheet(null)}
+      />
+      <ConfirmSheet
+        open={sheet?.kind === 'clear'}
+        message={`Effacer la transcription de « ${liveName ?? title ?? ''} » ? Elle disparaît aussi des sous-titres et de LinTO Studio.`}
+        confirmLabel="Effacer"
+        destructive
+        onConfirm={clearTranscript}
         onCancel={() => setSheet(null)}
       />
       <ConfirmSheet

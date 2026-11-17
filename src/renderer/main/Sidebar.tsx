@@ -94,6 +94,7 @@ export function Sidebar(p: SidebarProps) {
                   >
                     <StatusDot tone={STATUS[s.status].tone} pulse={s.status === 'active'} />
                     <span className="sidebar-row-name">{s.name}</span>
+                    <span className="sr-only">, {STATUS[s.status].label}</span>
                   </li>
                 )
               })}
@@ -126,20 +127,33 @@ function AccountMenu({ organizations, orgId, onSwitchOrg, onLogout, onAir }: Sid
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent): void => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
-    const onKey = (e: globalThis.KeyboardEvent): void => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false) } }
+    const onKey = (e: globalThis.KeyboardEvent): void => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); focusTrigger() } }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     ref.current?.querySelector<HTMLElement>('[role^=menuitem]:not([disabled])')?.focus()
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
-  const pick = (fn: () => void) => () => { setOpen(false); fn() }
+  const focusTrigger = (): void => { ref.current?.querySelector<HTMLElement>('[aria-haspopup]')?.focus() }
+  const pick = (fn: () => void) => () => { setOpen(false); focusTrigger(); fn() }
+  // WAI-ARIA menu button: arrows (wrapping) / Home / End move between items; Tab closes, focus stays on the trigger.
+  const onMenuKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key === 'Tab') { setOpen(false); focusTrigger(); return }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return
+    e.preventDefault()
+    const items = Array.from(ref.current?.querySelectorAll<HTMLElement>('[role^=menuitem]:not([disabled])') ?? [])
+    if (items.length === 0) return
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    const n = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+      : e.key === 'ArrowDown' ? (i + 1) % items.length : (i <= 0 ? items.length - 1 : i - 1)
+    items[n]?.focus()
+  }
 
   return (
     <div className="account-menu" ref={ref}>
       <Button variant="plain" aria-label="Compte" title="Compte" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}
         icon={<EllipsisIcon />} />
       {open && (
-        <div className="menu" role="menu" aria-label="Compte">
+        <div className="menu" role="menu" aria-label="Compte" onKeyDown={onMenuKey}>
           {organizations.length > 1 && (
             <>
               <div className="menu-header">Organisation</div>

@@ -13,6 +13,19 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   l'un de ces noms sont remplacés dans la bande, la transcription et l'export (« lina gora » →
   Linagora, « Ici, les Moulineaux » → Issy-les-Moulineaux), une fois la phrase finalisée. Les
   traductions, LinTO Studio et la page publique gardent le texte de LinTO.
+- **Effacer la transcription…** : comme dans LinTO Studio, efface la transcription de la session
+  sur LinTO ; les sous-titres et la transcription se vident dans LinTO Live **et** dans LinTO
+  Studio. Un effacement fait depuis LinTO Studio vide aussi LinTO Live. Remplace « Effacer les
+  sous-titres », qui ne vidait que le bandeau localement.
+- **Écouter le retour audio** (réglage Micro) : le son du micro tel qu'il est envoyé à LinTO et
+  enregistré est joué sur la sortie audio du système, pour vérifier sa qualité. Désactivé à
+  chaque lancement ; à utiliser au casque (sur haut-parleurs, le micro le reprend : larsen).
+
+### Modifié
+
+- **Terminer la session** fait désormais comme « Arrêter et enregistrer » dans LinTO Studio : la
+  transcription et ses traductions sont enregistrées comme média dans LinTO Studio, puis la session
+  est supprimée. Auparavant, la session était seulement close et n'apparaissait pas dans les médias.
 
 ## [0.4.0] - 2026-11-16
 

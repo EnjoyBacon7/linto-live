@@ -39,7 +39,11 @@ export class CaptionStream extends EventEmitter {
     private ioFactory: IoFn = realIo
   ) { super() }
 
-  open(sessionId: string, channelId: number): void {
+  /**
+   * Joins the session's caption room. `orgId`: LinTO also puts the socket in the organisation's room, where it
+   * announces a cleared transcript (`orga_<org>_session_cleared`, payload: the session id) → 'cleared'.
+   */
+  open(sessionId: string, channelId: number, orgId?: string): void {
     this.teardown()
     this.lastStatus = null
     this.backoff = 1000
@@ -90,6 +94,7 @@ export class CaptionStream extends EventEmitter {
     socket.on('partial', (e: CaptionEvent) => this.emit('partial', e))
     socket.on('final', (e: CaptionEvent) => this.emit('final', e))
     socket.on('translation', (e: TranslationEvent) => this.emit('translation', e))
+    if (orgId) socket.on(`orga_${orgId}_session_cleared`, (id: unknown) => { if (id === sessionId) this.emit('cleared') })
   }
 
   close(): void {

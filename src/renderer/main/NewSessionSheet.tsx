@@ -90,7 +90,8 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
             onChange={(v) => setVisibility(v as NewSessionOptions['visibility'])} />
         </label>
         {visibility === 'password' && (
-          <TextField label="Mot de passe" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <TextField label="Mot de passe" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(e) }} />
         )}
         {p.profiles.length === 0 && (
           <p className="sheet-detail" role="note">

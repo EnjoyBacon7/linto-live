@@ -17,9 +17,12 @@ export interface InspectorProps {
   /** Profile line: the pending session's profile name, « Défini par la session », or null (nothing selected). */
   profile: string | null
   onChange(patch: Partial<Settings>): void
-  /** A show is on air (« Effacer les sous-titres » only means something then). */
+  /** A show is on air (« Effacer la transcription » only means something then). */
   onAir?: boolean
-  onClearSubtitles?(): void
+  /** « Effacer la transcription »: clears the on-air session's transcript on LinTO (as LinTO Studio's button). */
+  onClearTranscript?(): void
+  /** Why the transcript cannot be cleared here (the user may not manage sessions); absent = it can. */
+  clearBlocked?: string
   watermark?: WatermarkTarget
   onWatermarkChange?(patch: Partial<Watermark>): void
   onWatermarkSettings?(): void
@@ -34,6 +37,10 @@ export interface InspectorProps {
   onQrSettings?(): void
   /** Which source is on air when a backup is configured (absent otherwise). */
   videoOnAir?: 'primary' | 'backup'
+  /** Audio feedback (hear the micro as sent to LinTO and recorded); available only while OBS runs. */
+  audioMonitor?: boolean
+  audioMonitorAvailable?: boolean
+  onAudioMonitorChange?(on: boolean): void
 }
 
 export function Check({ label, checked, disabled, onChange }: {
@@ -164,6 +171,15 @@ export function Inspector(p: InspectorProps) {
         <PopUp label="Micro" className="inspector-control" value={settings?.audioDeviceId ?? ''} placeholder="Choisir…"
           options={opts(data?.audioDevices)} disabled={!data} onChange={(v) => onChange({ audioDeviceId: v })} />
         <VuMeter />
+        <Check label="Écouter le retour audio" checked={p.audioMonitor === true}
+          disabled={!p.onAudioMonitorChange || (!p.audioMonitor && !p.audioMonitorAvailable)}
+          onChange={(v) => p.onAudioMonitorChange?.(v)} />
+        {p.audioMonitor && (
+          <p className="inspector-note">
+            Le son envoyé à LinTO et enregistré est joué sur la sortie audio du système : utilisez un casque (sur
+            haut-parleurs, le micro le reprend et provoque un larsen).
+          </p>
+        )}
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><CaptionsIcon size={14} />Profil de transcription</h3>
@@ -201,8 +217,9 @@ export function Inspector(p: InspectorProps) {
                 )}
               </div>
             )}
-            <Button className="inspector-control" disabled={!p.onAir} onClick={() => p.onClearSubtitles?.()}>
-              Effacer les sous-titres
+            <Button className="inspector-control" disabled={!p.onAir || p.clearBlocked !== undefined}
+              title={p.clearBlocked} onClick={() => p.onClearTranscript?.()}>
+              Effacer la transcription…
             </Button>
           </>
         )}

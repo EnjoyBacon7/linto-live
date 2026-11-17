@@ -283,6 +283,17 @@ export class ObsController {
     await this.client.call('SetInputSettings', { inputName: SRC_AUDIO, inputSettings: { device_id: id } })
   }
 
+  /**
+   * Audio feedback: OBS plays the micro on the monitoring device (the system output) as it goes into the
+   * mix — after OBS's processing, i.e. what LinTO receives and what is recorded — while still sending it out.
+   */
+  async setAudioMonitor(on: boolean): Promise<void> {
+    await this.client.call('SetInputAudioMonitorType', {
+      inputName: SRC_AUDIO,
+      monitorType: on ? 'OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT' : 'OBS_MONITORING_TYPE_NONE'
+    })
+  }
+
   async setOverlayUrl(url: string): Promise<void> {
     await this.client.call('SetInputSettings', {
       inputName: SRC_OVERLAY,

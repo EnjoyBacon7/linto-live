@@ -5,7 +5,7 @@
  *
  * - list / read sessions, caption socket: MEMBER (others' private sessions are hidden below MEETING_MANAGER);
  * - transcriber profiles: QUICK_MEETING;
- * - create, modify (watermark), terminate a session: MEETING_MANAGER, and the organisation's SESSION permission.
+ * - create, modify (watermark), clear the transcript of, terminate a session: MEETING_MANAGER, and the organisation's SESSION permission.
  */
 export const ORG_ROLE = {
   MEMBER: 1,
@@ -27,7 +27,7 @@ export const ORG_PERMISSION = {
 
 /** What the user may do with the sessions of an organisation; `reason` says why not (user-facing). */
 export interface OrgRights {
-  /** Create a session, change its settings (watermark) and terminate it. */
+  /** Create a session, change its settings (watermark), clear its transcript and terminate it. */
   manageSessions: boolean
   /** Read the transcriber profiles (needed to create a session). */
   readProfiles: boolean

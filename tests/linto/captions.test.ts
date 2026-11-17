@@ -61,6 +61,17 @@ describe('CaptionStream', () => {
     sock.emit_('final', { segmentId: 1, text: 'ab' })
     expect(out).toEqual([['p', { segmentId: 1, text: 'a' }], ['f', { segmentId: 1, text: 'ab' }]])
   })
+  it("emits cleared when LinTO announces the session's transcript was cleared", () => {
+    const { s, sock } = mk()
+    let n = 0
+    s.on('cleared', () => n++)
+    s.open('s1', 7, 'o1')
+    sock.emit_('orga_o1_session_cleared', 'other')
+    sock.emit_('orga_o2_session_cleared', 's1')
+    expect(n).toBe(0)
+    sock.emit_('orga_o1_session_cleared', 's1')
+    expect(n).toBe(1)
+  })
   it('forwards translation events', () => {
     const { s, sock } = mk()
     const out: unknown[] = []

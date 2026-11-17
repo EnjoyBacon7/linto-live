@@ -28,8 +28,6 @@ function Icon({ size = 16, className, children, ...rest }: IconProps & { childre
 export const ChevronUpDownIcon = (p: IconProps) => (
   <Icon {...p}><path d="M5 6.5 8 3.5l3 3M5 9.5l3 3 3-3" /></Icon>
 )
-export const ChevronDownIcon = (p: IconProps) => <Icon {...p}><path d="m4 6 4 4 4-4" /></Icon>
-export const ChevronRightIcon = (p: IconProps) => <Icon {...p}><path d="m6 4 4 4-4 4" /></Icon>
 export const PlusIcon = (p: IconProps) => <Icon {...p}><path d="M8 3v10M3 8h10" /></Icon>
 export const PlayIcon = (p: IconProps) => (
   <Icon {...p}><path d="M5 3.2v9.6a.5.5 0 0 0 .76.43l7.6-4.8a.5.5 0 0 0 0-.86l-7.6-4.8A.5.5 0 0 0 5 3.2Z" fill="currentColor" /></Icon>
@@ -49,16 +47,6 @@ export const CaptionsIcon = (p: IconProps) => (
 )
 export const DisplayIcon = (p: IconProps) => (
   <Icon {...p}><rect x="1.75" y="2.25" width="12.5" height="8.5" rx="1.5" /><path d="M6 13.75h4M8 10.75v3" /></Icon>
-)
-export const WaveformIcon = (p: IconProps) => <Icon {...p}><path d="M2 8h.01M4.5 6v4M7 3.5v9M9.5 5.5v5M12 7v2M14 8h.01" /></Icon>
-export const GearIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <circle cx="8" cy="8" r="2.25" />
-    <path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M3.6 12.4l1.05-1.05M11.35 4.65l1.05-1.05" />
-  </Icon>
-)
-export const PersonIcon = (p: IconProps) => (
-  <Icon {...p}><circle cx="8" cy="5.5" r="2.75" /><path d="M2.75 14c.6-2.6 2.7-4 5.25-4s4.65 1.4 5.25 4" /></Icon>
 )
 export const EllipsisIcon = (p: IconProps) => (
   <Icon {...p}><circle cx="3.5" cy="8" r=".6" fill="currentColor" /><circle cx="8" cy="8" r=".6" fill="currentColor" /><circle cx="12.5" cy="8" r=".6" fill="currentColor" /></Icon>

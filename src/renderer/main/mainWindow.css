@@ -164,7 +164,7 @@
 }
 
 .sidebar-org {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 /* ---------- Account menu (NSMenu look) ---------- */
@@ -584,6 +584,11 @@
   color: var(--text-3);
 }
 
+/* The default-folder placeholder is plain text, not a cut path: let it wrap instead of widening the pane. */
+.inspector-path.is-empty {
+  white-space: normal;
+}
+
 /* Segmented level meter. */
 .vu {
   display: flex;
@@ -646,7 +651,7 @@
 .inspector-note {
   margin: 0;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .check {
@@ -683,4 +688,9 @@
   padding-bottom: 4px;
   line-height: 1.35;
   font-family: inherit;
+}
+
+.field-error {
+  font-size: 11px;
+  color: var(--bad);
 }

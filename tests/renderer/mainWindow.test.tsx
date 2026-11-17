@@ -52,7 +52,9 @@ async function renderMain() {
   render(<App />)
   await screen.findByRole('listbox', { name: 'Sessions' })
 }
-const row = (name: string) => screen.getByRole('option', { name })
+// A session option's accessible name is « name, status » (hidden status text).
+const sessionName = (name: string) => (n: string) => n === name || n.startsWith(name + ', ')
+const row = (name: string) => screen.getByRole('option', { name: sessionName(name) })
 const startBtn = () => screen.getByRole('button', { name: 'Démarrer' }) as HTMLButtonElement
 const toolbar = () => screen.getByRole('toolbar')
 
@@ -90,7 +92,7 @@ describe('Sidebar', () => {
     render(<App />)
     expect(await screen.findByText("Trop de sessions dans l'organisation.")).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
-    expect(await screen.findByRole('option', { name: 'Conférence' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: sessionName('Conférence') })).toBeTruthy()
     expect(screen.queryByText("Trop de sessions dans l'organisation.")).toBeNull()
   })
 
@@ -145,6 +147,20 @@ describe('Démarrer', () => {
     expect((screen.getByLabelText('Source principale') as HTMLSelectElement).value).toBe('none') // « Aucune »
     await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
     expect(startBtn().disabled).toBe(false)
+  })
+
+  it('« Écouter le retour audio » toggles the audio feedback and warns about loudspeakers once on', async () => {
+    setup()
+    await renderMain()
+    const check = screen.getByLabelText('Écouter le retour audio') as HTMLInputElement
+    expect(check.checked).toBe(false)
+    expect(check.disabled).toBe(false)
+    await userEvent.click(check)
+    expect(api.live.setAudioMonitor).toHaveBeenCalledWith(true)
+    expect(screen.queryByText(/utilisez un casque/)).toBeNull()
+    act(() => emit('live-state', { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off', audioMonitor: true }))
+    expect((screen.getByLabelText('Écouter le retour audio') as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText(/utilisez un casque/)).toBeTruthy()
   })
 
   it('the camera can be set back to « Aucune »', async () => {
@@ -302,7 +318,7 @@ describe('Nouvelle session…', () => {
     expect(within(d).getByText('Utiliser cette session ?')).toBeTruthy()
     await userEvent.click(within(d).getByRole('button', { name: 'Utiliser' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getAllByRole('option', { name: 'Atelier' })).toHaveLength(1)
+    expect(screen.getAllByRole('option', { name: sessionName('Atelier') })).toHaveLength(1)
     expect(row('Atelier').getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Défini par la session')).toBeTruthy()
     await userEvent.click(startBtn())
@@ -340,7 +356,7 @@ describe('Nouvelle session…', () => {
     expect(within(d).queryByRole('button', { name: 'Utiliser' })).toBeNull()
     await userEvent.click(within(d).getByRole('button', { name: 'OK' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByRole('option', { name: 'Privée' })).toBeNull()
+    expect(screen.queryByRole('option', { name: sessionName('Privée') })).toBeNull()
     expect(api.live.start).not.toHaveBeenCalled()
   })
 
@@ -352,7 +368,7 @@ describe('Nouvelle session…', () => {
     const d = await screen.findByRole('dialog', { name: 'La session « Ancienne » existe déjà.' })
     expect(within(d).getByText('Elle est terminée et ne peut pas être reprise. Choisis un autre nom.')).toBeTruthy()
     await userEvent.click(within(d).getByRole('button', { name: 'OK' }))
-    expect(screen.queryByRole('option', { name: 'Ancienne' })).toBeNull()
+    expect(screen.queryByRole('option', { name: sessionName('Ancienne') })).toBeNull()
   })
 
   it('OK is disabled without a name; Escape cancels', async () => {
@@ -438,7 +454,7 @@ describe('Terminer…', () => {
     await renderMain()
     act(() => emit('live-state', live()))
     await userEvent.click(screen.getByRole('button', { name: 'Terminer…' }))
-    expect(screen.getByText('Terminer définitivement « Conférence » ?')).toBeTruthy()
+    expect(screen.getByText('Terminer définitivement « Conférence » ? La transcription sera enregistrée dans LinTO Studio.')).toBeTruthy()
     expect(document.activeElement?.textContent).toBe('Annuler')
     await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -764,7 +780,7 @@ describe('Review fixes', () => {
     await renderMain()
     act(() => emit('live-state', live({ session: { name: 'Ailleurs', status: 'active' } })))
     const tabbable = screen.getAllByRole('option').filter((o) => o.tabIndex === 0)
-    expect(tabbable.map((o) => o.textContent)).toEqual(['Conférence'])
+    expect(tabbable.map((o) => o.textContent)).toEqual(['Conférence, Prête'])
   })
 
   it('Démarrer stays disabled while a start launched elsewhere is in progress', async () => {
@@ -1053,14 +1069,29 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(screen.queryByRole('checkbox', { name: 'Afficher le filigrane' })).toBeNull()
   })
 
-  it('« Effacer les sous-titres » only on air', async () => {
+  it('« Effacer la transcription… » only on air, after confirming', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(IDLE) } })
     await renderMain()
-    expect(btn('Effacer les sous-titres').disabled).toBe(true)
+    expect(btn('Effacer la transcription…').disabled).toBe(true)
     act(() => emit('live-state', live()))
-    await waitFor(() => expect(btn('Effacer les sous-titres').disabled).toBe(false))
-    await userEvent.click(btn('Effacer les sous-titres'))
-    expect(fn(api.live.clearSubtitles)).toHaveBeenCalled()
+    await waitFor(() => expect(btn('Effacer la transcription…').disabled).toBe(false))
+    await userEvent.click(btn('Effacer la transcription…'))
+    expect(screen.getByText('Effacer la transcription de « Conférence » ? Elle disparaît aussi des sous-titres et de LinTO Studio.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    expect(fn(api.live.clearTranscript)).not.toHaveBeenCalled()
+    await userEvent.click(btn('Effacer la transcription…'))
+    await userEvent.click(screen.getByRole('button', { name: 'Effacer' }))
+    expect(fn(api.live.clearTranscript)).toHaveBeenCalled()
+  })
+
+  it('« Effacer la transcription… » shows LinTO\'s refusal', async () => {
+    setup({ live: { clearTranscript: vi.fn().mockRejectedValue(new Error('Refusé par LinTO.')) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await waitFor(() => expect(btn('Effacer la transcription…').disabled).toBe(false))
+    await userEvent.click(btn('Effacer la transcription…'))
+    await userEvent.click(screen.getByRole('button', { name: 'Effacer' }))
+    expect(await screen.findByText('Refusé par LinTO.')).toBeTruthy()
   })
 })
 
@@ -1085,6 +1116,9 @@ describe('organisation rights', () => {
     const term = screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement
     expect(term.disabled).toBe(true)
     expect(term.title).toBe(REASON)
+    const clear = screen.getByRole('button', { name: 'Effacer la transcription…' }) as HTMLButtonElement
+    expect(clear.disabled).toBe(true)
+    expect(clear.title).toBe(REASON)
     act(() => emit('command', 'terminate'))
     expect(screen.queryByRole('dialog')).toBeNull()
   })
@@ -1185,5 +1219,14 @@ describe('Enregistrement', () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'off' })) } as never })
     await renderMain()
     expect(within(toolbar()).queryByText('REC')).toBeNull()
+  })
+})
+
+describe('A-014 session status in the option name', () => {
+  it('exposes the status label as hidden text in the option accessible name', async () => {
+    setup()
+    await renderMain()
+    expect(screen.getByRole('option', { name: /Plénière.*En direct/ })).toBeTruthy()
+    expect(screen.getByRole('option', { name: /Atelier.*En pause/ })).toBeTruthy()
   })
 })
