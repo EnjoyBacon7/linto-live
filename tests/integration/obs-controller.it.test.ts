@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +8,7 @@ import { ObsController, SCENE, SRC_AUDIO, SRC_BACKUP, SRC_OVERLAY, SRC_VIDEO } f
 import { obsExecutable } from '../../src/main/obs/locate'
 import { ObsProcess } from '../../src/main/obs/process'
 import { appPaths } from '../../src/main/paths'
+import { openBroadcast } from '../../src/main/broadcast/relay'
 
 const platform = process.platform
 const run = process.env.LINTO_LIVE_IT === '1' && (platform === 'darwin' || platform === 'linux')
@@ -149,7 +150,7 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     await new Promise((r) => setTimeout(r, 500))
     expect(existsSync(path!)).toBe(true)
     expect(path!.startsWith(dir)).toBe(true) // SetRecordDirectory applies in Advanced output mode
-    expect(statSync(path!).size).toBeGreaterThan(50_000)
+    expect(statSync(path!).size).toBeGreaterThan(20_000) // a still picture: the H.264 encoder needs little
     const size = videoSize(path!)
     console.log('recording video size', JSON.stringify(size), 'bytes', statSync(path!).size)
     if (size) expect(size).toEqual({ width: 1920, height: 1080 }) // full canvas, not the 640×360 stream
@@ -223,6 +224,62 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
       expect(videoSize(path!)).toEqual({ width: 1920, height: 1080 })
     } finally {
       ff.kill('SIGKILL')
+    }
+  }, 40_000)
+
+  it.skipIf(!hasFfmpeg)('broadcasts the full output through the relay while the stream to LinTO runs; the key never reaches OBS', async () => {
+    const base = 19850 + Math.floor(Math.random() * 500)
+    const KEY = 'cle-secrete-' + Math.random().toString(36).slice(2)
+    const linto = join(userData, 'linto.flv')
+    const online = join(userData, 'online.flv')
+    // Two one-shot RTMP servers: LinTO's ingest and the online platform.
+    const servers = [
+      spawn('ffmpeg', ['-v', 'error', '-y', '-listen', '1', '-i', `rtmp://127.0.0.1:${base}/live/test`, '-c', 'copy', linto], { stdio: 'ignore' }),
+      spawn('ffmpeg', ['-v', 'error', '-y', '-listen', '1', '-i', `rtmp://127.0.0.1:${base + 1}/live2/${KEY}`, '-c', 'copy', online], { stdio: 'ignore' })
+    ]
+    const exited = servers.map((ff) => new Promise((r) => ff.once('exit', r)))
+    const raw = new OBSWebSocket()
+    await raw.connect(`ws://127.0.0.1:${conn!.port}`, conn!.password)
+    try {
+      await new Promise((r) => setTimeout(r, 1000))
+      const rec: { active: boolean; path?: string }[] = []
+      const off = ctl!.recordState$((x) => rec.push(x))
+      await ctl!.startStream({ streamServiceType: 'rtmp_custom', streamServiceSettings: { server: `rtmp://127.0.0.1:${base}/live`, key: 'test' } })
+      await new Promise((r) => setTimeout(r, 1500))
+      const session = await openBroadcast({ server: `rtmp://127.0.0.1:${base + 1}/live2`, key: KEY })
+      await ctl!.startBroadcast(session.url)
+      await new Promise((r) => setTimeout(r, 3000))
+      expect(rec).toContainEqual({ active: true })
+      expect((await raw.call('GetStreamStatus')).outputActive).toBe(true)
+      await ctl!.stopRecord()
+      session.close()
+      expect((await raw.call('GetStreamStatus')).outputActive).toBe(true) // LinTO's stream goes on
+      await ctl!.stopStream()
+      off()
+      await Promise.race([Promise.all(exited), new Promise((r) => setTimeout(r, 5000))])
+      expect(videoSize(online)).toEqual({ width: 1920, height: 1080 })
+      expect(videoSize(linto)).toEqual({ width: 640, height: 360 })
+
+      // A refused connection: the relay fails before OBS is involved.
+      await expect(openBroadcast({ server: 'rtmp://127.0.0.1:9/live2', key: KEY })).rejects.toThrow()
+
+      // Back to a file after a broadcast.
+      const dir = join(userData, 'rec3')
+      mkdirSync(dir)
+      await ctl!.startRecord(dir, 'Après diffusion')
+      await new Promise((r) => setTimeout(r, 2000))
+      const path = await ctl!.stopRecord()
+      expect(path).toMatch(/Après diffusion \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.mkv$/)
+      await new Promise((r) => setTimeout(r, 500))
+      expect(existsSync(path!)).toBe(true)
+
+      // Nowhere in OBS's files: profile, scene collection, logs.
+      const grep = spawnSync('grep', ['-rl', KEY, paths.obsConfigDir], { encoding: 'utf8' })
+      expect(grep.stdout).toBe('')
+      expect(grep.status).toBe(1) // 1: no match (2 would be an error)
+    } finally {
+      servers.forEach((ff) => ff.kill('SIGKILL'))
+      await raw.disconnect().catch(() => {})
     }
   }, 40_000)
 })

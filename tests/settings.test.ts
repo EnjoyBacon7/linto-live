@@ -119,6 +119,25 @@ describe('SettingsStore instance', () => {
   })
 })
 
+describe('SettingsStore broadcast key', () => {
+  it('round-trips the stream key encrypted; get() only says one is set; blank forgets it', () => {
+    const p = appPaths(dir, 'linux')
+    const s = new SettingsStore(p, crypto)
+    expect(s.getBroadcastKey()).toBeNull()
+    expect(s.get()).not.toHaveProperty('broadcastKeySet')
+    s.setBroadcastKey('  live-abcd-1234 ')
+    expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('live-abcd-1234')
+    expect(s.get()).toMatchObject({ broadcastKeySet: true })
+    expect(s.get()).not.toHaveProperty('broadcastKeyEnc')
+    expect(new SettingsStore(p, crypto).getBroadcastKey()).toBe('live-abcd-1234')
+    s.update({ broadcastKeySet: false, broadcastServer: 'rtmp://x/live' }) // derived: not writable
+    expect(s.get()).toMatchObject({ broadcastKeySet: true, broadcastServer: 'rtmp://x/live' })
+    s.setBroadcastKey('  ')
+    expect(s.getBroadcastKey()).toBeNull()
+    expect(s.get()).not.toHaveProperty('broadcastKeySet')
+  })
+})
+
 describe('SettingsStore saved login', () => {
   it('round-trips email + password encrypted, never in get() nor in plain text on disk', () => {
     const p = appPaths(dir, 'linux')

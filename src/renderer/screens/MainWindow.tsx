@@ -9,6 +9,7 @@ import { CloseIcon } from '../ui/icons'
 import { ConfirmSheet } from '../main/ConfirmSheet'
 import { Inspector, type WatermarkTarget } from '../main/Inspector'
 import { QrSheet } from '../main/QrSheet'
+import { BroadcastSheet, type BroadcastConfig } from '../main/BroadcastSheet'
 import { WatermarkSheet } from '../main/WatermarkSheet'
 import { NewSessionSheet } from '../main/NewSessionSheet'
 import { Sidebar } from '../main/Sidebar'
@@ -46,6 +47,7 @@ type SheetState =
   | { kind: 'login' }
   | { kind: 'watermark' }
   | { kind: 'qr' }
+  | { kind: 'broadcast' }
   /** « Nouvelle session » hit an existing session: `usable` offers to use it, otherwise the name is refused. */
   | { kind: 'exists'; name: string; usable: boolean; terminated?: boolean; rtmpOnly?: boolean }
   | null
@@ -289,6 +291,16 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     setSettings((s) => (s ? { ...s, ...patch } : s))
     window.lintoLive.setup.save(patch).catch((e) => setError(ipcErrorMessage(e)))
   }
+  /** Server in the settings; the stream key apart (encrypted in main, never sent back: only « saved » is known). */
+  const saveBroadcast = ({ server, key }: BroadcastConfig): void => {
+    // No server left: nothing to broadcast to, the checkbox goes off with it.
+    if (server !== (settings?.broadcastServer ?? '')) {
+      saveSettings({ broadcastServer: server, ...(server === '' && settings?.broadcastEnabled ? { broadcastEnabled: false } : {}) })
+    }
+    if (key === undefined) return
+    setSettings((s) => (s ? { ...s, broadcastKeySet: key !== '' } : s))
+    window.lintoLive.setup.setBroadcastKey(key).catch((e) => setError(ipcErrorMessage(e)))
+  }
   /** Saved on the LinTO session (like LinTO Studio); shown at once, rolled back by a refresh on failure. */
   const saveWatermark = (patch: Partial<Watermark>): void => {
     if (!summary || manageBlocked) return
@@ -404,7 +416,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           title={title}
           caption={caption}
           onAir={onAir}
-          recording={state.recording === 'on'}
+          recording={state.recording === 'on' && state.recordingTarget !== 'broadcast'}
+          broadcasting={state.recording === 'on' && state.recordingTarget === 'broadcast'}
           startedAt={state.startedAt}
           busy={busy}
           canStart={canStart}
@@ -425,6 +438,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
             {...(state.videoOnAir ? { videoOnAir: state.videoOnAir } : {})}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
+            onBroadcastSettings={() => { if (!sheetRef.current) setSheet({ kind: 'broadcast' }) }}
             {...(summary?.visibility ? { visibility: summary.visibility } : {})}
             {...(summary ? { languages: (summary.name === liveName && state.session?.languages) || summary.languages, language: settings?.subtitleLanguages?.[summary.id] ?? 'original',
               onLanguageChange: saveLanguage } : {})}
@@ -501,6 +515,13 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         open={sheet?.kind === 'qr'}
         qr={{ ...DEFAULT_QR, ...settings?.qr }}
         onApply={(q) => { setSheet(null); saveSettings({ qr: { ...DEFAULT_QR, ...settings?.qr, ...q } }) }}
+        onCancel={() => setSheet(null)}
+      />
+      <BroadcastSheet
+        open={sheet?.kind === 'broadcast'}
+        server={settings?.broadcastServer ?? ''}
+        keySet={settings?.broadcastKeySet === true}
+        onApply={(b) => { setSheet(null); saveBroadcast(b) }}
         onCancel={() => setSheet(null)}
       />
       <Sheet title="Se reconnecter à LinTO" open={sheet?.kind === 'login'} onClose={() => setSheet(null)} footer={null}>

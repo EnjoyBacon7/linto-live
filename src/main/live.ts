@@ -8,6 +8,9 @@ import {
 import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import { recordBaseName, type ObsController, type StreamState } from './obs/controller'
+import { isBroadcastServer } from '../shared/broadcast'
+import type { BroadcastSession } from './broadcast/relay'
+import type { PublishTarget } from './broadcast/rtmp'
 import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
 import { FallbackMonitor, type Luma } from './obs/fallback'
 import type { LintoApi } from './linto/api'
@@ -45,9 +48,16 @@ export const MSG_OBS_SETUP_FAILED = 'Impossible de configurer OBS : '
 export const MSG_OBS_RESTARTED = 'OBS a redémarré automatiquement.'
 export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const MSG_RECORD_FAILED = 'Enregistrement impossible : '
+export const MSG_BROADCAST_FAILED = 'Diffusion en ligne impossible : '
 export const MSG_PRIMARY_FAILED = 'Source principale indisponible : '
 const MSG_RECORD_NOT_STARTED = "OBS n'a pas démarré l'enregistrement."
 const MSG_RECORD_STOPPED = "OBS a arrêté l'enregistrement."
+export const MSG_BROADCAST_NOT_STARTED = "OBS n'a pas démarré la diffusion."
+export const MSG_BROADCAST_STOPPED = "OBS a arrêté la diffusion."
+export const MSG_BROADCAST_NO_SERVER = 'aucun serveur de diffusion configuré.'
+/** A warning about the show's second output (recording or broadcast). */
+const isRecordWarning = (w: string | undefined): boolean =>
+  !!w && (w.startsWith(MSG_RECORD_FAILED) || w.startsWith(MSG_BROADCAST_FAILED))
 export const MSG_NO_ORG = 'Choisis une organisation.'
 export const MSG_START_CANCELLED = 'Démarrage annulé.'
 /** The caption socket was refused while the token is still valid: access to the session itself was lost. */
@@ -112,7 +122,7 @@ export type LiveObsController = Pick<
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setBackupVisible' | 'probePrimary'
   | 'setAudioDevice' | 'setAudioMonitor' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
-  | 'startRecord' | 'stopRecord' | 'recordState$'
+  | 'startRecord' | 'startBroadcast' | 'stopRecord' | 'recordState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession' | 'clearSession'>
@@ -122,7 +132,7 @@ export interface LiveCaptions {
   on(event: 'status' | 'partial' | 'final' | 'translation' | 'authError' | 'cleared', listener: Listener): unknown
 }
 export type LiveOverlay = Pick<OverlayServer, 'start' | 'push' | 'stop'>
-export type LiveSettings = Pick<SettingsStore, 'get' | 'update' | 'setToken'>
+export type LiveSettings = Pick<SettingsStore, 'get' | 'update' | 'setToken' | 'getBroadcastKey'>
 
 export interface LiveDeps {
   obs: LiveObsProcess
@@ -144,6 +154,11 @@ export interface LiveDeps {
   defaultRecordDir: string
   /** EXPERIMENTAL: corrector of Settings.properNouns in final captions (absent: no correction). */
   nameCorrector?: (names: string[]) => NameCorrector
+  /**
+   * Publishes to the platform (the app holds the stream key, OBS never sees it) and returns the local
+   * address OBS sends the show to (broadcast/relay.ts).
+   */
+  openBroadcast: (t: PublishTarget) => Promise<BroadcastSession>
 }
 
 /** Font size actually used on the canvas: the saved one if valid, else the default. */
@@ -152,6 +167,17 @@ export function subtitleFontSize(s: Pick<Settings, 'subtitleFontSize'>): number 
   return typeof v === 'number' && Number.isFinite(v)
     ? Math.min(SUBTITLE_FONT_SIZE_MAX, Math.max(SUBTITLE_FONT_SIZE_MIN, Math.round(v)))
     : DEFAULT_SUBTITLE_FONT_SIZE
+}
+
+/** The show's second OBS output: a file, or an online broadcast (`target` null: no server configured). */
+type RecordTarget = { kind: 'file' } | { kind: 'broadcast'; target: PublishTarget | null }
+
+/** What the show started now records or broadcasts (the broadcast wins: OBS cannot do both). */
+function recordTargetOf(s: Settings, key: () => string | null): RecordTarget | null {
+  if (s.broadcastEnabled) {
+    return { kind: 'broadcast', target: isBroadcastServer(s.broadcastServer) ? { server: s.broadcastServer, key: key() } : null }
+  }
+  return s.recordEnabled ? { kind: 'file' } : null
 }
 
 interface Current {
@@ -185,7 +211,8 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * (setWindowVisible); audio levels are only forwarded while the window is visible. No request closes or lists
  * projectors: the output window only opens on demand (showOutputWindow), on or off air, and keeps showing the
  * camera after Arrêter. The show is recorded when Settings.recordEnabled is set at Démarrer (a new file per
- * session and per OBS run); recording never blocks nor fails the show.
+ * session and per OBS run), or broadcast online when Settings.broadcastEnabled is (OBS's same second output,
+ * hence one or the other); neither ever blocks nor fails the show.
  */
 export class LiveController extends EventEmitter {
   private state: LiveState = {
@@ -232,8 +259,10 @@ export class LiveController extends EventEmitter {
   private names: { key: string; correct: NameCorrector } | null = null
   /** Switches to the backup source when the primary is absent (only while a backup is configured and OBS attached). */
   private monitor: FallbackMonitor | null = null
-  /** Settings.recordEnabled read at Démarrer: the show on air is recorded (fixed until it ends). */
-  private recordIntent = false
+  /** Settings.recordEnabled / broadcastEnabled read at Démarrer: the show on air is recorded or broadcast (fixed until it ends). */
+  private recordTarget: RecordTarget | null = null
+  /** The platform connection of the online broadcast on air (OBS sends to its local address). */
+  private broadcast: BroadcastSession | null = null
   /** startRecord was sent and OBS has not reported the recording started yet. */
   private recordAwaiting = false
   private recordTimer: NodeJS.Timeout | null = null
@@ -263,7 +292,7 @@ export class LiveController extends EventEmitter {
       // OBS gave up: the show cannot continue. Tear it down like Arrêter (nothing left to stop in OBS)
       // so the UI is not stuck on a live session; the error phase and warning tell what happened.
       this.clearCaptionsTimer()
-      this.recordIntent = false
+      this.recordTarget = null
       if (this.current) {
         this.d.captions.close()
         this.current = null
@@ -279,7 +308,8 @@ export class LiveController extends EventEmitter {
         session: undefined,
         stream: 'off',
         captions: 'offline',
-        startedAt: undefined
+        startedAt: undefined,
+        recordingTarget: undefined
       })
       this.sendTranscript(this.transcript.endPartial())
     })
@@ -673,6 +703,7 @@ export class LiveController extends EventEmitter {
     this.flushRecordStopWaiters()
     this.clearRecordTimer()
     this.recordAnnouncePending = false // that OBS run will not report it any more
+    this.closeBroadcast() // attach publishes again if the show is still broadcast
     if (this.state.output !== 'off') this.setState({ output: 'off' })
     // The OBS run that recorded is gone: attach starts a new file if the show is still recorded.
     if (this.state.recording !== 'off') this.setState({ recording: 'off' })
@@ -734,7 +765,7 @@ export class LiveController extends EventEmitter {
     const cur = this.current
     if (this.state.phase === 'live' && cur) {
       await this.applyShow(ready, cur)
-      if (this.recordIntent && ready === this.ctl && cur === this.current) await this.startRecordSafe(ready, cur)
+      if (this.recordTarget && ready === this.ctl && cur === this.current) await this.startRecordSafe(ready, cur)
     }
   }
 
@@ -996,9 +1027,9 @@ export class LiveController extends EventEmitter {
       // One file per session: the previous show's recording is closed; this show follows the setting read now.
       await withDeadline(STOP_WAIT_MS, async (limit) => {
         if (this.streamRunning) await this.stopStreamAndWait(limit)
-        if (this.recordIntent) await this.stopRecordSafe(limit)
+        if (this.recordTarget) await this.stopRecordSafe(limit)
       })
-      this.recordIntent = s.recordEnabled === true
+      this.recordTarget = recordTargetOf(s, () => this.d.settings.getBroadcastKey())
 
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
       const languages = subtitleLanguageOptions(res.channel)
@@ -1020,7 +1051,8 @@ export class LiveController extends EventEmitter {
         session: { name: res.session.name, status: res.session.status, languages },
         stream: cur.service ? 'starting' : 'unavailable',
         warning: cur.service ? undefined : res.blocker === 'rtmp-only' ? MSG_RTMP_ONLY : MSG_NO_STREAM,
-        startedAt
+        startedAt,
+        recordingTarget: this.recordTarget?.kind
       })
       this.sendTranscript(this.transcript.reset(res.session.name, startedAt))
       this.d.captions.open(res.session.id, res.channel.id, cur.orgId)
@@ -1028,7 +1060,7 @@ export class LiveController extends EventEmitter {
       const c = this.ctl
       if (c) {
         await this.applyShow(c, cur)
-        if (this.recordIntent && c === this.ctl && cur === this.current) await this.startRecordSafe(c, cur)
+        if (this.recordTarget && c === this.ctl && cur === this.current) await this.startRecordSafe(c, cur)
       }
     } catch (e) {
       if (this.state.phase !== 'live') {
@@ -1052,9 +1084,9 @@ export class LiveController extends EventEmitter {
     // One deadline for both: quitting stays within SHUTDOWN_STOP_WAIT_MS.
     await withDeadline(streamWaitMs, async (limit) => {
       await this.stopStreamAndWait(limit)
-      if (this.recordIntent) await this.stopRecordSafe(limit)
+      if (this.recordTarget) await this.stopRecordSafe(limit)
     })
-    this.recordIntent = false
+    this.recordTarget = null
     // The program scene stays on the camera: an open output window keeps showing it (only the captions go).
     this.current = null
     this.watermark = null
@@ -1067,6 +1099,7 @@ export class LiveController extends EventEmitter {
       stream: 'off',
       captions: 'offline',
       startedAt: undefined,
+      recordingTarget: undefined,
       warning: undefined,
       ...end
     })
@@ -1098,15 +1131,36 @@ export class LiveController extends EventEmitter {
 
   /** Never throws: a failure becomes recording 'error' + a warning, the show goes on. */
   private async startRecordSafe(c: LiveObsController, cur: Current): Promise<void> {
-    const dir = this.d.settings.get().recordDir || this.d.defaultRecordDir
+    const target = this.recordTarget
+    if (!target) return
     this.clearRecordTimer()
     this.recordAnnouncePending = false // a new file: a stop OBS never reported is not waited for any more
+    if (target.kind === 'broadcast' && !target.target) {
+      this.recordFailed(MSG_BROADCAST_NO_SERVER)
+      return
+    }
     this.recordAwaiting = true
     try {
-      await this.d.mkdirp(dir)
+      let start: () => Promise<void>
+      if (target.kind === 'broadcast') {
+        this.closeBroadcast()
+        // The platform accepts the stream (or says why not) before OBS starts sending.
+        const session = await this.d.openBroadcast(target.target!)
+        if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) {
+          session.close()
+          return
+        }
+        this.broadcast = session
+        session.onClose((e) => this.onBroadcastClosed(session, e))
+        start = () => c.startBroadcast(session.url)
+      } else {
+        const dir = this.d.settings.get().recordDir || this.d.defaultRecordDir
+        await this.d.mkdirp(dir)
+        start = () => c.startRecord(dir, recordBaseName(cur.session.name))
+      }
       for (let attempt = 0; ; attempt++) {
         try {
-          await c.startRecord(dir, recordBaseName(cur.session.name))
+          await start()
           break
         } catch (e) {
           // The previous file's output is still stopping: it frees up shortly.
@@ -1118,6 +1172,7 @@ export class LiveController extends EventEmitter {
     } catch (e) {
       if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) return
       this.recordAwaiting = false
+      this.closeBroadcast()
       this.recordFailed(errMsg(e))
       return
     }
@@ -1126,7 +1181,8 @@ export class LiveController extends EventEmitter {
       this.recordTimer = null
       if (!this.recordAwaiting || c !== this.ctl || cur !== this.current) return
       this.recordAwaiting = false
-      this.recordFailed(MSG_RECORD_NOT_STARTED)
+      this.closeBroadcast()
+      this.recordFailed(target.kind === 'broadcast' ? MSG_BROADCAST_NOT_STARTED : MSG_RECORD_NOT_STARTED)
     }, RECORD_START_WAIT_MS)
   }
 
@@ -1138,6 +1194,8 @@ export class LiveController extends EventEmitter {
   private async stopRecordSafe(limit: Promise<void>): Promise<void> {
     this.clearRecordTimer()
     this.recordAwaiting = false
+    // A broadcast leaves no file (OBS reports the relay's local address as its « path »).
+    const toFile = this.recordTarget?.kind === 'file'
     const c = this.ctl
     if (c) {
       this.recordStopping = true
@@ -1146,9 +1204,9 @@ export class LiveController extends EventEmitter {
       const stopped = new Promise<void>((resolve) => this.recordStopWaiters.push(resolve))
       try {
         const r = await Promise.race([c.stopRecord(), limit.then(() => timedOut)])
-        if (r === timedOut) this.recordAnnouncePending = true
+        if (r === timedOut) this.recordAnnouncePending = toFile
         else if (r) {
-          this.emit('recording-saved', r)
+          if (toFile) this.emit('recording-saved', r)
           await Promise.race([stopped, limit])
         }
       } catch {
@@ -1158,15 +1216,33 @@ export class LiveController extends EventEmitter {
         this.flushRecordStopWaiters()
       }
     }
-    const failed = this.state.warning?.startsWith(MSG_RECORD_FAILED)
+    this.closeBroadcast()
+    const failed = isRecordWarning(this.state.warning)
     if (this.state.recording !== 'off' || failed) this.setState({ recording: 'off', ...(failed ? { warning: undefined } : {}) })
+  }
+
+  private closeBroadcast(): void {
+    const b = this.broadcast
+    this.broadcast = null
+    b?.close()
+  }
+
+  /** The platform dropped the broadcast (its relay then stops OBS's output): says why, the show goes on. */
+  private onBroadcastClosed(session: BroadcastSession, e: Error | null): void {
+    if (this.broadcast !== session) return
+    this.broadcast = null
+    if (!e || this.recordTarget?.kind !== 'broadcast') return
+    this.recordAwaiting = false
+    this.clearRecordTimer()
+    this.recordFailed(e.message)
   }
 
   /** A stream/OBS warning matters more: it stays, the recording indicator alone tells the failure then. */
   private recordFailed(detail: string): void {
     const w = this.state.warning
-    const mayWarn = !w || w.startsWith(MSG_RECORD_FAILED)
-    this.setState({ recording: 'error', ...(mayWarn ? { warning: MSG_RECORD_FAILED + detail } : {}) })
+    const mayWarn = !w || isRecordWarning(w)
+    const prefix = this.recordTarget?.kind === 'broadcast' ? MSG_BROADCAST_FAILED : MSG_RECORD_FAILED
+    this.setState({ recording: 'error', ...(mayWarn ? { warning: prefix + detail } : {}) })
   }
 
   private clearRecordTimer(): void {
@@ -1188,11 +1264,11 @@ export class LiveController extends EventEmitter {
       this.recordAwaiting = false
       this.clearRecordTimer()
       // Started while no show wants it (e.g. late, after Arrêter): no hidden recording left running.
-      if (!this.recordIntent) {
+      if (!this.recordTarget) {
         void c.stopRecord().catch(() => {})
         return
       }
-      const failed = this.state.warning?.startsWith(MSG_RECORD_FAILED)
+      const failed = isRecordWarning(this.state.warning)
       this.setState({ recording: 'on', ...(failed ? { warning: undefined } : {}) })
       return
     }
@@ -1203,7 +1279,11 @@ export class LiveController extends EventEmitter {
       return
     }
     // Our own stopRecord announces the file itself; after it, recording is already 'off'.
-    if (this.recordStopping || !this.recordIntent || this.state.recording !== 'on') return
+    if (this.recordStopping || !this.recordTarget || this.state.recording !== 'on') return
+    if (this.recordTarget.kind === 'broadcast') {
+      this.closeBroadcast()
+      return this.recordFailed(MSG_BROADCAST_STOPPED)
+    }
     if (s.path) this.emit('recording-saved', s.path)
     this.recordFailed(MSG_RECORD_STOPPED)
   }

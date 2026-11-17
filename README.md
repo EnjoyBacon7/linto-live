@@ -156,6 +156,18 @@ l'application pendant un direct revient à cliquer sur Arrêter.
   Studio : la transcription de la session est effacée sur LinTO, et disparaît à la fois des
   sous-titres de LinTO Live et de LinTO Studio. À l'inverse, effacer la transcription depuis LinTO
   Studio vide aussi les sous-titres et la transcription de LinTO Live. Le direct continue.
+- **Diffusion en ligne** : « Diffuser en ligne » envoie la même sortie (1920×1080, sous-titres
+  incrustés et son) à une plateforme de streaming (YouTube, Twitch, PeerTube, serveur RTMP…).
+  L'adresse du serveur (`rtmp://` ou `rtmps://`) et la clé de stream fournies par la plateforme se
+  saisissent dans « Paramètres de diffusion… » ; la clé est chiffrée comme le mot de passe mémorisé
+  et n'est jamais réaffichée. OBS ne la reçoit jamais : il envoie l'image à l'application, sur un port
+  local, et c'est l'application qui la publie sur la plateforme ; la clé n'apparaît donc ni dans la
+  configuration ni dans les journaux d'OBS. Une clé refusée est signalée, avec la raison donnée par la
+  plateforme, avant même qu'OBS ne démarre. Une pastille rouge **EN LIGNE** s'affiche pendant la diffusion. OBS
+  n'ayant qu'une sortie en plus de l'envoi vers LinTO, diffusion et enregistrement s'excluent :
+  cocher l'un décoche l'autre. Comme l'enregistrement, le réglage s'applique au prochain Démarrer
+  et une coupure de la diffusion n'interrompt pas le direct (pas de reconnexion automatique : elle
+  reprend au Démarrer suivant).
 
 ### Droits LinTO nécessaires
 

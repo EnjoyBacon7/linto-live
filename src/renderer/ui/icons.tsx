@@ -36,6 +36,13 @@ export const StopIcon = (p: IconProps) => (
   <Icon {...p}><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" /></Icon>
 )
 export const RecordIcon = (p: IconProps) => <Icon {...p}><circle cx="8" cy="8" r="4.5" fill="currentColor" stroke="none" /></Icon>
+/** Broadcast: a dot with radio waves on both sides. */
+export const BroadcastIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M5.2 5.2a4 4 0 0 0 0 5.6M10.8 5.2a4 4 0 0 1 0 5.6M3.1 3.1a7 7 0 0 0 0 9.8M12.9 3.1a7 7 0 0 1 0 9.8" />
+  </Icon>
+)
 export const CameraIcon = (p: IconProps) => (
   <Icon {...p}><rect x="1.75" y="4.25" width="9" height="7.5" rx="1.5" /><path d="m10.75 7 3.5-2v6l-3.5-2" /></Icon>
 )

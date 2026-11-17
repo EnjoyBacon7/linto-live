@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
 import type { ObsStreamService } from './streamTarget'
@@ -77,6 +78,18 @@ const TRANSFORM_1080P = {
   boundsAlignment: 0,
   boundsWidth: 1920,
   boundsHeight: 1080
+}
+
+/** OBS's FFmpeg output in Advanced mode (its « Custom Output (FFmpeg) » recording type, see seed.ts). */
+export const FFMPEG_OUTPUT = 'adv_ffmpeg_output'
+const MKV = { name: 'matroska', mime: 'video/x-matroska' }
+const FLV = { name: 'flv', mime: 'video/x-flv' }
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+/** `YYYY-MM-DD hh-mm-ss` in local time, as OBS names its recordings. */
+export function fileStamp(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ` +
+    `${pad2(d.getHours())}-${pad2(d.getMinutes())}-${pad2(d.getSeconds())}`
 }
 
 /** File name base for a recording: no character OBS or a file system treats specially ('%' starts an OBS format specifier). */
@@ -385,18 +398,38 @@ export class ObsController {
     }
   }
 
-  /** Records the output as `<baseName> <date time>` in dir (OBS appends the extension of the profile's format). */
-  async startRecord(dir: string, baseName: string): Promise<void> {
-    await this.client.call('SetRecordDirectory', { recordDirectory: dir })
-    await this.client.call('SetProfileParameter', {
-      parameterCategory: 'Output',
-      parameterName: 'FilenameFormatting',
-      parameterValue: `${baseName} %CCYY-%MM-%DD %hh-%mm-%ss`
+  /**
+   * Points OBS's FFmpeg output (the « recording » output, see seed.ts) at `url` and starts it. Set twice:
+   * in the profile, which OBS re-applies when no output is running, and on the output itself, used as is
+   * while the stream to LinTO already runs.
+   */
+  private async startFfmpegOutput(url: string, format: { name: string; mime: string }): Promise<void> {
+    const param = (parameterName: string, parameterValue: string): Promise<unknown> =>
+      this.client.call('SetProfileParameter', { parameterCategory: 'AdvOut', parameterName, parameterValue })
+    await param('FFURL', url)
+    await param('FFFormat', format.name)
+    await param('FFFormatMimeType', format.mime)
+    await this.client.call('SetOutputSettings', {
+      outputName: FFMPEG_OUTPUT,
+      outputSettings: { url, format_name: format.name, format_mime_type: format.mime }
     })
     await this.client.call('StartRecord')
   }
 
-  /** Stops the recording; resolves the file path, or null when no recording was running. */
+  /** Records the output to `<dir>/<baseName> <date time>.mkv` (local time). */
+  async startRecord(dir: string, baseName: string, now: Date = new Date()): Promise<void> {
+    await this.startFfmpegOutput(join(dir, `${baseName} ${fileStamp(now)}.mkv`), MKV)
+  }
+
+  /**
+   * Broadcasts the output online: FLV to `url`, the app's local relay (`tcp://127.0.0.1:<port>`, see
+   * broadcast/relay.ts), which publishes to the platform. OBS never gets the stream key.
+   */
+  async startBroadcast(url: string): Promise<void> {
+    await this.startFfmpegOutput(url, FLV)
+  }
+
+  /** Stops the recording or the broadcast; resolves its file path (a broadcast's local URL), or null when nothing was running. */
   async stopRecord(): Promise<string | null> {
     try {
       const r = await this.client.call('StopRecord')

@@ -6,7 +6,7 @@ import type { SavedLogin, Settings } from '../shared/types'
 export interface TokenCrypto { encrypt(s: string): Buffer; decrypt(b: Buffer): string }
 export const DEFAULT_INSTANCE = 'https://studio.linto.ai'
 
-interface Stored extends Settings { tokenEnc?: string; savedLoginEnc?: string }
+interface Stored extends Settings { tokenEnc?: string; savedLoginEnc?: string; broadcastKeyEnc?: string }
 
 const DEV_HOSTS = new Set(['localhost', '127.0.0.1'])
 
@@ -69,13 +69,14 @@ export class SettingsStore {
 
   get(): Settings {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { tokenEnc, savedLoginEnc, ...rest } = this.data
-    return { ...rest }
+    const { tokenEnc, savedLoginEnc, broadcastKeyEnc, broadcastKeySet, ...rest } = this.data
+    return broadcastKeyEnc ? { ...rest, broadcastKeySet: true } : { ...rest }
   }
 
   /** Throws on an invalid instance URL; changing the instance drops the token and the saved login in the same write. */
   update(patch: Partial<Settings>): void {
     const clean = { ...patch }
+    delete clean.broadcastKeySet // derived from the stored key
     if (clean.instance === undefined) delete clean.instance
     else clean.instance = checkInstance(clean.instance)
     const next: Stored = { ...this.data, ...clean }
@@ -120,6 +121,27 @@ export class SettingsStore {
   setSavedLogin(l: SavedLogin | null): void {
     if (l === null) delete this.data.savedLoginEnc
     else this.data.savedLoginEnc = this.crypto.encrypt(JSON.stringify({ email: l.email, password: l.password })).toString('base64')
+    this.save()
+  }
+
+  /**
+   * Stream key of the online broadcast, encrypted like the saved login (with no OS keychain, safeStorage only
+   * obfuscates it: OBS itself keeps stream keys in clear text).
+   */
+  getBroadcastKey(): string | null {
+    if (!this.data.broadcastKeyEnc) return null
+    try {
+      return this.crypto.decrypt(Buffer.from(this.data.broadcastKeyEnc, 'base64'))
+    } catch {
+      return null
+    }
+  }
+
+  /** null or blank: forgets the key. */
+  setBroadcastKey(k: string | null): void {
+    const key = k?.trim()
+    if (!key) delete this.data.broadcastKeyEnc
+    else this.data.broadcastKeyEnc = this.crypto.encrypt(key).toString('base64')
     this.save()
   }
 }

@@ -17,6 +17,7 @@ import {
 } from '../shared/types'
 import { appPaths } from './paths'
 import { SettingsStore } from './settings'
+import { openBroadcast } from './broadcast/relay'
 import { ObsProcess } from './obs/process'
 import { ObsController } from './obs/controller'
 import { lumaOfBgra } from './obs/fallback'
@@ -226,7 +227,8 @@ function main(): void {
       await mkdir(dir, { recursive: true })
     },
     defaultRecordDir: join(app.getPath('videos'), 'LinTO Live'),
-    nameCorrector: (names) => createNameCorrector(names, commonWords())
+    nameCorrector: (names) => createNameCorrector(names, commonWords()),
+    openBroadcast
   })
 
   // ---- Native shell: app menu, menu-bar icon, notifications ----
@@ -426,6 +428,11 @@ function main(): void {
     }
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
+
+  ipcMain.handle(IPC.setupSetBroadcastKey, (_e, key: unknown) => {
+    if (typeof key !== 'string' || key.length > 1024) throw new Error('Clé de stream invalide.')
+    settings.setBroadcastKey(key)
   })
 
   ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown) => {
