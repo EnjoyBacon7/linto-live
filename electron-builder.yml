@@ -29,6 +29,9 @@ extraResources:
     to: tray
     filter:
       - '*.png'
+  # EXPERIMENTAL proper-noun correction: everyday French words never replaced (hermitdave/FrequencyWords, CC BY-SA 4.0).
+  - from: resources/proper-nouns
+    to: proper-nouns
 mac:
   extraResources:
     - from: vendor/obs/macos

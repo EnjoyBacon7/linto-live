@@ -12,6 +12,7 @@ import { toObsStreamService, type ObsStreamService } from './obs/streamTarget'
 import { FallbackMonitor, type Luma } from './obs/fallback'
 import type { LintoApi } from './linto/api'
 import { type CaptionEvent, type CaptionStatus, type CaptionStream } from './linto/captions'
+import { cleanNames, type NameCorrector } from './linto/properNouns'
 import { resolveSession } from './linto/sessionResolver'
 import { lintoErrorMessage } from './linto/accessMessages'
 import { TranscriptLog } from './linto/transcript'
@@ -141,6 +142,8 @@ export interface LiveDeps {
   mkdirp: (dir: string) => Promise<void>
   /** Record folder when Settings.recordDir is not set. */
   defaultRecordDir: string
+  /** EXPERIMENTAL: corrector of Settings.properNouns in final captions (absent: no correction). */
+  nameCorrector?: (names: string[]) => NameCorrector
 }
 
 /** Font size actually used on the canvas: the saved one if valid, else the default. */
@@ -223,6 +226,8 @@ export class LiveController extends EventEmitter {
   private cancelGen = 0
   private cancelListeners = new Set<() => void>()
   private transcript = new TranscriptLog()
+  /** Corrector built for this list of proper nouns (rebuilt when the list changes). */
+  private names: { key: string; correct: NameCorrector } | null = null
   /** Switches to the backup source when the primary is absent (only while a backup is configured and OBS attached). */
   private monitor: FallbackMonitor | null = null
   /** Settings.recordEnabled read at Démarrer: the show on air is recorded (fixed until it ends). */
@@ -284,7 +289,9 @@ export class LiveController extends EventEmitter {
       this.pushCaption(routeOriginal(this.subtitleLanguage(), false, e.text))
       this.sendTranscript(this.transcript.partial(e))
     })
-    d.captions.on('final', (e: CaptionEvent) => {
+    d.captions.on('final', (raw: CaptionEvent) => {
+      // Proper nouns are only corrected once LinTO has settled the words (partials would flicker).
+      const e = this.correctNames(raw)
       this.pushCaption(routeOriginal(this.subtitleLanguage(), true, e.text))
       this.sendTranscript(this.transcript.final(e))
     })
@@ -292,6 +299,23 @@ export class LiveController extends EventEmitter {
       this.pushCaption(routeTranslation(this.subtitleLanguage(), this.current?.channel.languages, e))
     })
     d.captions.on('authError', () => void this.captionsRefused())
+  }
+
+  private correctNames(e: CaptionEvent): CaptionEvent {
+    const make = this.d.nameCorrector
+    if (!make || !e.text) return e
+    const s = this.d.settings.get()
+    if (s.properNounsEnabled !== true) return e
+    const list = cleanNames(s.properNouns)
+    if (list.length === 0) return e
+    const key = list.join('\n')
+    if (this.names?.key !== key) this.names = { key, correct: make(list) }
+    try {
+      const r = this.names.correct(e.text)
+      return r.replacements.length > 0 ? { ...e, text: r.text } : e
+    } catch {
+      return e // never lose a caption to the corrector
+    }
   }
 
   getState(): LiveState {

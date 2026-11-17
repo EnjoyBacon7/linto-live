@@ -1156,6 +1156,25 @@ describe('Enregistrement', () => {
     expect(await screen.findByText('S’applique au prochain Démarrer.')).toBeTruthy()
   })
 
+  it('proper nouns: the toggle saves properNounsEnabled and shows the list, saved on blur one name per line', async () => {
+    setup({}, setupData({ properNouns: ['LINAGORA'] }))
+    await renderMain()
+    expect(screen.queryByLabelText('Noms propres attendus (un par ligne)')).toBeNull()
+    await userEvent.click(screen.getByLabelText('Corriger les noms propres'))
+    expect(api.setup.save).toHaveBeenCalledWith({ properNounsEnabled: true })
+  })
+
+  it('proper nouns: the list is edited only while the toggle is on', async () => {
+    setup({}, setupData({ properNounsEnabled: true, properNouns: ['LINAGORA'] }))
+    await renderMain()
+    const box = screen.getByLabelText('Noms propres attendus (un par ligne)')
+    expect((box as HTMLTextAreaElement).value).toBe('LINAGORA')
+    await userEvent.type(box, '{enter}  Issy-les-Moulineaux {enter}{enter}')
+    expect(api.setup.save).not.toHaveBeenCalledWith(expect.objectContaining({ properNouns: expect.anything() }))
+    await userEvent.tab()
+    expect(api.setup.save).toHaveBeenCalledWith({ properNouns: ['LINAGORA', 'Issy-les-Moulineaux'] })
+  })
+
   it('REC pill shows while recording', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'on' })) } as never })
     await renderMain()

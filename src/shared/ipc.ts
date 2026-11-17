@@ -208,7 +208,11 @@ export function checkSettingsPatch(raw: unknown): Partial<Settings> {
   if ('backupSource' in raw && !isVideoSource(raw.backupSource)) return bad()
   if ('recordDir' in raw && !absolute(raw.recordDir)) return bad()
   if ('qr' in raw && !isQr(raw.qr)) return bad()
-  for (const k of ['blackIsAbsent', 'recordEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
+  if ('properNouns' in raw) {
+    const v = raw.properNouns
+    if (!Array.isArray(v) || v.length > 1000 || !v.every((n) => typeof n === 'string' && n.length <= 200)) return bad()
+  }
+  for (const k of ['blackIsAbsent', 'recordEnabled', 'properNounsEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
   return raw as Partial<Settings>
 }
 

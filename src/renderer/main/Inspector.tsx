@@ -70,6 +70,29 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
   )
 }
 
+/** EXPERIMENTAL: expected proper nouns, one per line; saved when the field loses focus. */
+function ProperNouns({ value, disabled, onChange }: { value: string[]; disabled: boolean; onChange(v: string[]): void }) {
+  const joined = value.join('\n')
+  const [draft, setDraft] = useState(joined)
+  useEffect(() => setDraft(joined), [joined])
+  const parse = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter(Boolean)
+  return (
+    <>
+    <label className="field">
+      <span className="field-label">Noms propres attendus (un par ligne)</span>
+      <textarea className="field-input proper-nouns" rows={5} value={draft} disabled={disabled} spellCheck={false}
+        placeholder={'Camille Bizeul\nLinagora\nSaint-Brieuc'}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          const next = parse(draft)
+          if (next.join('\n') !== joined) onChange(next)
+        }} />
+    </label>
+    <p className="inspector-note">Expérimental : les mots de LinTO qui se prononcent comme l’un de ces noms sont remplacés.</p>
+    </>
+  )
+}
+
 /** Path cut in the middle (CSS only truncates the end): the tail (folder name) stays visible. */
 function MiddleEllipsis({ text }: { text: string }) {
   const tail = Math.min(18, Math.floor(text.length / 2))
@@ -183,6 +206,14 @@ export function Inspector(p: InspectorProps) {
             </Button>
           </>
         )}
+        <div className="inspector-subgroup">
+          <Check label="Corriger les noms propres" checked={settings?.properNounsEnabled === true} disabled={!settings}
+            onChange={(v) => onChange({ properNounsEnabled: v })} />
+          {settings?.properNounsEnabled === true && (
+            <ProperNouns value={settings.properNouns ?? []} disabled={false}
+              onChange={(v) => onChange({ properNouns: v })} />
+          )}
+        </div>
         <div className="inspector-subgroup">
           <Check label="Afficher le QR code" checked={qr.display} disabled={!settings}
             onChange={(v) => onChange({ qr: { ...qr, display: v } })} />

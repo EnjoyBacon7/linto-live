@@ -4,6 +4,16 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+
+- **Correction des noms propres (expérimental)** : dans les sous-titres, case « Corriger les noms
+  propres » et liste des noms attendus (un par ligne). Les mots de LinTO qui se prononcent comme
+  l'un de ces noms sont remplacés dans la bande, la transcription et l'export (« lina gora » →
+  Linagora, « Ici, les Moulineaux » → Issy-les-Moulineaux), une fois la phrase finalisée. Les
+  traductions, LinTO Studio et la page publique gardent le texte de LinTO.
+
 ## [0.4.0] - 2026-11-16
 
 ### Ajouté
