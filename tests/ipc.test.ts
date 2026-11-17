@@ -15,7 +15,7 @@ describe('IPC constants', () => {
         'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveViewTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe',
-        'liveSetAudioMonitor', 'setupSetBroadcast'
+        'liveSetAudioMonitor', 'liveSetVirtualCam', 'setupSetBroadcast'
       ].sort()
     )
   })
@@ -69,6 +69,7 @@ describe('createLintoLiveApi', () => {
     await api.live.terminate()
     await api.live.showOutputWindow()
     await api.live.setAudioMonitor(true)
+    await api.live.setVirtualCam(true)
     await api.live.getState()
     await api.live.getTranscript()
     await api.live.exportTranscript('srt')
@@ -97,6 +98,7 @@ describe('createLintoLiveApi', () => {
       [IPC.liveTerminate],
       ['live:show-output'],
       ['live:set-audio-monitor', true],
+      ['live:set-virtual-cam', true],
       ['live:get-state'],
       ['live:get-transcript'],
       ['live:export-transcript', 'srt'],

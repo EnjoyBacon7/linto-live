@@ -30,6 +30,8 @@ export interface ObsClient {
 }
 
 const MIN_DB = -100
+/** obs-websocket RequestStatus::OutputRunning. */
+const OUTPUT_RUNNING = 500
 /** obs-websocket RequestStatus::OutputNotRunning. */
 const OUTPUT_NOT_RUNNING = 501
 const TRACKS_NONE = { '1': false, '2': false, '3': false, '4': false, '5': false, '6': false }
@@ -449,6 +451,40 @@ export class ObsController {
     this.client.on('RecordStateChanged', handler)
     return () => {
       this.client.off('RecordStateChanged', handler)
+    }
+  }
+
+  /** Whether this OBS has a virtual camera output (none on Linux without the v4l2loopback module). */
+  async virtualCamAvailable(): Promise<boolean> {
+    try {
+      await this.client.call('GetVirtualCamStatus')
+      return true
+    } catch (e) {
+      if (codeOf(e) === INVALID_RESOURCE_STATE) return false
+      throw e
+    }
+  }
+
+  /** Starts or stops the virtual camera (the program output, captions included; video only). */
+  async setVirtualCam(on: boolean): Promise<void> {
+    try {
+      await this.client.call(on ? 'StartVirtualCam' : 'StopVirtualCam')
+    } catch (e) {
+      // Already in the asked state.
+      if (codeOf(e) === (on ? OUTPUT_RUNNING : OUTPUT_NOT_RUNNING)) return
+      throw e
+    }
+  }
+
+  /** Virtual camera started (true) or stopped (false); the STARTING/STOPPING steps are not reported. */
+  virtualCamState$(cb: (active: boolean) => void): () => void {
+    const handler = (d: { outputState?: string }): void => {
+      if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STARTED') cb(true)
+      else if (d.outputState === 'OBS_WEBSOCKET_OUTPUT_STOPPED') cb(false)
+    }
+    this.client.on('VirtualcamStateChanged', handler)
+    return () => {
+      this.client.off('VirtualcamStateChanged', handler)
     }
   }
 

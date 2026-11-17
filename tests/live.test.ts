@@ -39,7 +39,10 @@ const RECORD_WAIT_MS = 5_100
 function fakeController(log: string[]) {
   let stateCb: ((s: StreamState) => void) | null = null
   let recordCb: ((s: { active: boolean; path?: string }) => void) | null = null
+  let vcamCb: ((active: boolean) => void) | null = null
   const c = {
+    /** false: this OBS has no virtual camera (Linux without v4l2loopback). */
+    vcamAvailable: true,
     autoStop: true,
     /** false: OBS accepts StartRecord but never reports the recording started. */
     recordStarts: true,
@@ -99,9 +102,20 @@ function fakeController(log: string[]) {
         if (recordCb === cb) recordCb = null
       }
     }),
+    virtualCamAvailable: vi.fn(async () => c.vcamAvailable),
+    setVirtualCam: vi.fn(async (on: boolean) => {
+      log.push(`virtualCam:${on}`)
+    }),
+    virtualCamState$: vi.fn((cb: (active: boolean) => void) => {
+      vcamCb = cb
+      return () => {
+        if (vcamCb === cb) vcamCb = null
+      }
+    }),
     resetProjectorState: vi.fn(),
     disconnect: vi.fn(async () => {}),
     ping: vi.fn(async () => {}),
+    emitVirtualCam: (active: boolean) => vcamCb?.(active),
     emitState: (s: StreamState) => stateCb?.(s),
     emitRecord: (s: { active: boolean; path?: string }) => recordCb?.(s)
   }
@@ -111,6 +125,7 @@ type FakeCtl = ReturnType<typeof fakeController>
 
 function setup(opts: {
   sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null; broadcastKey?: string; history?: CaptionEvent[]
+  vcamPreflight?: () => Promise<string | null>
 } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
@@ -201,7 +216,8 @@ function setup(opts: {
   const deps = {
     obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const,
     mkdirp, defaultRecordDir: REC_DIR,
-    nameCorrector: (names: string[]) => createNameCorrector(names, new Set(['macro'])), openBroadcast
+    nameCorrector: (names: string[]) => createNameCorrector(names, new Set(['macro'])), openBroadcast,
+    virtualCam: { unavailableReason: 'Pas de v4l2loopback', preflight: vi.fn(opts.vcamPreflight ?? (async () => null)) }
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
@@ -275,6 +291,67 @@ describe('LiveController', () => {
     t.ctl().setAudioMonitor.mockRejectedValueOnce(new Error('boom'))
     await expect(t.live.setAudioMonitor(true)).rejects.toThrow('Retour audio indisponible : boom')
     expect(t.last().audioMonitor).toBe(false)
+  })
+
+  it('virtual camera toggles on the attached OBS and is never saved', async () => {
+    const t = setup()
+    await t.live.boot()
+    expect(t.last().virtualCamBlocked).toBeUndefined()
+    expect(t.ctl().setVirtualCam).not.toHaveBeenCalled()
+    await t.live.setVirtualCam(true)
+    expect(t.ctl().setVirtualCam).toHaveBeenLastCalledWith(true)
+    expect(t.last().virtualCam).toBe(true)
+    expect(t.settings.update).not.toHaveBeenCalled()
+    await t.live.setVirtualCam(false)
+    expect(t.ctl().setVirtualCam).toHaveBeenLastCalledWith(false)
+    expect(t.last().virtualCam).toBe(false)
+  })
+
+  it('virtual camera is re-applied after an OBS restart', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.setVirtualCam(true)
+    const first = t.ctl()
+    t.obs.emit('restarting', 1)
+    t.obs.emit('ready', { port: 4100, password: 'pw2' })
+    await t.live.settled()
+    expect(t.ctl()).not.toBe(first)
+    expect(t.ctl().setVirtualCam).toHaveBeenCalledWith(true)
+    expect(t.last().virtualCam).toBe(true)
+  })
+
+  it('virtual camera missing from OBS: blocked with the reason, never started', async () => {
+    const t = setup()
+    t.controllerFactory.mockImplementationOnce(async () => {
+      const c = fakeController(t.log)
+      c.vcamAvailable = false
+      t.ctls.push(c)
+      return c
+    })
+    await t.live.boot()
+    expect(t.last().virtualCamBlocked).toBe('Pas de v4l2loopback')
+    await expect(t.live.setVirtualCam(true)).rejects.toThrow('Pas de v4l2loopback')
+    expect(t.ctl().setVirtualCam).not.toHaveBeenCalled()
+    expect(t.last().virtualCam).toBeFalsy()
+  })
+
+  it('virtual camera preflight refusal is reported without asking OBS', async () => {
+    const t = setup({ vcamPreflight: async () => 'Pas autorisée' })
+    await t.live.boot()
+    await expect(t.live.setVirtualCam(true)).rejects.toThrow('Pas autorisée')
+    expect(t.ctl().setVirtualCam).not.toHaveBeenCalled()
+    expect(t.last().virtualCam).toBeFalsy()
+  })
+
+  it('virtual camera OBS refuses is reported and shown off; OBS stopping it shows it off', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.ctl().setVirtualCam.mockRejectedValueOnce(new Error('boom'))
+    await expect(t.live.setVirtualCam(true)).rejects.toThrow('Caméra virtuelle indisponible : boom')
+    expect(t.last().virtualCam).toBe(false)
+    await t.live.setVirtualCam(true)
+    t.ctl().emitVirtualCam(false)
+    expect(t.last().virtualCam).toBe(false)
   })
 
   it('start reused session streams and projects', async () => {

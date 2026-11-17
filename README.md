@@ -168,6 +168,18 @@ l'application pendant un direct revient à cliquer sur Arrêter.
   cocher l'un décoche l'autre. Comme l'enregistrement, le réglage s'applique au prochain Démarrer
   et une coupure de la diffusion n'interrompt pas le direct (pas de reconnexion automatique : elle
   reprend au Démarrer suivant).
+- **Caméra virtuelle** (section Enregistrement et diffusion) : la sortie (image et sous-titres
+  incrustés, sans le son) apparaît comme une webcam « OBS Virtual Camera » dans les autres
+  applications (Zoom, Teams, Visio, navigateur…). Indépendante de l'enregistrement et de la
+  diffusion, elle s'active immédiatement, direct ou non, et n'est pas mémorisée d'un lancement à
+  l'autre.
+  - macOS : à la première utilisation, autoriser l'extension caméra d'OBS dans Réglages Système →
+    Général → Ouverture et extensions → Extensions de caméra.
+  - Linux : nécessite le module `v4l2loopback` (paquet `v4l2loopback-dkms`), chargé à la demande
+    (mot de passe administrateur). Avec le Flatpak, le module doit être chargé sur le système avant
+    de lancer LinTO Live :
+    `sudo modprobe v4l2loopback exclusive_caps=1 card_label="OBS Virtual Camera"`. Sans lui,
+    l'option est grisée et son infobulle indique quoi faire.
 
 ### Droits LinTO nécessaires
 

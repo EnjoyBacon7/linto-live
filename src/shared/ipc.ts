@@ -38,6 +38,10 @@ export interface LiveState {
   recordingTarget?: 'file' | 'broadcast'
   /** Audio feedback: the micro, as sent to LinTO and recorded, plays on the system output (absent = off). */
   audioMonitor?: boolean
+  /** OBS's output offered to the system as a camera (absent = off). */
+  virtualCam?: boolean
+  /** Why this OBS has no virtual camera at all (absent = it has one, or OBS is not up yet). */
+  virtualCamBlocked?: string
   warning?: string
 }
 
@@ -100,6 +104,8 @@ export interface LintoLiveApi {
     showOutputWindow(): Promise<void>
     /** Audio feedback on/off: hear the micro as OBS sends it to LinTO and records it (not saved). */
     setAudioMonitor(on: boolean): Promise<void>
+    /** Virtual camera on/off: other apps see the output (captions included) as a camera (not saved). */
+    setVirtualCam(on: boolean): Promise<void>
     /**
      * Clears the on-air session's transcript on LinTO (« Effacer la transcription », as in LinTO Studio): Studio,
      * the subtitle band and the transcript here all empty.
@@ -160,6 +166,7 @@ export const IPC = {
   liveExportTranscript: 'live:export-transcript',
   liveSetSubtitleLanguage: 'live:set-subtitle-language',
   liveSetAudioMonitor: 'live:set-audio-monitor',
+  liveSetVirtualCam: 'live:set-virtual-cam',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
@@ -278,6 +285,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput),
       setAudioMonitor: (on) => call(IPC.liveSetAudioMonitor, on),
+      setVirtualCam: (on) => call(IPC.liveSetVirtualCam, on),
       clearTranscript: () => call(IPC.liveClearTranscript),
       getState: () => call(IPC.liveGetState),
       getTranscript: () => call(IPC.liveGetTranscript),

@@ -24,6 +24,7 @@ import { ObsController } from './obs/controller'
 import { lumaOfBgra } from './obs/fallback'
 import { obsExecutable } from './obs/locate'
 import { ensureObsRuntime } from './obs/runtime'
+import { virtualCamPreflight, virtualCamUnavailableReason } from './obs/virtualCam'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
 import { asLintoAction } from './linto/accessMessages'
@@ -134,6 +135,7 @@ function main(): void {
   void rm(join(app.getPath('userData'), ...LEGACY_SSO_DIR), { recursive: true, force: true }).catch(() => {})
   serveRenderer()
   const platform = process.platform
+  const flatpak = process.env.FLATPAK_ID !== undefined
   const paths = appPaths(app.getPath('userData'), platform)
   // Linux without a usable keyring (no gnome-keyring / KWallet, or none unlocked): safeStorage falls
   // back to 'basic_text' and refuses to encrypt. Allow Chromium's fixed-key obfuscation so encryptString
@@ -229,7 +231,11 @@ function main(): void {
     },
     defaultRecordDir: join(app.getPath('videos'), 'LinTO Live'),
     nameCorrector: (names) => createNameCorrector(names, commonWords()),
-    openBroadcast
+    openBroadcast,
+    virtualCam: {
+      unavailableReason: virtualCamUnavailableReason(platform, flatpak),
+      preflight: () => virtualCamPreflight(platform, flatpak)
+    }
   })
 
   // ---- Native shell: app menu, menu-bar icon, notifications ----
@@ -485,6 +491,10 @@ function main(): void {
     if (typeof on !== 'boolean') throw new Error('Réglage invalide.')
     return live.setAudioMonitor(on)
   })
+  ipcMain.handle(IPC.liveSetVirtualCam, (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw new Error('Réglage invalide.')
+    return live.setVirtualCam(on)
+  })
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
@@ -543,7 +553,7 @@ function main(): void {
     const { response } = await show({
       type: 'warning',
       message: 'Supprimer LinTO Live et toutes ses données ?',
-      detail: uninstallConfirmDetail(plan, platform, process.env.FLATPAK_ID !== undefined),
+      detail: uninstallConfirmDetail(plan, platform, flatpak),
       buttons: ['Annuler', 'Désinstaller'],
       defaultId: 0,
       cancelId: 0

@@ -4,6 +4,15 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+
+- **Caméra virtuelle** : la sortie de LinTO Live (image et sous-titres, sans le son) est proposée
+  comme webcam aux autres applications. Grisée, avec une infobulle explicative, quand le système
+  n'en dispose pas (Linux sans `v4l2loopback`, notamment le Flatpak sans le module chargé sur le
+  système).
+
 ## [0.5.0] - 2026-11-17
 
 ### Ajouté

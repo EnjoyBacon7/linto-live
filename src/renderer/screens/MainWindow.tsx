@@ -223,6 +223,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const setAudioMonitor = (on: boolean): void => {
     window.lintoLive.live.setAudioMonitor(on).catch((e) => setError(ipcErrorMessage(e)))
   }
+  const setVirtualCam = (on: boolean): void => {
+    window.lintoLive.live.setVirtualCam(on).catch((e) => setError(ipcErrorMessage(e)))
+  }
   const showOutput = (): void => {
     window.lintoLive.live.showOutputWindow().catch((e) => setError(ipcErrorMessage(e)))
   }
@@ -438,6 +441,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
             onAir={onAir} onClearTranscript={askClearTranscript}
             audioMonitor={state.audioMonitor === true} audioMonitorAvailable={state.obs === 'running'}
             onAudioMonitorChange={setAudioMonitor}
+            virtualCam={state.virtualCam === true} virtualCamAvailable={state.obs === 'running'}
+            {...(state.virtualCamBlocked ? { virtualCamBlocked: state.virtualCamBlocked } : {})}
+            onVirtualCamChange={setVirtualCam}
             {...(state.videoOnAir ? { videoOnAir: state.videoOnAir } : {})}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}

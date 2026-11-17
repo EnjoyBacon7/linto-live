@@ -124,6 +124,7 @@ export type LiveObsController = Pick<
   | 'setAudioDevice' | 'setAudioMonitor' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
   | 'startRecord' | 'startBroadcast' | 'stopRecord' | 'recordState$'
+  | 'virtualCamAvailable' | 'setVirtualCam' | 'virtualCamState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession' | 'clearSession'>
@@ -161,6 +162,11 @@ export interface LiveDeps {
    * address OBS sends the show to (broadcast/relay.ts).
    */
   openBroadcast: (t: PublishTarget) => Promise<BroadcastSession>
+  /**
+   * Virtual camera: why it is missing when OBS has none, and the platform check run before starting it
+   * (null = go; else why not). Absent: no check, and a generic reason.
+   */
+  virtualCam?: { unavailableReason: string; preflight?: () => Promise<string | null> }
 }
 
 /** Font size actually used on the canvas: the saved one if valid, else the default. */
@@ -276,6 +282,8 @@ export class LiveController extends EventEmitter {
   private recordAnnouncePending = false
   /** Audio feedback asked by the user (not saved: the app always starts without it, see setAudioMonitor). */
   private audioMonitor = false
+  /** Virtual camera asked by the user (not saved; re-applied after an OBS restart). */
+  private virtualCam = false
   /** Waiting for OBS's « stopped » recording event (StopRecord may answer before the output has stopped). */
   private recordStopWaiters: (() => void)[] = []
 
@@ -629,6 +637,47 @@ export class LiveController extends EventEmitter {
     })
   }
 
+  /**
+   * Virtual camera: OBS's output offered to the system as a camera (video only, captions included). Kept for
+   * the app run (re-applied after an OBS restart), not saved: other apps would see a camera appear on its own.
+   */
+  setVirtualCam(on: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      const c = this.ctl
+      if (on) {
+        if (this.state.virtualCamBlocked) throw new Error(this.state.virtualCamBlocked)
+        if (!c) throw new Error(MSG_OBS_NOT_READY)
+        const why = await this.d.virtualCam?.preflight?.()
+        if (why) throw new Error(why)
+      }
+      this.virtualCam = on
+      this.setState({ virtualCam: on })
+      if (!c || c !== this.ctl) return
+      try {
+        await c.setVirtualCam(on)
+      } catch (e) {
+        if (c !== this.ctl) return // OBS restarted meanwhile: attach re-applies it
+        this.virtualCam = false
+        this.setState({ virtualCam: false })
+        throw new Error(`Caméra virtuelle indisponible : ${errMsg(e)}`, { cause: e })
+      }
+    })
+  }
+
+  /** On a new OBS run: tells whether it has a virtual camera and restarts it when the user had it on. */
+  private async attachVirtualCam(c: LiveObsController): Promise<void> {
+    const available = await c.virtualCamAvailable().catch(() => false)
+    const blocked = available ? undefined : (this.d.virtualCam?.unavailableReason ?? 'Caméra virtuelle indisponible.')
+    if (!this.virtualCam) {
+      this.setState({ virtualCamBlocked: blocked })
+      return
+    }
+    const ok = available && !(await this.d.virtualCam?.preflight?.().catch(() => null)) &&
+      await c.setVirtualCam(true).then(() => true, () => false)
+    if (!ok && c === this.ctl) this.virtualCam = false
+    this.setState({ virtualCamBlocked: blocked, virtualCam: this.virtualCam })
+  }
+
   /** Device lists for the setup screen (empty while OBS is not connected). */
   async listDevices(): Promise<{ videoDevices: DeviceItem[]; audioDevices: DeviceItem[] }> {
     const c = this.ctl
@@ -788,6 +837,11 @@ export class LiveController extends EventEmitter {
     )
     this.unsubs.push(ready.streamState$((s) => this.onStreamState(ready, s)))
     this.unsubs.push(ready.recordState$((s) => this.onRecordState(ready, s)))
+    this.unsubs.push(ready.virtualCamState$((active) => {
+      if (ready !== this.ctl || active === this.virtualCam) return
+      this.virtualCam = active
+      this.setState({ virtualCam: active })
+    }))
     this.ctl = ready
     this.attachedConn = conn
     this.startWatchdog(ready)
@@ -806,6 +860,7 @@ export class LiveController extends EventEmitter {
       }
     })
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
+    await this.attachVirtualCam(ready)
     const w0 = this.state.warning
     const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)
       || w0?.startsWith(MSG_PRIMARY_FAILED)
