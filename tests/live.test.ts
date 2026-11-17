@@ -131,7 +131,8 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
     createSession: vi.fn(async () => session({ id: 'new' })),
     terminateSession: vi.fn(async () => {
       log.push('terminateSession')
-    })
+    }),
+    clearSession: vi.fn(async () => {})
   }
   const captions = Object.assign(new EventEmitter(), {
     open: vi.fn((sid: string, ch: number) => {
@@ -249,7 +250,7 @@ describe('LiveController', () => {
     await t.live.boot()
     const r = await t.live.start('  Conf ')
     expect(r).toEqual({ ok: true, reused: true, canStream: true })
-    expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
+    expect(t.captions.open).toHaveBeenCalledWith('s1', 7, 'org1')
     expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
     expect(t.ctl().startStream).toHaveBeenCalledWith({
       streamServiceType: 'rtmp_custom',
@@ -315,7 +316,7 @@ describe('LiveController', () => {
     const r = await t.live.start('Conf')
     expect(r).toEqual({ ok: true, reused: true, canStream: false })
     expect(t.ctl().startStream).not.toHaveBeenCalled()
-    expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
+    expect(t.captions.open).toHaveBeenCalledWith('s1', 7, 'org1')
     expect(t.last()).toMatchObject({ phase: 'live', stream: 'unavailable', warning: MSG_NO_STREAM })
     expect(MSG_NO_STREAM).toMatch(/propriétaire de la session et aux gestionnaires de réunion/)
   })
@@ -407,7 +408,7 @@ describe('LiveController', () => {
     t.captions.emit('authError')
     t.live.resumeCaptions()
     expect(t.captions.open).toHaveBeenCalledTimes(2)
-    expect(t.captions.open).toHaveBeenLastCalledWith('s1', 7)
+    expect(t.captions.open).toHaveBeenLastCalledWith('s1', 7, 'org1')
   })
 
   it('unauthorized during start when not live clears token and asks for login', async () => {
@@ -867,7 +868,7 @@ describe('LiveController final fixes', () => {
       expect(t.ctl().setSource).toHaveBeenCalledWith('primary', { kind: 'none' })
       await t.live.start('Conf')
       expect(t.ctl().startStream).toHaveBeenCalled()
-      expect(t.captions.open).toHaveBeenCalledWith('s1', 7)
+      expect(t.captions.open).toHaveBeenCalledWith('s1', 7, 'org1')
       expect(t.ctl().openOutputWindow).not.toHaveBeenCalled()
       expect(t.last()).toMatchObject({ phase: 'live', output: 'off' })
       await t.live.showOutputWindow() // still available on demand (menu)

@@ -209,6 +209,14 @@ export class LintoApi {
   }
 
   /**
+   * Empties the session's transcript, like Studio's « Effacer la transcription »: LinTO then tells every viewer
+   * (Studio, the public page, LinTO Live's caption socket) to clear it (`orga_<org>_session_cleared`).
+   */
+  async clearSession(orgId: string, id: string): Promise<void> {
+    await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}/clear`, { method: 'PUT' })
+  }
+
+  /**
    * Stops the session and saves it, like Studio's « Arrêter et enregistrer »: the server stops it (waiting for the
    * last captions), stores its captions and translations as a conversation, then deletes the session.
    */

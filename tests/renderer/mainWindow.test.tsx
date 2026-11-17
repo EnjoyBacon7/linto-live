@@ -1069,14 +1069,29 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(screen.queryByRole('checkbox', { name: 'Afficher le filigrane' })).toBeNull()
   })
 
-  it('« Effacer les sous-titres » only on air', async () => {
+  it('« Effacer la transcription… » only on air, after confirming', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(IDLE) } })
     await renderMain()
-    expect(btn('Effacer les sous-titres').disabled).toBe(true)
+    expect(btn('Effacer la transcription…').disabled).toBe(true)
     act(() => emit('live-state', live()))
-    await waitFor(() => expect(btn('Effacer les sous-titres').disabled).toBe(false))
-    await userEvent.click(btn('Effacer les sous-titres'))
-    expect(fn(api.live.clearSubtitles)).toHaveBeenCalled()
+    await waitFor(() => expect(btn('Effacer la transcription…').disabled).toBe(false))
+    await userEvent.click(btn('Effacer la transcription…'))
+    expect(screen.getByText('Effacer la transcription de « Conférence » ? Elle disparaît aussi des sous-titres et de LinTO Studio.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    expect(fn(api.live.clearTranscript)).not.toHaveBeenCalled()
+    await userEvent.click(btn('Effacer la transcription…'))
+    await userEvent.click(screen.getByRole('button', { name: 'Effacer' }))
+    expect(fn(api.live.clearTranscript)).toHaveBeenCalled()
+  })
+
+  it('« Effacer la transcription… » shows LinTO\'s refusal', async () => {
+    setup({ live: { clearTranscript: vi.fn().mockRejectedValue(new Error('Refusé par LinTO.')) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await waitFor(() => expect(btn('Effacer la transcription…').disabled).toBe(false))
+    await userEvent.click(btn('Effacer la transcription…'))
+    await userEvent.click(screen.getByRole('button', { name: 'Effacer' }))
+    expect(await screen.findByText('Refusé par LinTO.')).toBeTruthy()
   })
 })
 
@@ -1101,6 +1116,9 @@ describe('organisation rights', () => {
     const term = screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement
     expect(term.disabled).toBe(true)
     expect(term.title).toBe(REASON)
+    const clear = screen.getByRole('button', { name: 'Effacer la transcription…' }) as HTMLButtonElement
+    expect(clear.disabled).toBe(true)
+    expect(clear.title).toBe(REASON)
     act(() => emit('command', 'terminate'))
     expect(screen.queryByRole('dialog')).toBeNull()
   })

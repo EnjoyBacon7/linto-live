@@ -17,9 +17,12 @@ export interface InspectorProps {
   /** Profile line: the pending session's profile name, « Défini par la session », or null (nothing selected). */
   profile: string | null
   onChange(patch: Partial<Settings>): void
-  /** A show is on air (« Effacer les sous-titres » only means something then). */
+  /** A show is on air (« Effacer la transcription » only means something then). */
   onAir?: boolean
-  onClearSubtitles?(): void
+  /** « Effacer la transcription »: clears the on-air session's transcript on LinTO (as LinTO Studio's button). */
+  onClearTranscript?(): void
+  /** Why the transcript cannot be cleared here (the user may not manage sessions); absent = it can. */
+  clearBlocked?: string
   watermark?: WatermarkTarget
   onWatermarkChange?(patch: Partial<Watermark>): void
   onWatermarkSettings?(): void
@@ -191,8 +194,9 @@ export function Inspector(p: InspectorProps) {
                 )}
               </div>
             )}
-            <Button className="inspector-control" disabled={!p.onAir} onClick={() => p.onClearSubtitles?.()}>
-              Effacer les sous-titres
+            <Button className="inspector-control" disabled={!p.onAir || p.clearBlocked !== undefined}
+              title={p.clearBlocked} onClick={() => p.onClearTranscript?.()}>
+              Effacer la transcription…
             </Button>
           </>
         )}

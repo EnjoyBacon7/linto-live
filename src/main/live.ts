@@ -114,11 +114,11 @@ export type LiveObsController = Pick<
   | 'startRecord' | 'stopRecord' | 'recordState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
 >
-export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession'>
+export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession' | 'clearSession'>
 export interface LiveCaptions {
   open: CaptionStream['open']
   close: CaptionStream['close']
-  on(event: 'status' | 'partial' | 'final' | 'translation' | 'authError', listener: Listener): unknown
+  on(event: 'status' | 'partial' | 'final' | 'translation' | 'authError' | 'cleared', listener: Listener): unknown
 }
 export type LiveOverlay = Pick<OverlayServer, 'start' | 'push' | 'stop'>
 export type LiveSettings = Pick<SettingsStore, 'get' | 'update' | 'setToken'>
@@ -296,6 +296,8 @@ export class LiveController extends EventEmitter {
       this.pushCaption(routeTranslation(this.subtitleLanguage(), this.current?.channel.languages, e))
     })
     d.captions.on('authError', () => void this.captionsRefused())
+    // Cleared on LinTO (from LinTO Studio or by clearTranscript): the band and the transcript empty, as in Studio.
+    d.captions.on('cleared', () => this.transcriptCleared())
   }
 
   getState(): LiveState {
@@ -424,7 +426,7 @@ export class LiveController extends EventEmitter {
     const cur = this.current
     if (!cur || this.state.phase !== 'live') return
     this.captionsAuthLost = false
-    this.d.captions.open(cur.session.id, cur.channel.id)
+    this.d.captions.open(cur.session.id, cur.channel.id, cur.orgId)
   }
 
   /**
@@ -447,9 +449,32 @@ export class LiveController extends EventEmitter {
     this.emit('auth-required')
   }
 
-  /** « Effacer les sous-titres »: empties the band (it comes back with the next words); the transcript stays. */
-  clearSubtitles(): void {
+  /**
+   * « Effacer la transcription »: clears the on-air session's transcript on LinTO, like LinTO Studio's button.
+   * LinTO tells every viewer (Studio included) to empty it; the band and the transcript here empty at once,
+   * without waiting for that notice (it may not come, e.g. an older LinTO).
+   */
+  async clearTranscript(): Promise<void> {
+    const cur = this.current
+    if (!cur) return
+    try {
+      await this.d.api.clearSession(cur.orgId, cur.session.id)
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        this.reportUnauthorized()
+        throw new Error(MSG_AUTH)
+      }
+      throw new Error(lintoErrorMessage(e, 'clear') ?? errMsg(e), { cause: e })
+    }
+    if (cur === this.current) this.transcriptCleared()
+  }
+
+  /** The on-air session's transcript was cleared on LinTO: empties the band and the transcript (the show goes on). */
+  private transcriptCleared(): void {
+    if (!this.current) return
     this.d.overlay.push({ type: 'reset' })
+    const { sessionName, startedAt } = this.transcript.snapshot()
+    this.sendTranscript(this.transcript.reset(sessionName, startedAt))
   }
 
   /** Saves the language shown in the band for a session; if it is on air, the band empties and switches now. */
@@ -865,7 +890,7 @@ export class LiveController extends EventEmitter {
         this.captionsRetryTimer = setTimeout(() => {
           this.captionsRetryTimer = null
           if (cur !== this.current || this.state.phase !== 'live' || this.captionsAuthLost) return
-          this.d.captions.open(cur.session.id, cur.channel.id)
+          this.d.captions.open(cur.session.id, cur.channel.id, cur.orgId)
         }, CAPTIONS_REFUSED_RETRY_MS)
     }
   }
@@ -974,7 +999,7 @@ export class LiveController extends EventEmitter {
         startedAt
       })
       this.sendTranscript(this.transcript.reset(res.session.name, startedAt))
-      this.d.captions.open(res.session.id, res.channel.id)
+      this.d.captions.open(res.session.id, res.channel.id, cur.orgId)
 
       const c = this.ctl
       if (c) {
