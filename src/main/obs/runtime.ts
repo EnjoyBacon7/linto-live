@@ -3,6 +3,18 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs
 import { join } from 'node:path'
 
 /**
+ * Where the OBS.app copy goes first: macOS activates a system extension (OBS's virtual camera) only from
+ * an app under /Applications, so a copy elsewhere can never start the virtual camera. A dot folder keeps
+ * it out of Finder, Launchpad and Spotlight. Not a "*.app" name (see below).
+ */
+export const MAC_OBS_RUNTIME_DIR = '/Applications/.LinTO Live'
+
+/** True when this OBS executable may activate OBS's camera extension (its app sits under /Applications). */
+export function inApplicationsFolder(exe: string): boolean {
+  return exe.startsWith('/Applications/')
+}
+
+/**
  * macOS only. The official OBS.app cannot run from inside another .app bundle: its CEF (browser
  * source) aborts in cef_initialize because Chromium takes the first "*.app" path component as the
  * main bundle. So the packaged app runs a copy of its embedded OBS.app placed under userData
@@ -35,4 +47,26 @@ export function ensureObsRuntime(o: { bundledApp: string; runtimeDir: string }):
   rmSync(target, { recursive: true, force: true })
   renameSync(tmp, target)
   return exe
+}
+
+/**
+ * Places the runtime copy in the first writable directory (MAC_OBS_RUNTIME_DIR, then userData) and
+ * removes copies left in the later ones (an older version placed it under userData).
+ */
+export function placeObsRuntime(
+  o: { bundledApp: string; runtimeDirs: string[] },
+  log: (msg: string, e: unknown) => void = () => {}
+): string {
+  let lastError: unknown
+  for (const [i, runtimeDir] of o.runtimeDirs.entries()) {
+    try {
+      const exe = ensureObsRuntime({ bundledApp: o.bundledApp, runtimeDir })
+      for (const stale of o.runtimeDirs.slice(i + 1)) rmSync(join(stale, 'OBS.app'), { recursive: true, force: true })
+      return exe
+    } catch (e) {
+      lastError = e
+      log(`OBS runtime copy failed in ${runtimeDir}`, e)
+    }
+  }
+  throw lastError
 }

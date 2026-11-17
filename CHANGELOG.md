@@ -11,7 +11,9 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - **Caméra virtuelle** : la sortie de LinTO Live (image et sous-titres, sans le son) est proposée
   comme webcam aux autres applications. Grisée, avec une infobulle explicative, quand le système
   n'en dispose pas (Linux sans `v4l2loopback`, notamment le Flatpak sans le module chargé sur le
-  système).
+  système). Sur macOS, qui n'autorise l'extension caméra d'OBS que depuis le dossier Applications,
+  la copie d'OBS utilisée par LinTO Live est désormais placée dans `/Applications/.LinTO Live`
+  (dossier masqué, supprimé à la désinstallation).
 
 ## [0.5.0] - 2026-11-17
 

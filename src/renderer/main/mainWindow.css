@@ -39,6 +39,9 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Containing block for .sr-only (position: absolute) children, so they scroll with the list
+     instead of extending the page and making the whole window scroll. */
+  position: relative;
   padding: 0 10px 10px;
 }
 
@@ -528,6 +531,8 @@
 .inspector {
   min-height: 0;
   overflow: auto;
+  /* See .sidebar-scroll: keeps .sr-only children inside the scroll box. */
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: 4px 0 16px;

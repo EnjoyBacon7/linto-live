@@ -1,4 +1,5 @@
 import { posix } from 'node:path'
+import { MAC_OBS_RUNTIME_DIR } from './obs/runtime'
 
 export interface UninstallInput {
   platform: NodeJS.Platform
@@ -100,6 +101,8 @@ export function uninstallTargets(o: UninstallInput): UninstallPlan {
     }
   }
   remove.forEach((p) => assertSafe(p, home, 'remove'))
+  // The only path outside home: a fixed constant, the OBS copy placed under /Applications (obs/runtime.ts).
+  if (o.platform === 'darwin') remove.push(MAC_OBS_RUNTIME_DIR)
   return { remove, trash }
 }
 

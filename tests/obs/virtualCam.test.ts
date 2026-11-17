@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  MAC_CAMERA_EXTENSION, MSG_VCAM_MAC_NOT_ALLOWED, MSG_VCAM_MODPROBE_FAILED, macExtensionActive, v4l2loopbackLoaded,
+  MAC_CAMERA_EXTENSION, MSG_VCAM_MAC_LOCATION, MSG_VCAM_MAC_NOT_ALLOWED, MSG_VCAM_MODPROBE_FAILED, macExtensionActive, v4l2loopbackLoaded,
   virtualCamPreflight, virtualCamUnavailableReason, type PreflightOps
 } from '../../src/main/obs/virtualCam'
 
@@ -28,6 +28,14 @@ describe('virtual camera checks', () => {
     expect(await virtualCamPreflight('darwin', false, ops({ run: vi.fn(async () => LIST_ACTIVE) }))).toBeNull()
     expect(await virtualCamPreflight('darwin', false, ops({ run: vi.fn(async () => LIST_WAITING) }))).toBe(MSG_VCAM_MAC_NOT_ALLOWED)
     expect(await virtualCamPreflight('darwin', false, ops({ run: vi.fn(async () => { throw new Error('x') }) }))).toBeNull()
+  })
+
+  it('macOS: refuses when OBS does not run from /Applications (macOS would refuse its camera extension)', async () => {
+    const active = ops({ run: vi.fn(async () => LIST_ACTIVE) })
+    const outside = '/Users/u/Library/Application Support/LinTO Live/obs-runtime/OBS.app/Contents/MacOS/OBS'
+    expect(await virtualCamPreflight('darwin', false, active, outside)).toBe(MSG_VCAM_MAC_LOCATION)
+    expect(active.run).not.toHaveBeenCalled()
+    expect(await virtualCamPreflight('darwin', false, active, '/Applications/.LinTO Live/OBS.app/Contents/MacOS/OBS')).toBeNull()
   })
 
   it('Linux: nothing to do when v4l2loopback is loaded', async () => {

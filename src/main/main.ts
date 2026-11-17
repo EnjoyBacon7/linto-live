@@ -23,7 +23,7 @@ import { ObsProcess } from './obs/process'
 import { ObsController } from './obs/controller'
 import { lumaOfBgra } from './obs/fallback'
 import { obsExecutable } from './obs/locate'
-import { ensureObsRuntime } from './obs/runtime'
+import { MAC_OBS_RUNTIME_DIR, placeObsRuntime } from './obs/runtime'
 import { virtualCamPreflight, virtualCamUnavailableReason } from './obs/virtualCam'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
@@ -190,12 +190,13 @@ function main(): void {
   const overlay = new OverlayServer({ pageDir: join(app.getAppPath(), 'out/main/overlay-page') })
   let obsExe = obsExecutable({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, platform, env: process.env })
   if (app.isPackaged && platform === 'darwin') {
-    // OBS's CEF cannot start from inside LinTO Live.app: run an APFS clone under userData (see runtime.ts).
+    // OBS's CEF cannot start from inside LinTO Live.app: run an APFS clone, under /Applications so its
+    // virtual camera can be activated, else under userData (see runtime.ts).
     try {
-      obsExe = ensureObsRuntime({
+      obsExe = placeObsRuntime({
         bundledApp: join(process.resourcesPath, 'obs', 'OBS.app'),
-        runtimeDir: join(paths.userData, 'obs-runtime')
-      })
+        runtimeDirs: [MAC_OBS_RUNTIME_DIR, join(paths.userData, 'obs-runtime')]
+      }, (msg, e) => console.warn(msg, e))
     } catch (e) {
       console.error('OBS runtime copy failed, using the embedded OBS.app', e)
     }
@@ -237,7 +238,7 @@ function main(): void {
     openBroadcast,
     virtualCam: {
       unavailableReason: virtualCamUnavailableReason(platform, flatpak),
-      preflight: () => virtualCamPreflight(platform, flatpak)
+      preflight: () => virtualCamPreflight(platform, flatpak, undefined, obsExe)
     }
   })
 
