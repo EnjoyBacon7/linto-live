@@ -1543,6 +1543,26 @@ describe('OBS exit during a show', () => {
   })
 })
 
+describe('stream retry backoff across shows', () => {
+  it('starts the next show with the first (short) retry delay', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.startStream.mockRejectedValue(new Error('refused'))
+    for (let i = 0; i < 4; i++) {
+      c.emitState('stopped')
+      await vi.advanceTimersByTimeAsync(31_000)
+    }
+    await t.live.stop()
+    await t.live.start('Conf')
+    const afterStart = c.startStream.mock.calls.length
+    c.emitState('stopped')
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(c.startStream.mock.calls.length - afterStart).toBe(1)
+  })
+})
+
 describe('backup source', () => {
   const BACKUP = { kind: 'image', path: '/secours.png' } as const
 

@@ -591,6 +591,7 @@ export class LiveController extends EventEmitter {
     if (this.state.phase === 'live' && this.current?.service && (this.state.stream === 'active' || this.state.stream === 'error')) {
       this.setState({ stream: 'starting' })
     }
+    this.retryAttempt = 0
     this.clearRetry()
     this.stopPreview()
     this.flushStopWaiters()
@@ -888,6 +889,7 @@ export class LiveController extends EventEmitter {
       this.setState({ phase: 'starting' })
 
       // Switching from a previous show: the old stream must be fully stopped before retargeting.
+      this.retryAttempt = 0
       this.clearRetry()
       this.clearCaptionsTimer()
       this.captionsAuthLost = false
@@ -944,6 +946,7 @@ export class LiveController extends EventEmitter {
   private async doStop(streamWaitMs = STOP_WAIT_MS, end: Partial<LiveState> = {}): Promise<void> {
     if (this.state.phase === 'idle' && !this.current) return
     this.setState({ phase: 'stopping' })
+    this.retryAttempt = 0
     this.clearRetry()
     this.clearCaptionsTimer()
     this.authLost = false
