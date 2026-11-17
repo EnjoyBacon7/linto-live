@@ -17,7 +17,7 @@ export interface ToolbarProps {
   startedAt?: number
   busy: Busy
   canStart: boolean
-  /** Why Démarrer is disabled (tooltip). */
+  /** Why Démarrer is unavailable: the button stays focusable and announces it (aria-disabled). */
   startHint?: string
   onStart(): void
   onStop(): void
@@ -71,16 +71,17 @@ export function Toolbar(p: ToolbarProps) {
               {p.busy === 'stop' ? 'Arrêt…' : 'Arrêter'}
             </Button>
             {outputButton}
-            <Button size="large" variant="destructive" disabled={p.busy !== null || p.terminateBlocked !== undefined}
-              title={p.terminateBlocked} onClick={p.onTerminate}>
+            <Button size="large" variant="destructive" disabled={p.busy !== null}
+              blockedReason={p.terminateBlocked} onClick={p.onTerminate}>
               {p.busy === 'terminate' ? 'Fin de session…' : 'Terminer…'}
             </Button>
           </>
         ) : (
           <>
             {outputButton}
-            <Button size="large" variant="primary" icon={<PlayIcon size={12} />} disabled={!p.canStart || p.busy !== null}
-              title={p.canStart ? undefined : p.startHint} onClick={p.onStart}>
+            <Button size="large" variant="primary" icon={<PlayIcon size={12} />}
+              disabled={p.busy !== null || (!p.canStart && p.startHint === undefined)}
+              blockedReason={p.canStart ? undefined : p.startHint} onClick={p.onStart}>
               {p.busy === 'start' ? 'Démarrage…' : 'Démarrer'}
             </Button>
           </>

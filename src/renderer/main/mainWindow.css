@@ -83,7 +83,7 @@
 }
 
 .sidebar-row:focus-visible {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: inset 0 0 0 2px var(--focus-color);
 }
 
 .sidebar-row-name {
@@ -108,8 +108,12 @@
   color: var(--text-2);
 }
 
-.sidebar-new:active {
+.sidebar-new:active:not([aria-disabled='true']) {
   background: var(--bg-hover);
+}
+
+.sidebar-new[aria-disabled='true'] {
+  opacity: 0.45;
 }
 
 .sidebar-empty {
@@ -220,7 +224,7 @@
 
 .menu-item:hover:not(:disabled),
 .menu-item:focus-visible {
-  background: var(--accent);
+  background: var(--accent-strong);
   color: var(--accent-text);
   box-shadow: none;
 }

@@ -56,6 +56,11 @@ async function renderMain() {
 const sessionName = (name: string) => (n: string) => n === name || n.startsWith(name + ', ')
 const row = (name: string) => screen.getByRole('option', { name: sessionName(name) })
 const startBtn = () => screen.getByRole('button', { name: 'Démarrer' }) as HTMLButtonElement
+/** Unavailable either transiently (disabled) or for a stated reason (aria-disabled, still focusable). */
+const unavailable = (b: HTMLButtonElement): boolean => b.disabled || b.getAttribute('aria-disabled') === 'true'
+/** The accessible description given by aria-describedby. */
+const description = (el: Element): string =>
+  (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim()
 const toolbar = () => screen.getByRole('toolbar')
 
 beforeEach(() => { vi.useRealTimers() })
@@ -141,12 +146,27 @@ describe('Démarrer', () => {
   it('is disabled without a session or a micro; the camera is optional', async () => {
     setup({}, setupData({ primarySource: undefined, audioDeviceId: undefined }))
     await renderMain()
-    expect(startBtn().disabled).toBe(true)
+    expect(unavailable(startBtn())).toBe(true)
     await userEvent.click(row('Conférence'))
-    expect(startBtn().disabled).toBe(true)
+    expect(unavailable(startBtn())).toBe(true)
     expect((screen.getByLabelText('Source principale') as HTMLSelectElement).value).toBe('none') // « Aucune »
     await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
-    expect(startBtn().disabled).toBe(false)
+    expect(unavailable(startBtn())).toBe(false)
+  })
+
+  it('when blocked, stays focusable, announces why, and ignores clicks and Enter (A-011)', async () => {
+    setup({}, setupData({ audioDeviceId: undefined }))
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    const b = startBtn()
+    expect(b.disabled).toBe(false)
+    expect(b.getAttribute('aria-disabled')).toBe('true')
+    expect(description(b)).toBe('Choisis un micro.')
+    b.focus()
+    expect(document.activeElement).toBe(b)
+    await userEvent.keyboard('{Enter}')
+    await userEvent.click(b)
+    expect(api.live.start).not.toHaveBeenCalled()
   })
 
   it('« Écouter le retour audio » toggles the audio feedback and warns about loudspeakers once on', async () => {
@@ -1106,19 +1126,27 @@ describe('organisation rights', () => {
     setup({}, member())
     await renderMain()
     const newRow = await screen.findByRole('button', { name: 'Nouvelle session…' }) as HTMLButtonElement
-    await waitFor(() => expect(newRow.disabled).toBe(true))
+    await waitFor(() => expect(newRow.getAttribute('aria-disabled')).toBe('true'))
+    expect(newRow.disabled).toBe(false) // focusable, so keyboard users can reach the reason
     expect(newRow.title).toBe(REASON)
+    expect(description(newRow)).toBe(REASON)
+    await userEvent.click(newRow)
+    expect(screen.queryByRole('dialog')).toBeNull()
     act(() => emit('command', 'new-session'))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getByText(REASON)).toBeTruthy()
+    expect(screen.getAllByText(REASON).some((el) => !el.classList.contains('sr-only'))).toBe(true) // visible banner
 
     act(() => emit('live-state', live()))
     const term = screen.getByRole('button', { name: 'Terminer…' }) as HTMLButtonElement
-    expect(term.disabled).toBe(true)
+    expect(term.getAttribute('aria-disabled')).toBe('true')
     expect(term.title).toBe(REASON)
+    expect(description(term)).toBe(REASON)
+    await userEvent.click(term)
+    expect(screen.queryByRole('dialog')).toBeNull()
     const clear = screen.getByRole('button', { name: 'Effacer la transcription…' }) as HTMLButtonElement
-    expect(clear.disabled).toBe(true)
+    expect(clear.getAttribute('aria-disabled')).toBe('true')
     expect(clear.title).toBe(REASON)
+    expect(description(clear)).toBe(REASON)
     act(() => emit('command', 'terminate'))
     expect(screen.queryByRole('dialog')).toBeNull()
   })

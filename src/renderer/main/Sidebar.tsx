@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { Organization, SessionSummary } from '../../shared/types'
 import { Button } from '../ui/Button'
 import { StatusDot, type StatusDotProps } from '../ui/StatusDot'
@@ -37,6 +37,7 @@ const hostOf = (u: string): string => {
 
 export function Sidebar(p: SidebarProps) {
   const listRef = useRef<HTMLUListElement>(null)
+  const newBlockedId = useId()
 
   const onListKey = (e: KeyboardEvent<HTMLUListElement>): void => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
@@ -104,11 +105,14 @@ export function Sidebar(p: SidebarProps) {
             )}
           </>
         )}
-        <button type="button" className="sidebar-row sidebar-new" onClick={p.onNew}
-          disabled={p.newSessionBlocked !== undefined} title={p.newSessionBlocked}>
+        <button type="button" className="sidebar-row sidebar-new"
+          onClick={p.newSessionBlocked === undefined ? p.onNew : undefined}
+          {...(p.newSessionBlocked !== undefined
+            ? { 'aria-disabled': true, 'aria-describedby': newBlockedId, title: p.newSessionBlocked } : {})}>
           <PlusIcon size={12} className="sidebar-row-icon" />
           <span className="sidebar-row-name">Nouvelle session…</span>
         </button>
+        {p.newSessionBlocked !== undefined && <span id={newBlockedId} className="sr-only">{p.newSessionBlocked}</span>}
       </div>
       <div className="sidebar-footer">
         <div className="sidebar-account">
