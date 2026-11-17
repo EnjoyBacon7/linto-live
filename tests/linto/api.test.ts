@@ -150,12 +150,12 @@ describe('LintoApi', () => {
     expect(s.id).toBe('n')
   })
   it('getSession and terminateSession', async () => {
-    const { calls, api } = mk((c) => c.url.includes('stop') ? json({ success: true }) : json({ id: 's', name: 'N', status: 'ready', channels: [] }))
+    const { calls, api } = mk((c) => c.init.method === 'DELETE' ? json({ success: true }) : json({ id: 's', name: 'N', status: 'ready', channels: [] }))
     expect((await api.getSession('o1', 's')).id).toBe('s')
     expect(calls[0].url).toBe('https://s/api/organizations/o1/sessions/s')
     await api.terminateSession('o1', 's')
-    expect(calls[1].url).toBe('https://s/api/organizations/o1/sessions/s/stop?force=true&waitFinal=true')
-    expect(calls[1].init.method).toBe('PUT')
+    expect(calls[1].url).toBe('https://s/api/organizations/o1/sessions/s?force=true')
+    expect(calls[1].init.method).toBe('DELETE')
   })
 })
 

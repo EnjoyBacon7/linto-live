@@ -438,7 +438,7 @@ describe('Terminer…', () => {
     await renderMain()
     act(() => emit('live-state', live()))
     await userEvent.click(screen.getByRole('button', { name: 'Terminer…' }))
-    expect(screen.getByText('Terminer définitivement « Conférence » ?')).toBeTruthy()
+    expect(screen.getByText('Terminer définitivement « Conférence » ? La transcription sera enregistrée dans LinTO Studio.')).toBeTruthy()
     expect(document.activeElement?.textContent).toBe('Annuler')
     await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
     expect(screen.queryByRole('dialog')).toBeNull()

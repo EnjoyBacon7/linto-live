@@ -4,6 +4,14 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Modifié
+
+- **Terminer la session** fait désormais comme « Arrêter et enregistrer » dans LinTO Studio : la
+  transcription et ses traductions sont enregistrées comme média dans LinTO Studio, puis la session
+  est supprimée. Auparavant, la session était seulement close et n'apparaissait pas dans les médias.
+
 ## [0.4.0] - 2026-11-16
 
 ### Ajouté

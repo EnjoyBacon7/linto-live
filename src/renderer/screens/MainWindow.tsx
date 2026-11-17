@@ -433,7 +433,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       />
       <ConfirmSheet
         open={sheet?.kind === 'terminate'}
-        message={`Terminer définitivement « ${liveName ?? title ?? ''} » ?`}
+        message={`Terminer définitivement « ${liveName ?? title ?? ''} » ? La transcription sera enregistrée dans LinTO Studio.`}
         confirmLabel="Terminer"
         destructive
         onConfirm={() => void terminate()}
