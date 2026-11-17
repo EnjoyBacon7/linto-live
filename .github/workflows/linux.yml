@@ -1,20 +1,29 @@
 name: Build
 
-# Every push / PR: Linux packages (AppImage, .deb, Flatpak), the Flatpak installed on Ubuntu 22.04,
-# macOS typecheck and tests.
-# Tags v*: also the macOS dmg, then a GitHub release with all four packages, SHA256SUMS.txt and the
-# notes from CHANGELOG.md (scripts/release-notes.sh).
+# Pull requests, pushes to main, tags v* and manual runs. Jobs run in parallel where they can:
+#   checks             typecheck + unit tests (Linux)
+#   obs-linux          makes sure the OBS build cache exists (builds OBS only on a cache miss)
+#   linux-appimage-deb AppImage + .deb, installed and inspected, OBS smoke test
+#   linux-flatpak      Flatpak (its `flatpak build-bundle` is the slowest step, ~7 min)
+#   flatpak-ubuntu-2204  the Flatpak installed on Ubuntu 22.04
+#   macos              typecheck + tests; the dmg on tags and manual runs
+# Tags v*: then a GitHub release with all four packages, SHA256SUMS.txt and the notes from
+# CHANGELOG.md (scripts/release-notes.sh).
 
 on:
+  # Branches are built through their pull request only (no duplicate push + pull_request runs).
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
+    # Not evaluated for tag pushes, so releases always build.
+    paths-ignore: ['docs/**', 'spikes/**', '**/*.md', 'LICENSE']
   pull_request:
+    paths-ignore: ['docs/**', 'spikes/**', '**/*.md', 'LICENSE']
   workflow_dispatch:
 
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
@@ -26,42 +35,74 @@ env:
   FLATPAK_RUNTIME: '25.08'
 
 jobs:
-  linux:
-    name: Linux packages (ubuntu-24.04, x64)
+  checks:
+    name: Typecheck + unit tests (ubuntu-24.04)
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Ensure the Electron binary is present
+        run: test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
+      - run: npm run typecheck
+      - run: npm test
+
+  # The OBS build (~30-45 min) only reruns when the OBS tag or the build script changes. On a cache
+  # hit this job only looks the key up (a few seconds); the packaging jobs then restore it.
+  obs-linux:
+    name: OBS build cache (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      key: ${{ steps.obs-cache.outputs.cache-primary-key }}
     steps:
       - uses: actions/checkout@v4
 
-      # The OBS build (~30-45 min) only reruns when the OBS tag or the build script changes.
-      - name: Restore OBS build cache
+      - name: Look up OBS build cache
         id: obs-cache
         uses: actions/cache/restore@v4
         with:
           path: vendor/obs/linux
           key: obs-linux-${{ env.OBS_VERSION }}-ubuntu-24.04-x64-${{ hashFiles('scripts/build-obs-linux.sh', 'scripts/obs-linux-patches/**') }}
+          lookup-only: true
 
-      # Needed by the OBS build and by the Flatpak build (several copies of the app tree).
       - name: Free disk space
+        if: steps.obs-cache.outputs.cache-hit != 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
       - name: Build OBS ${{ env.OBS_VERSION }} from source
         if: steps.obs-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-obs-linux.sh
+        run: |
+          bash scripts/build-obs-linux.sh
+          rm -rf vendor/cache
 
-      - name: Remove OBS build intermediates
-        if: steps.obs-cache.outputs.cache-hit != 'true'
-        run: rm -rf vendor/cache
-
-      # Saved right away so a later failure (tests, packaging) does not throw the OBS build away.
       - name: Save OBS build cache
         if: steps.obs-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: vendor/obs/linux
           key: ${{ steps.obs-cache.outputs.cache-primary-key }}
+
+  linux-appimage-deb:
+    name: AppImage + .deb (ubuntu-24.04, x64)
+    needs: [obs-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore OBS build
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/obs/linux
+          key: ${{ needs.obs-linux.outputs.key }}
+          fail-on-cache-miss: true
 
       - name: Check staged OBS tree
         run: |
@@ -71,6 +112,84 @@ jobs:
           test -f vendor/obs/linux/obs/lib/obs-plugins/obs-websocket.so
           cat vendor/obs/linux/obs/BUILD-INFO.txt
           du -sh vendor/obs/linux/obs
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build AppImage + .deb
+        run: npm run dist:linux:nopak
+
+      # The bundled OBS leaves host libraries (libva, PulseAudio, EGL/GL, ...) to the system; the
+      # .deb declares them. Installing it with apt pulls them in, so `ldd` checks both the OBS tree
+      # and the package's Depends list.
+      - name: Install and inspect .deb
+        run: |
+          set -euo pipefail
+          deb="$(ls dist/*.deb)"
+          dpkg-deb --info "$deb"
+          # Listed to a file: grep -q on the pipe would stop early and fail dpkg-deb under pipefail.
+          dpkg-deb --contents "$deb" > /tmp/deb-contents.txt
+          grep 'resources/obs/bin/obs$' /tmp/deb-contents.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends "./$deb" xvfb libgl1-mesa-dri
+          obs="/opt/LinTO Live/resources/obs/bin/obs"
+          test -x "$obs"
+          if ldd "$obs" | grep 'not found'; then exit 1; fi
+          echo "OBS_INSTALLED=$obs" >> "$GITHUB_ENV"
+
+      - name: Inspect AppImage
+        run: |
+          set -euo pipefail
+          appimage="$(ls dist/*.AppImage)"
+          echo "AppImage: $appimage ($(du -h "$appimage" | cut -f1))"
+          rm -rf /tmp/appimage && mkdir -p /tmp/appimage && cd /tmp/appimage
+          "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+          obs=/tmp/appimage/squashfs-root/resources/obs/bin/obs
+          test -x "$obs"
+          test -f /tmp/appimage/squashfs-root/resources/obs/COPYING
+          test -f /tmp/appimage/squashfs-root/resources/obs/SOURCE.md
+          if ldd "$obs" | grep 'not found'; then exit 1; fi
+
+      # Best-effort smoke test: start/stop the bundled OBS under Xvfb (software GL) through the
+      # real ObsProcess, isolated config. Informational only: CI has no GPU, audio or camera.
+      - name: Smoke test bundled OBS (Xvfb)
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$OBS_INSTALLED" \
+            xvfb-run -a -s '-screen 0 1920x1080x24' \
+            npx vitest run --config vitest.it.config.ts tests/integration/obs-process.it.test.ts
+
+      - name: Upload AppImage + .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinTO-Live-linux-x86_64-appimage-deb
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+          # Already compressed packages: zipping them again only costs time.
+          compression-level: 0
+
+  linux-flatpak:
+    name: Flatpak (ubuntu-24.04, x64)
+    needs: [obs-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore OBS build
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/obs/linux
+          key: ${{ needs.obs-linux.outputs.key }}
+          fail-on-cache-miss: true
 
       - name: Install Flatpak tooling and runtimes
         run: |
@@ -90,47 +209,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Ensure the Electron binary is present
-        run: test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Build AppImage + .deb + Flatpak
-        run: DEBUG=@malept/flatpak-bundler npm run dist:linux
-
-      # The bundled OBS leaves host libraries (libva, PulseAudio, EGL/GL, ...) to the system; the
-      # .deb declares them. Installing it with apt pulls them in, so `ldd` checks both the OBS tree
-      # and the package's Depends list.
-      - name: Install and inspect .deb
-        run: |
-          set -euo pipefail
-          deb="$(ls dist/*.deb)"
-          dpkg-deb --info "$deb"
-          # Listed to a file: grep -q on the pipe would stop early and fail dpkg-deb under pipefail.
-          dpkg-deb --contents "$deb" > /tmp/deb-contents.txt
-          grep 'resources/obs/bin/obs$' /tmp/deb-contents.txt
-          sudo apt-get install -y --no-install-recommends "./$deb"
-          obs="/opt/LinTO Live/resources/obs/bin/obs"
-          test -x "$obs"
-          if ldd "$obs" | grep 'not found'; then exit 1; fi
-          echo "OBS_INSTALLED=$obs" >> "$GITHUB_ENV"
-
-      - name: Inspect AppImage
-        run: |
-          set -euo pipefail
-          appimage="$(ls dist/*.AppImage)"
-          echo "AppImage: $appimage ($(du -h "$appimage" | cut -f1))"
-          rm -rf /tmp/appimage && mkdir -p /tmp/appimage && cd /tmp/appimage
-          "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
-          obs=/tmp/appimage/squashfs-root/resources/obs/bin/obs
-          test -x "$obs"
-          test -f /tmp/appimage/squashfs-root/resources/obs/COPYING
-          test -f /tmp/appimage/squashfs-root/resources/obs/SOURCE.md
-          if ldd "$obs" | grep 'not found'; then exit 1; fi
+      - name: Build Flatpak
+        run: DEBUG=@malept/flatpak-bundler npm run dist:linux:flatpak
 
       # Every library the bundled OBS and its plugins link against must resolve inside the sandbox
       # (bundled tree + Freedesktop runtime).
@@ -153,39 +233,26 @@ jobs:
             exit $missing
           '
 
-      # Best-effort smoke test: start/stop the bundled OBS under Xvfb (software GL) through the
-      # real ObsProcess, isolated config. Informational only: CI has no GPU, audio or camera.
-      - name: Smoke test bundled OBS (Xvfb)
-        continue-on-error: true
-        timeout-minutes: 10
-        run: |
-          sudo apt-get install -y --no-install-recommends xvfb libgl1-mesa-dri
-          LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$OBS_INSTALLED" \
-            xvfb-run -a -s '-screen 0 1920x1080x24' \
-            npx vitest run --config vitest.it.config.ts tests/integration/obs-process.it.test.ts
-
-      - name: Upload Linux packages
+      - name: Upload Flatpak
         uses: actions/upload-artifact@v4
         with:
-          name: LinTO-Live-linux-x86_64
-          path: |
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.flatpak
+          name: LinTO-Live-linux-x86_64-flatpak
+          path: dist/*.flatpak
           if-no-files-found: error
+          compression-level: 0
 
   # Ubuntu 22.04 (glibc 2.35) is covered by the Flatpak only: the .deb and AppImage need glibc 2.39,
   # and OBS 32.1 cannot be built there (FFmpeg >= 6.1, CMake >= 3.28). Installs the bundle with the
   # distribution's own flatpak (1.12) and checks every OBS library resolves inside the sandbox.
   flatpak-ubuntu-2204:
     name: Flatpak on Ubuntu 22.04
-    needs: [linux]
+    needs: [linux-flatpak]
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: LinTO-Live-linux-x86_64
+          name: LinTO-Live-linux-x86_64-flatpak
           path: dist
 
       - name: Install flatpak (Ubuntu 22.04 package) and the bundle
@@ -271,11 +338,12 @@ jobs:
           name: LinTO-Live-macos-arm64
           path: dist/*.dmg
           if-no-files-found: error
+          compression-level: 0
 
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, flatpak-ubuntu-2204, macos]
+    needs: [checks, linux-appimage-deb, linux-flatpak, flatpak-ubuntu-2204, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

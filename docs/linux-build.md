@@ -8,7 +8,7 @@ system-wide; OBS runs hidden with its configuration under the app's `userData`.
   patch in `scripts/obs-linux-patches/`
 - From macOS (or any Docker host): `npm run dist:linux:docker` (`scripts/build-linux-docker.sh`)
 - Electron packaging: `electron-builder.yml` (`linux` section), `npm run dist:linux`
-- CI: `.github/workflows/linux.yml` (ubuntu-24.04, OBS build cached on tag + script hash)
+- CI: `.github/workflows/linux.yml` (ubuntu-24.04, OBS build cached on tag + script hash; AppImage/.deb and Flatpak built in parallel jobs)
 - Provenance / license: `resources/obs/SOURCE.md`, `resources/obs/COPYING` in the package
 
 ## Building locally (Ubuntu 24.04 x86_64)
@@ -109,7 +109,7 @@ package: OBS runs directly from the AppImage's read-only FUSE mount.
 
 Run on a clean Ubuntu 24.04 desktop VM, X11 session ("Ubuntu on Xorg" at the login screen), with
 a webcam or capture card and a microphone attached if available. Use the AppImage artifact from CI
-(`LinTO-Live-linux-x86_64`) or a local build. Tick every box; note anything else in the PR.
+(`LinTO-Live-linux-x86_64-appimage-deb`) or a local build. Tick every box; note anything else in the PR.
 
 ### 0. Preparation
 
