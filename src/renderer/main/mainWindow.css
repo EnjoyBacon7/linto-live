@@ -530,29 +530,231 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 16px 16px 20px;
+  padding: 4px 0 16px;
   border-left: 0.5px solid var(--separator);
   background: var(--bg-inspector);
 }
 
-.inspector-group {
+/* Collapsible section: a 28 px header (chevron, icon, title, summary when closed), then the controls. */
+.insp-section {
+  border-bottom: 0.5px solid var(--separator);
+}
+
+.insp-section:last-child {
+  border-bottom: none;
+}
+
+.insp-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.insp-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 5px;
+  min-height: 30px;
+  padding: 7px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: left;
+  cursor: default;
+}
+
+.insp-toggle:hover .insp-chevron,
+.insp-toggle:focus-visible .insp-chevron {
+  color: var(--text);
+}
+
+.insp-toggle .icon {
+  vertical-align: 0;
+}
+
+.insp-chevron {
+  color: var(--text-3);
+  transition: transform 0.15s ease;
+}
+
+.insp-section.is-open .insp-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .insp-chevron {
+    transition: none;
+  }
+}
+
+.insp-title {
+  flex: none;
+  color: var(--text-2);
+}
+
+/* Closed: the current values on a second line, so the pane still tells what is set without every control. */
+.insp-summary {
+  flex: 0 0 100%;
+  min-width: 0;
+  padding-left: 34px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 15px;
+  color: var(--text);
+}
+
+.insp-attention {
+  flex: none;
+  display: inline-flex;
+  color: var(--warn);
+}
+
+.insp-accessory {
+  flex: none;
+  align-self: flex-start;
+  width: 44px;
+  margin-top: 29px;
+}
+
+.insp-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0 14px 12px;
+}
+
+.insp-body[hidden] {
+  display: none;
+}
+
+/* Label | control on one line (Profil, Langue, Taille). */
+.insp-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  min-height: 22px;
+}
+
+.insp-row-label {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.insp-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.insp-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.insp-size .field-input {
+  width: 56px;
+}
+
+.insp-unit {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+/* One item of a section (Filigrane, QR code, Enregistrement…): a title line, then its controls. */
+.insp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.insp-item + .insp-item {
+  padding-top: 7px;
+  border-top: 0.5px solid var(--separator);
+}
+
+.insp-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 22px;
+}
+
+.insp-item-title {
+  font-size: 13px;
+}
+
+.insp-checks {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 14px;
+  row-gap: 4px;
+}
+
+.insp-icon-btn {
+  width: 22px;
+  padding: 0;
+}
+
+.insp-icon-btn .icon {
+  vertical-align: 0;
+}
+
+.insp-radios {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
 
-.inspector-label {
+.insp-radios > .insp-item {
+  padding-top: 7px;
+  border-top: 0.5px solid var(--separator);
+}
+
+/* Value under a radio, lined up with its label (13 px input + 6 px gap). */
+.insp-detail {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  min-width: 0;
+  padding-left: 19px;
+}
+
+.insp-detail .inspector-path {
+  flex: 1;
+  font-size: 12px;
   color: var(--text-2);
 }
 
-.inspector-label .icon {
-  vertical-align: 0;
+.insp-detail .inspector-path.is-empty {
+  color: var(--text-3);
+}
+
+.insp-small-btn {
+  flex: none;
+  min-width: 0;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .inspector-control {
@@ -601,6 +803,13 @@
   margin-top: 2px;
 }
 
+/* In a closed Micro header: same meter, thinner, so the level stays visible. */
+.vu-compact {
+  gap: 1px;
+  height: 4px;
+  margin-top: 0;
+}
+
 .vu-seg {
   flex: 1;
   border-radius: 1px;
@@ -639,19 +848,6 @@
 
 /* ---------- Inspector: subtitles ---------- */
 
-.inspector-subgroup {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 8px 0;
-  border-top: 0.5px solid var(--separator);
-  border-bottom: 0.5px solid var(--separator);
-}
-
-.inspector-inline .field-input {
-  width: 72px;
-}
-
 .inspector-note {
   margin: 0;
   font-size: 11px;
@@ -686,7 +882,7 @@
 /* EXPERIMENTAL proper nouns list */
 .field-input.proper-nouns {
   height: auto;
-  min-height: 84px;
+  min-height: 72px;
   resize: vertical;
   padding-top: 4px;
   padding-bottom: 4px;
