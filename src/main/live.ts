@@ -109,7 +109,7 @@ export interface LiveObsProcess {
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setBackupVisible' | 'probePrimary'
-  | 'setAudioDevice' | 'setOverlayUrl'
+  | 'setAudioDevice' | 'setAudioMonitor' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
   | 'startRecord' | 'stopRecord' | 'recordState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
@@ -185,7 +185,9 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * session and per OBS run); recording never blocks nor fails the show.
  */
 export class LiveController extends EventEmitter {
-  private state: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off', recording: 'off' }
+  private state: LiveState = {
+    phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off', recording: 'off', audioMonitor: false
+  }
   private ctl: LiveObsController | null = null
   private unsubs: (() => void)[] = []
   private overlayUrl: string | null = null
@@ -234,6 +236,8 @@ export class LiveController extends EventEmitter {
   private recordStopping = false
   /** stopRecord gave up waiting for OBS: OBS's « stopped » event, when it comes, announces the file. */
   private recordAnnouncePending = false
+  /** Audio feedback asked by the user (not saved: the app always starts without it, see setAudioMonitor). */
+  private audioMonitor = false
   /** Waiting for OBS's « stopped » recording event (StopRecord may answer before the output has stopped). */
   private recordStopWaiters: (() => void)[] = []
 
@@ -471,6 +475,28 @@ export class LiveController extends EventEmitter {
     if (s) this.watermarkChanged(s.id, s.watermark)
   }
 
+  /**
+   * Audio feedback (quality check): plays the micro, as OBS sends it to LinTO and records it, on the system
+   * output. Kept for the app run (re-applied after an OBS restart) but never saved: on loudspeakers the micro
+   * would pick it up again (feedback), so it must not come back on by itself at the next launch.
+   */
+  setAudioMonitor(on: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      this.audioMonitor = on
+      this.setState({ audioMonitor: on })
+      const c = this.ctl
+      if (!c) return
+      try {
+        await c.setAudioMonitor(on)
+      } catch (e) {
+        if (c !== this.ctl) return // OBS restarted meanwhile: attach re-applies it
+        this.audioMonitor = false
+        this.setState({ audioMonitor: false })
+        throw new Error(`Retour audio indisponible : ${errMsg(e)}`, { cause: e })
+      }
+    })
+  }
+
   /** Device lists for the setup screen (empty while OBS is not connected). */
   async listDevices(): Promise<{ videoDevices: DeviceItem[]; audioDevices: DeviceItem[] }> {
     const c = this.ctl
@@ -639,6 +665,13 @@ export class LiveController extends EventEmitter {
     const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
     this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
+    // Always set (also off): OBS saves the monitoring type with the scene collection.
+    await ready.setAudioMonitor(this.audioMonitor).catch(() => {
+      if (this.audioMonitor) {
+        this.audioMonitor = false
+        this.setState({ audioMonitor: false })
+      }
+    })
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
     const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)

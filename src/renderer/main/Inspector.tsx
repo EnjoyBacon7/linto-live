@@ -34,6 +34,10 @@ export interface InspectorProps {
   onQrSettings?(): void
   /** Which source is on air when a backup is configured (absent otherwise). */
   videoOnAir?: 'primary' | 'backup'
+  /** Audio feedback (hear the micro as sent to LinTO and recorded); available only while OBS runs. */
+  audioMonitor?: boolean
+  audioMonitorAvailable?: boolean
+  onAudioMonitorChange?(on: boolean): void
 }
 
 export function Check({ label, checked, disabled, onChange }: {
@@ -141,6 +145,15 @@ export function Inspector(p: InspectorProps) {
         <PopUp label="Micro" className="inspector-control" value={settings?.audioDeviceId ?? ''} placeholder="Choisir…"
           options={opts(data?.audioDevices)} disabled={!data} onChange={(v) => onChange({ audioDeviceId: v })} />
         <VuMeter />
+        <Check label="Écouter le retour audio" checked={p.audioMonitor === true}
+          disabled={!p.onAudioMonitorChange || (!p.audioMonitor && !p.audioMonitorAvailable)}
+          onChange={(v) => p.onAudioMonitorChange?.(v)} />
+        {p.audioMonitor && (
+          <p className="inspector-note">
+            Le son envoyé à LinTO et enregistré est joué sur la sortie audio du système : utilisez un casque (sur
+            haut-parleurs, le micro le reprend et provoque un larsen).
+          </p>
+        )}
       </section>
       <section className="inspector-group">
         <h3 className="inspector-label"><CaptionsIcon size={14} />Profil de transcription</h3>

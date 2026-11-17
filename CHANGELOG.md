@@ -6,6 +6,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Ajouté
+
+- **Écouter le retour audio** (réglage Micro) : le son du micro tel qu'il est envoyé à LinTO et
+  enregistré est joué sur la sortie audio du système, pour vérifier sa qualité. Désactivé à
+  chaque lancement ; à utiliser au casque (sur haut-parleurs, le micro le reprend : larsen).
+
 ### Modifié
 
 - **Terminer la session** fait désormais comme « Arrêter et enregistrer » dans LinTO Studio : la
