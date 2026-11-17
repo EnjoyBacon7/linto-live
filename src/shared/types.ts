@@ -185,11 +185,15 @@ export interface Transcript {
   startedAt?: number
   dropped?: number
 }
-/** Change to the transcript: a segment finalized, the partial changed (null = none), or a new show began. */
+/**
+ * Change to the transcript: a segment finalized, the partial changed (null = none), a new show began, or the
+ * whole transcript was replaced (e.g. the session's history loaded from LinTO).
+ */
 export type TranscriptUpdate =
   | { kind: 'final'; segment: TranscriptSegment }
   | { kind: 'partial'; segment: TranscriptSegment | null }
   | { kind: 'reset'; sessionName?: string; startedAt?: number }
+  | { kind: 'snapshot'; transcript: Transcript }
 
 /** Export formats of the transcript (« Exporter » once the show has ended). */
 export const TRANSCRIPT_EXPORT_FORMATS = ['txt', 'srt', 'vtt', 'json'] as const

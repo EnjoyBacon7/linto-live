@@ -109,6 +109,8 @@ export interface LintoLiveApi {
     getState(): Promise<LiveState>
     /** Transcript of the show on air or of the last one (the 'transcript' event only carries changes). */
     getTranscript(): Promise<Transcript>
+    /** Off air: loads the selected session's transcript from LinTO (on air: the show's own, unchanged). */
+    viewTranscript(sessionId: string): Promise<Transcript>
     /** Saves the finalized transcript where the user picks (save dialog); false if they cancelled. */
     exportTranscript(format: TranscriptExportFormat): Promise<{ saved: boolean }>
   }
@@ -154,6 +156,7 @@ export const IPC = {
   liveGetState: 'live:get-state',
   liveClearTranscript: 'live:clear-transcript',
   liveGetTranscript: 'live:get-transcript',
+  liveViewTranscript: 'live:view-transcript',
   liveExportTranscript: 'live:export-transcript',
   liveSetSubtitleLanguage: 'live:set-subtitle-language',
   liveSetAudioMonitor: 'live:set-audio-monitor',
@@ -278,6 +281,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       clearTranscript: () => call(IPC.liveClearTranscript),
       getState: () => call(IPC.liveGetState),
       getTranscript: () => call(IPC.liveGetTranscript),
+      viewTranscript: (sessionId) => call(IPC.liveViewTranscript, sessionId),
       exportTranscript: (format) => call(IPC.liveExportTranscript, format)
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },

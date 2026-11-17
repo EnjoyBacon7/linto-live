@@ -19,6 +19,7 @@ import { cleanNames, type NameCorrector } from './linto/properNouns'
 import { resolveSession } from './linto/sessionResolver'
 import { lintoErrorMessage } from './linto/accessMessages'
 import { TranscriptLog } from './linto/transcript'
+import { TRANSCRIPT_LOG_MAX_SEGMENTS } from '../shared/transcript'
 import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
 import { publicLink } from '../shared/publicLink'
@@ -126,6 +127,7 @@ export type LiveObsController = Pick<
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
 >
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession' | 'clearSession'>
+  & Partial<Pick<LintoApi, 'channelCaptions'>>
 export interface LiveCaptions {
   open: CaptionStream['open']
   close: CaptionStream['close']
@@ -255,6 +257,8 @@ export class LiveController extends EventEmitter {
   private cancelGen = 0
   private cancelListeners = new Set<() => void>()
   private transcript = new TranscriptLog()
+  /** Bumped whenever the transcript starts over: a history fetched for an older one is dropped. */
+  private transcriptGen = 0
   /** Corrector built for this list of proper nouns (rebuilt when the list changes). */
   private names: { key: string; correct: NameCorrector } | null = null
   /** Switches to the backup source when the primary is absent (only while a backup is configured and OBS attached). */
@@ -528,7 +532,56 @@ export class LiveController extends EventEmitter {
     if (!this.current) return
     this.d.overlay.push({ type: 'reset' })
     const { sessionName, startedAt } = this.transcript.snapshot()
+    this.transcriptGen++
     this.sendTranscript(this.transcript.reset(sessionName, startedAt))
+  }
+
+  /** The finalized captions LinTO stored for this session's channel (the most the log keeps). */
+  private async fetchHistory(orgId: string, sessionId: string, channelId: number): Promise<CaptionEvent[]> {
+    const fetch = this.d.api.channelCaptions
+    if (!fetch) return []
+    const raw = await fetch.call(this.d.api, orgId, sessionId, channelId, TRANSCRIPT_LOG_MAX_SEGMENTS)
+    return raw.map((e) => this.correctNames(e))
+  }
+
+  /** Merges the on-air session's history from LinTO into its transcript (never fails the show). */
+  private async loadHistory(cur: Current): Promise<void> {
+    const gen = this.transcriptGen
+    try {
+      const captions = await this.fetchHistory(cur.orgId, cur.session.id, cur.channel.id)
+      if (cur !== this.current || gen !== this.transcriptGen || captions.length === 0) return
+      this.sendTranscript(this.transcript.history(captions))
+    } catch (e) {
+      if (e instanceof UnauthorizedError) this.reportUnauthorized()
+    }
+  }
+
+  /**
+   * A session was selected off air: its transcript is what LinTO holds for it (the export then saves that).
+   * On air the transcript stays the show's own.
+   */
+  async viewTranscript(sessionId: string): Promise<Transcript> {
+    const orgId = this.d.settings.get().orgId
+    if (this.current || !orgId) return this.transcript.snapshot()
+    const gen = ++this.transcriptGen
+    let session: Session
+    let captions: CaptionEvent[]
+    try {
+      session = await this.d.api.getSession(orgId, sessionId)
+      const channel = session.channels[0]
+      captions = channel ? await this.fetchHistory(orgId, sessionId, channel.id) : []
+    } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        this.reportUnauthorized()
+        throw new Error(MSG_AUTH)
+      }
+      throw new Error(lintoErrorMessage(e, 'read') ?? errMsg(e), { cause: e })
+    }
+    // A show started, or another session was selected, meanwhile.
+    if (this.current || gen !== this.transcriptGen) return this.transcript.snapshot()
+    this.transcript.reset(session.name)
+    this.sendTranscript(this.transcript.history(captions))
+    return this.transcript.snapshot()
   }
 
   /** Saves the language shown in the band for a session; if it is on air, the band empties and switches now. */
@@ -1054,8 +1107,11 @@ export class LiveController extends EventEmitter {
         startedAt,
         recordingTarget: this.recordTarget?.kind
       })
+      this.transcriptGen++
       this.sendTranscript(this.transcript.reset(res.session.name, startedAt))
       this.d.captions.open(res.session.id, res.channel.id, cur.orgId)
+      // What the session already holds on LinTO (an earlier run, a stop and resume) comes before the live words.
+      void this.loadHistory(cur)
 
       const c = this.ctl
       if (c) {

@@ -288,7 +288,9 @@ function main(): void {
     if (n) notify(n)
     rebuildShell()
   })
-  live.on('transcript', (u: TranscriptUpdate) => send(IPC.evtTranscript, u))
+  // A whole transcript goes to the window with its most recent segments only (as getTranscript below).
+  live.on('transcript', (u: TranscriptUpdate) => send(IPC.evtTranscript,
+    u.kind === 'snapshot' ? { kind: 'snapshot', transcript: trimTranscript(u.transcript, TRANSCRIPT_VIEW_MAX_SEGMENTS) } : u))
   live.on('preview', (d: string) => send(IPC.evtPreview, d))
   live.on('audio-level', (db: number) => send(IPC.evtAudioLevel, db))
   // The window does not say where the file went: always notify, a click shows it in its folder.
@@ -456,6 +458,11 @@ function main(): void {
   ipcMain.handle(IPC.liveGetState, () => live.getState())
   // The window shows only the most recent segments (the export reads the full log below).
   ipcMain.handle(IPC.liveGetTranscript, () => trimTranscript(live.getTranscript(), TRANSCRIPT_VIEW_MAX_SEGMENTS))
+  ipcMain.handle(IPC.liveViewTranscript, async (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string' || !sessionId) throw new Error('Session invalide.')
+    await ensureUrls()
+    return trimTranscript(await live.viewTranscript(sessionId), TRANSCRIPT_VIEW_MAX_SEGMENTS)
+  })
   ipcMain.handle(IPC.liveExportTranscript, async (_e, raw: unknown): Promise<{ saved: boolean }> => {
     if (!(TRANSCRIPT_EXPORT_FORMATS as readonly unknown[]).includes(raw)) throw new Error('Format d’export inconnu.')
     const format = raw as TranscriptExportFormat

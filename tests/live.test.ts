@@ -7,6 +7,7 @@ import {
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
+import type { CaptionEvent } from '../src/main/linto/captions'
 import { createNameCorrector } from '../src/main/linto/properNouns'
 import type { PublishTarget } from '../src/main/broadcast/rtmp'
 import type { Luma } from '../src/main/obs/fallback'
@@ -108,7 +109,9 @@ function fakeController(log: string[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null; broadcastKey?: string } = {}) {
+function setup(opts: {
+  sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null; broadcastKey?: string; history?: CaptionEvent[]
+} = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
@@ -139,7 +142,8 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
     terminateSession: vi.fn(async () => {
       log.push('terminateSession')
     }),
-    clearSession: vi.fn(async () => {})
+    clearSession: vi.fn(async () => {}),
+    channelCaptions: vi.fn(async (_o: string, _s: string, _c: number, _max?: number): Promise<CaptionEvent[]> => opts.history ?? [])
   }
   const captions = Object.assign(new EventEmitter(), {
     open: vi.fn((sid: string, ch: number) => {
@@ -321,6 +325,44 @@ describe('LiveController', () => {
     const restarted = { sessionName: 'Conf', startedAt: t.last().startedAt }
     expect(updates.at(-1)).toEqual({ kind: 'reset', ...restarted })
     expect(t.live.getTranscript()).toEqual({ finals: [], partial: null, ...restarted })
+  })
+
+  it('a resumed session shows what LinTO already holds before the live words (once each)', async () => {
+    const astart = '2026-11-10T09:00:00.000Z'
+    const before = '2026-11-10T08:00:00.000Z'
+    const t = setup({
+      history: [
+        { segmentId: 0, text: 'Première prise', astart: before, start: 1, end: 2 },
+        { segmentId: 0, text: 'bot', locutor: 'bot', astart: before },
+        { segmentId: 0, text: 'Reprise', astart, start: 1, end: 2 }
+      ]
+    })
+    await t.live.boot()
+    const updates: TranscriptUpdate[] = []
+    t.live.on('transcript', (u: TranscriptUpdate) => updates.push(u))
+    await t.live.start('Conf')
+    await vi.waitFor(() => expect(updates.at(-1)?.kind).toBe('snapshot'))
+    expect(t.api.channelCaptions).toHaveBeenCalledWith('org1', 's1', 7, expect.any(Number))
+    expect(t.live.getTranscript().finals.map((s) => s.text)).toEqual(['Première prise', 'Reprise'])
+    // Already loaded: the same final from the socket counts once; a new one follows.
+    t.captions.emit('final', { segmentId: 0, text: 'Reprise', astart, start: 1, end: 2 })
+    t.captions.emit('final', { segmentId: 1, text: 'Suite', astart, start: 3, end: 4 })
+    expect(t.live.getTranscript().finals.map((s) => s.text)).toEqual(['Première prise', 'Reprise', 'Suite'])
+  })
+
+  it('off air, selecting a session loads its transcript from LinTO; on air it keeps the show\'s', async () => {
+    const t = setup({ history: [{ segmentId: 3, text: 'Déjà dit', astart: '2026-11-10T09:00:00.000Z', start: 0, end: 1 }] })
+    await t.live.boot()
+    const got = await t.live.viewTranscript('s1')
+    expect(got).toMatchObject({ sessionName: 'Conf', finals: [{ id: 3, text: 'Déjà dit' }] })
+    expect(t.api.getSession).toHaveBeenCalledWith('org1', 's1')
+
+    await t.live.start('Conf')
+    t.api.channelCaptions.mockClear()
+    t.captions.emit('final', { segmentId: 9, text: 'En direct' })
+    const onAir = await t.live.viewTranscript('s1')
+    expect(t.api.channelCaptions).not.toHaveBeenCalled()
+    expect(onAir.finals.at(-1)).toMatchObject({ text: 'En direct' })
   })
 
   it('corrects the expected proper nouns in finals only (band and transcript), never in partials', async () => {

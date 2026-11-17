@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { LintoApi } from '../../src/main/linto/api'
-import { UnauthorizedError } from '../../src/shared/types'
+import { ForbiddenError, UnauthorizedError } from '../../src/shared/types'
 import type { LintoUrls } from '../../src/main/linto/instance'
 
 const urls: LintoUrls = { instance: 'https://s', api: 'https://s/api', auth: 'https://s/auth', wsUrl: 'https://s', wsPath: '/io' }
@@ -29,6 +29,11 @@ describe('LintoApi', () => {
     await expect(mk(() => json({}, 401)).api.organizations()).rejects.toBeInstanceOf(UnauthorizedError)
     await expect(mk(() => new Response('boom', { status: 500 })).api.organizations()).rejects.toThrow(/500.*boom/)
   })
+  it("401 with studio-api's plain-text proxy refusal => ForbiddenError, not an expired login", async () => {
+    // studio-api's proxy after-result check (session of another organisation) answers `error.toString()`, not JSON.
+    const { api } = mk(() => new Response('Unauthorized: You are not authorized to access this resource', { status: 401 }))
+    await expect(api.getSession('o1', 's')).rejects.toBeInstanceOf(ForbiddenError)
+  })
   it('authMethods is unauthenticated GET {auth}/list', async () => {
     const { calls, api } = mk(() => json([{ path: 'local', from: 'a', name: 'Local' }]))
     expect(await api.authMethods()).toHaveLength(1)
@@ -51,6 +56,7 @@ describe('LintoApi', () => {
     expect(calls[0].url).toContain('searchName=' + encodeURIComponent('Conf é&'))
     expect(calls[0].url).toContain('statusList=' + encodeURIComponent('on_schedule,ready,active,paused,terminated'))
     expect(calls[0].url).toContain('limit=50')
+    expect(new URL(calls[0].url).searchParams.get('organizationId')).toBe('o1')
     expect(r[0]).toEqual({ id: 's', name: 'Conf é&', status: 'active', owner: 'u', channels: [{ id: 7, name: 'c', streamEndpoints: { srt: 'srt://x' } }] })
   })
   it('searchSessions pages through every result (exact match on page 3)', async () => {
@@ -76,6 +82,8 @@ describe('LintoApi', () => {
     const r = await api.listSessions('o1')
     expect(calls[0].url).toContain('statusList=on_schedule%2Cready%2Cactive%2Cpaused')
     expect(calls[0].url).not.toContain('searchName')
+    // studio-api does not scope GET /organizations/:id/sessions itself: session-api needs the query parameter.
+    expect(calls.every((c) => new URL(c.url).searchParams.get('organizationId') === 'o1')).toBe(true)
     expect(calls.map((c) => new URL(c.url).searchParams.get('offset'))).toEqual(['0', '50'])
     expect(r).toHaveLength(60)
     expect(r[0].updatedAt).toBe('2026-01-01T00:00:00Z')
@@ -158,10 +166,42 @@ describe('LintoApi', () => {
   it('getSession and terminateSession', async () => {
     const { calls, api } = mk((c) => c.init.method === 'DELETE' ? json({ success: true }) : json({ id: 's', name: 'N', status: 'ready', channels: [] }))
     expect((await api.getSession('o1', 's')).id).toBe('s')
-    expect(calls[0].url).toBe('https://s/api/organizations/o1/sessions/s')
+    expect(calls[0].url).toBe('https://s/api/organizations/o1/sessions/s?withCaptions=false')
     await api.terminateSession('o1', 's')
     expect(calls[1].url).toBe('https://s/api/organizations/o1/sessions/s?force=true')
     expect(calls[1].init.method).toBe('DELETE')
+  })
+})
+
+describe('LintoApi.channelCaptions', () => {
+  const cap = (n: number) => ({ segmentId: n, text: `t${n}`, start: '1.5', end: 2, astart: '2026-11-10T09:00:00.000Z', aend: null, lang: 'fr-FR', locutor: null })
+  it('pages from the newest and returns the captions oldest first', async () => {
+    const all = Array.from({ length: 1500 }, (_, i) => cap(i))
+    const { calls, api } = mk((c) => {
+      const u = new URL(c.url)
+      const limit = Number(u.searchParams.get('limit'))
+      const offset = Number(u.searchParams.get('offset'))
+      const page = all.slice(Math.max(0, all.length - offset - limit), all.length - offset)
+      return json({ id: 7, closedCaptions: page, totalClosedCaptions: all.length })
+    })
+    const got = await api.channelCaptions('o1', 's', 7)
+    expect(calls[0].url).toBe('https://s/api/organizations/o1/sessions/s/channels/7?limit=1000&offset=0')
+    expect(calls).toHaveLength(2)
+    expect(got.map((c) => c.segmentId)).toEqual(all.map((c) => c.segmentId))
+    expect(got[0]).toEqual({ segmentId: 0, text: 't0', start: 1.5, end: 2, astart: '2026-11-10T09:00:00.000Z', lang: 'fr-FR' })
+  })
+  it('keeps the most recent `max` captions', async () => {
+    const { calls, api } = mk(() => json({ closedCaptions: [cap(8), cap(9)], totalClosedCaptions: 10 }))
+    expect((await api.channelCaptions('o1', 's', 7, 2)).map((c) => c.segmentId)).toEqual([8, 9])
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toContain('limit=2&offset=0')
+  })
+  it('an older LinTO without the paged route: the captions of the whole session', async () => {
+    const { calls, api } = mk((c) => c.url.includes('/channels/')
+      ? json({ message: 'nope' }, 404)
+      : json({ id: 's', channels: [{ id: 6, closedCaptions: [cap(0)] }, { id: 7, closedCaptions: [cap(1), cap(2)] }] }))
+    expect((await api.channelCaptions('o1', 's', 7)).map((c) => c.segmentId)).toEqual([1, 2])
+    expect(calls[1].url).toBe('https://s/api/organizations/o1/sessions/s')
   })
 })
 

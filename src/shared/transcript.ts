@@ -31,6 +31,7 @@ export function applyTranscriptUpdate(t: Transcript, u: TranscriptUpdate, max = 
     }
     case 'partial': return { ...t, partial: u.segment }
     case 'final': return pushFinal(t, u.segment, max)
+    case 'snapshot': return trimTranscript(u.transcript, max)
   }
 }
 
