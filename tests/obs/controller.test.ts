@@ -231,6 +231,17 @@ describe('ObsController', () => {
     expect(of(f.calls, 'SetInputSettings')[0].data).toMatchObject({ inputName: SRC_AUDIO, inputSettings: { device_id: 'mic1' } })
   })
 
+  it('setAudioMonitor monitors Micro while still sending it out, or stops monitoring', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.setAudioMonitor(true)
+    await c.setAudioMonitor(false)
+    expect(of(f.calls, 'SetInputAudioMonitorType').map((x) => x.data)).toEqual([
+      { inputName: SRC_AUDIO, monitorType: 'OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT' },
+      { inputName: SRC_AUDIO, monitorType: 'OBS_MONITORING_TYPE_NONE' }
+    ])
+  })
+
   it('audioLevel$ reports dB for Micro and unsubscribes', () => {
     const f = fakeClient()
     const c = new ObsController(f.client)

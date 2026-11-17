@@ -109,7 +109,7 @@ export interface LiveObsProcess {
 export type LiveObsController = Pick<
   ObsController,
   | 'ensureScene' | 'listVideoDevices' | 'listAudioDevices' | 'setSource' | 'setBackupVisible' | 'probePrimary'
-  | 'setAudioDevice' | 'setOverlayUrl'
+  | 'setAudioDevice' | 'setAudioMonitor' | 'setOverlayUrl'
   | 'audioLevel$' | 'screenshot' | 'startStream' | 'stopStream' | 'streamState$'
   | 'startRecord' | 'stopRecord' | 'recordState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
@@ -185,7 +185,9 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * session and per OBS run); recording never blocks nor fails the show.
  */
 export class LiveController extends EventEmitter {
-  private state: LiveState = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off', recording: 'off' }
+  private state: LiveState = {
+    phase: 'idle', stream: 'off', captions: 'offline', obs: 'down', output: 'off', recording: 'off', audioMonitor: false
+  }
   private ctl: LiveObsController | null = null
   private unsubs: (() => void)[] = []
   private overlayUrl: string | null = null
@@ -234,6 +236,8 @@ export class LiveController extends EventEmitter {
   private recordStopping = false
   /** stopRecord gave up waiting for OBS: OBS's « stopped » event, when it comes, announces the file. */
   private recordAnnouncePending = false
+  /** Audio feedback asked by the user (not saved: the app always starts without it, see setAudioMonitor). */
+  private audioMonitor = false
   /** Waiting for OBS's « stopped » recording event (StopRecord may answer before the output has stopped). */
   private recordStopWaiters: (() => void)[] = []
 
@@ -496,6 +500,28 @@ export class LiveController extends EventEmitter {
     if (s) this.watermarkChanged(s.id, s.watermark)
   }
 
+  /**
+   * Audio feedback (quality check): plays the micro, as OBS sends it to LinTO and records it, on the system
+   * output. Kept for the app run (re-applied after an OBS restart) but never saved: on loudspeakers the micro
+   * would pick it up again (feedback), so it must not come back on by itself at the next launch.
+   */
+  setAudioMonitor(on: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      this.audioMonitor = on
+      this.setState({ audioMonitor: on })
+      const c = this.ctl
+      if (!c) return
+      try {
+        await c.setAudioMonitor(on)
+      } catch (e) {
+        if (c !== this.ctl) return // OBS restarted meanwhile: attach re-applies it
+        this.audioMonitor = false
+        this.setState({ audioMonitor: false })
+        throw new Error(`Retour audio indisponible : ${errMsg(e)}`, { cause: e })
+      }
+    })
+  }
+
   /** Device lists for the setup screen (empty while OBS is not connected). */
   async listDevices(): Promise<{ videoDevices: DeviceItem[]; audioDevices: DeviceItem[] }> {
     const c = this.ctl
@@ -612,6 +638,11 @@ export class LiveController extends EventEmitter {
     this.ctl = null
     this.attachedConn = null
     this.streamRunning = false
+    // The output died with that OBS run: do not keep showing an active stream (attach's applyShow restarts it).
+    if (this.state.phase === 'live' && this.current?.service && (this.state.stream === 'active' || this.state.stream === 'error')) {
+      this.setState({ stream: 'starting' })
+    }
+    this.retryAttempt = 0
     this.clearRetry()
     this.stopPreview()
     this.flushStopWaiters()
@@ -636,7 +667,9 @@ export class LiveController extends EventEmitter {
       await c.ensureScene(this.d.platform)
     } catch (e) {
       await c?.disconnect().catch(() => {})
-      this.setState({ obs: 'down', warning: MSG_OBS_SETUP_FAILED + errMsg(e) })
+      // No OBS output to restart the stream on: say so instead of leaving a 'starting' stream hanging.
+      const lostStream = this.state.phase === 'live' && !!this.current?.service
+      this.setState({ obs: 'down', ...(lostStream ? { stream: 'error' as const } : {}), warning: MSG_OBS_SETUP_FAILED + errMsg(e) })
       return
     }
     const ready = c
@@ -657,6 +690,13 @@ export class LiveController extends EventEmitter {
     const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
     this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
+    // Always set (also off): OBS saves the monitoring type with the scene collection.
+    await ready.setAudioMonitor(this.audioMonitor).catch(() => {
+      if (this.audioMonitor) {
+        this.audioMonitor = false
+        this.setState({ audioMonitor: false })
+      }
+    })
     if (this.overlayUrl) await ready.setOverlayUrl(this.overlayUrl).catch((e) => (warning = MSG_OVERLAY_FAILED + errMsg(e)))
     const w0 = this.state.warning
     const staleObsWarning = w0 === MSG_OBS_DOWN || w0 === MSG_BOOT_FAILED || w0?.startsWith(MSG_OBS_SETUP_FAILED)
@@ -737,14 +777,23 @@ export class LiveController extends EventEmitter {
   }
 
   /** obs.start() with backoff (5 attempts). Null when every attempt failed or a newer start/shutdown superseded it. */
-  private async startObsWithRetry(gen: number): Promise<ObsConnection | null> {
+  private async startObsWithRetry(gen: number, cancelGen?: number): Promise<ObsConnection | null> {
+    const cancelled = (): boolean => cancelGen !== undefined && cancelGen !== this.cancelGen
     for (let attempt = 0; ; attempt++) {
-      if (this.shuttingDown || gen !== this.restartGen) return null
+      if (this.shuttingDown || gen !== this.restartGen || cancelled()) return null
       try {
         return await this.d.obs.start()
       } catch {
-        if (attempt >= OBS_START_DELAYS_MS.length) return null
-        await sleep(OBS_START_DELAYS_MS[attempt])
+        if (attempt >= OBS_START_DELAYS_MS.length || cancelled()) return null
+        // stop()/shutdown() ends the backoff at once (an obs.start already in flight still runs to its end).
+        if (cancelGen === undefined) await sleep(OBS_START_DELAYS_MS[attempt])
+        else {
+          try {
+            await this.abortable(cancelGen, sleep(OBS_START_DELAYS_MS[attempt]))
+          } catch {
+            return null
+          }
+        }
       }
     }
   }
@@ -753,7 +802,7 @@ export class LiveController extends EventEmitter {
    * Runs inside the queue: OBS is down (restarts exhausted, boot or attach failed) — quit whatever is left,
    * start it again with backoff and attach right away (the queued 'ready' then finds it attached).
    */
-  private async reviveObs(): Promise<boolean> {
+  private async reviveObs(cancelGen: number): Promise<boolean> {
     this.intentionalObsStop = true
     try {
       await this.d.obs.stop().catch(() => {})
@@ -761,9 +810,13 @@ export class LiveController extends EventEmitter {
       this.intentionalObsStop = false
     }
     this.setState({ obs: 'restarting' })
-    const conn = await this.startObsWithRetry(++this.restartGen)
+    const conn = await this.startObsWithRetry(++this.restartGen, cancelGen)
     if (conn) await this.attach(conn)
     if (this.ctl) return true
+    if (cancelGen !== this.cancelGen) {
+      this.setState({ obs: 'down' }) // Arrêter cancelled the revive: not a boot failure
+      return false
+    }
     this.setState({ obs: 'down', warning: MSG_BOOT_FAILED })
     return false
   }
@@ -885,7 +938,10 @@ export class LiveController extends EventEmitter {
     if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
     if (!this.ctl) {
       if (this.state.obs === 'restarting' || this.booting) return { ok: false, message: MSG_OBS_NOT_READY }
-      if (!(await this.reviveObs())) return { ok: false, message: MSG_BOOT_FAILED }
+      if (!(await this.reviveObs(gen))) {
+        if (gen !== this.cancelGen) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
+        return { ok: false, message: MSG_BOOT_FAILED }
+      }
     }
 
     // Resolve first: a failure here must leave a running show (transcript, stream supervision) untouched.
@@ -907,6 +963,7 @@ export class LiveController extends EventEmitter {
       this.setState({ phase: 'starting' })
 
       // Switching from a previous show: the old stream must be fully stopped before retargeting.
+      this.retryAttempt = 0
       this.clearRetry()
       this.clearCaptionsTimer()
       this.captionsAuthLost = false
@@ -963,6 +1020,7 @@ export class LiveController extends EventEmitter {
   private async doStop(streamWaitMs = STOP_WAIT_MS, end: Partial<LiveState> = {}): Promise<void> {
     if (this.state.phase === 'idle' && !this.current) return
     this.setState({ phase: 'stopping' })
+    this.retryAttempt = 0
     this.clearRetry()
     this.clearCaptionsTimer()
     this.authLost = false
@@ -996,7 +1054,7 @@ export class LiveController extends EventEmitter {
     const c = this.ctl
     if (!c) return
     if (!this.streamRunning) {
-      await c.stopStream().catch(() => {})
+      await Promise.race([c.stopStream().catch(() => {}), limit])
       return
     }
     this.stopRequested = true
@@ -1004,7 +1062,8 @@ export class LiveController extends EventEmitter {
     try {
       // false: OBS had no running output (e.g. the SRT connect is still pending) — no 'stopped' will
       // come; if the connect succeeds later, onStreamState stops the unwanted stream.
-      if (await c.stopStream()) await stopped
+      const sent = await Promise.race([c.stopStream(), limit.then(() => false)])
+      if (sent) await stopped
     } catch {
       /* OBS gone or already stopped */
     } finally {

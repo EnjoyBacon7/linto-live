@@ -52,7 +52,9 @@ async function renderMain() {
   render(<App />)
   await screen.findByRole('listbox', { name: 'Sessions' })
 }
-const row = (name: string) => screen.getByRole('option', { name })
+// A session option's accessible name is « name, status » (hidden status text).
+const sessionName = (name: string) => (n: string) => n === name || n.startsWith(name + ', ')
+const row = (name: string) => screen.getByRole('option', { name: sessionName(name) })
 const startBtn = () => screen.getByRole('button', { name: 'Démarrer' }) as HTMLButtonElement
 const toolbar = () => screen.getByRole('toolbar')
 
@@ -90,7 +92,7 @@ describe('Sidebar', () => {
     render(<App />)
     expect(await screen.findByText("Trop de sessions dans l'organisation.")).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
-    expect(await screen.findByRole('option', { name: 'Conférence' })).toBeTruthy()
+    expect(await screen.findByRole('option', { name: sessionName('Conférence') })).toBeTruthy()
     expect(screen.queryByText("Trop de sessions dans l'organisation.")).toBeNull()
   })
 
@@ -145,6 +147,20 @@ describe('Démarrer', () => {
     expect((screen.getByLabelText('Source principale') as HTMLSelectElement).value).toBe('none') // « Aucune »
     await userEvent.selectOptions(screen.getByLabelText('Micro'), 'a1')
     expect(startBtn().disabled).toBe(false)
+  })
+
+  it('« Écouter le retour audio » toggles the audio feedback and warns about loudspeakers once on', async () => {
+    setup()
+    await renderMain()
+    const check = screen.getByLabelText('Écouter le retour audio') as HTMLInputElement
+    expect(check.checked).toBe(false)
+    expect(check.disabled).toBe(false)
+    await userEvent.click(check)
+    expect(api.live.setAudioMonitor).toHaveBeenCalledWith(true)
+    expect(screen.queryByText(/utilisez un casque/)).toBeNull()
+    act(() => emit('live-state', { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off', audioMonitor: true }))
+    expect((screen.getByLabelText('Écouter le retour audio') as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByText(/utilisez un casque/)).toBeTruthy()
   })
 
   it('the camera can be set back to « Aucune »', async () => {
@@ -302,7 +318,7 @@ describe('Nouvelle session…', () => {
     expect(within(d).getByText('Utiliser cette session ?')).toBeTruthy()
     await userEvent.click(within(d).getByRole('button', { name: 'Utiliser' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getAllByRole('option', { name: 'Atelier' })).toHaveLength(1)
+    expect(screen.getAllByRole('option', { name: sessionName('Atelier') })).toHaveLength(1)
     expect(row('Atelier').getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('Défini par la session')).toBeTruthy()
     await userEvent.click(startBtn())
@@ -340,7 +356,7 @@ describe('Nouvelle session…', () => {
     expect(within(d).queryByRole('button', { name: 'Utiliser' })).toBeNull()
     await userEvent.click(within(d).getByRole('button', { name: 'OK' }))
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByRole('option', { name: 'Privée' })).toBeNull()
+    expect(screen.queryByRole('option', { name: sessionName('Privée') })).toBeNull()
     expect(api.live.start).not.toHaveBeenCalled()
   })
 
@@ -352,7 +368,7 @@ describe('Nouvelle session…', () => {
     const d = await screen.findByRole('dialog', { name: 'La session « Ancienne » existe déjà.' })
     expect(within(d).getByText('Elle est terminée et ne peut pas être reprise. Choisis un autre nom.')).toBeTruthy()
     await userEvent.click(within(d).getByRole('button', { name: 'OK' }))
-    expect(screen.queryByRole('option', { name: 'Ancienne' })).toBeNull()
+    expect(screen.queryByRole('option', { name: sessionName('Ancienne') })).toBeNull()
   })
 
   it('OK is disabled without a name; Escape cancels', async () => {
@@ -764,7 +780,7 @@ describe('Review fixes', () => {
     await renderMain()
     act(() => emit('live-state', live({ session: { name: 'Ailleurs', status: 'active' } })))
     const tabbable = screen.getAllByRole('option').filter((o) => o.tabIndex === 0)
-    expect(tabbable.map((o) => o.textContent)).toEqual(['Conférence'])
+    expect(tabbable.map((o) => o.textContent)).toEqual(['Conférence, Prête'])
   })
 
   it('Démarrer stays disabled while a start launched elsewhere is in progress', async () => {
@@ -1184,5 +1200,14 @@ describe('Enregistrement', () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'off' })) } as never })
     await renderMain()
     expect(within(toolbar()).queryByText('REC')).toBeNull()
+  })
+})
+
+describe('A-014 session status in the option name', () => {
+  it('exposes the status label as hidden text in the option accessible name', async () => {
+    setup()
+    await renderMain()
+    expect(screen.getByRole('option', { name: /Plénière.*En direct/ })).toBeTruthy()
+    expect(screen.getByRole('option', { name: /Atelier.*En pause/ })).toBeTruthy()
   })
 })

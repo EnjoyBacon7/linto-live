@@ -448,6 +448,10 @@ function main(): void {
   ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
   ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
   ipcMain.handle(IPC.liveClearTranscript, () => live.clearTranscript())
+  ipcMain.handle(IPC.liveSetAudioMonitor, (_e, on: unknown) => {
+    if (typeof on !== 'boolean') throw new Error('Réglage invalide.')
+    return live.setAudioMonitor(on)
+  })
   let uninstalling = false
   const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {

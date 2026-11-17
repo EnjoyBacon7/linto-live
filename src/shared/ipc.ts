@@ -31,6 +31,8 @@ export interface LiveState {
   videoOnAir?: 'primary' | 'backup'
   /** Recording of the show to a file: 'error' when it could not start or stopped by itself (the show goes on). */
   recording: 'off' | 'on' | 'error'
+  /** Audio feedback: the micro, as sent to LinTO and recorded, plays on the system output (absent = off). */
+  audioMonitor?: boolean
   warning?: string
 }
 
@@ -86,6 +88,8 @@ export interface LintoLiveApi {
     terminate(): Promise<void>
     /** Opens (another) OBS output window, even if one is already open. */
     showOutputWindow(): Promise<void>
+    /** Audio feedback on/off: hear the micro as OBS sends it to LinTO and records it (not saved). */
+    setAudioMonitor(on: boolean): Promise<void>
     /**
      * Clears the on-air session's transcript on LinTO (« Effacer la transcription », as in LinTO Studio): Studio,
      * the subtitle band and the transcript here all empty.
@@ -141,6 +145,7 @@ export const IPC = {
   liveGetTranscript: 'live:get-transcript',
   liveExportTranscript: 'live:export-transcript',
   liveSetSubtitleLanguage: 'live:set-subtitle-language',
+  liveSetAudioMonitor: 'live:set-audio-monitor',
   appUninstall: 'app:uninstall',
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
@@ -252,6 +257,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),
       showOutputWindow: () => call(IPC.liveShowOutput),
+      setAudioMonitor: (on) => call(IPC.liveSetAudioMonitor, on),
       clearTranscript: () => call(IPC.liveClearTranscript),
       getState: () => call(IPC.liveGetState),
       getTranscript: () => call(IPC.liveGetTranscript),

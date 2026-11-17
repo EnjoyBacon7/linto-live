@@ -14,7 +14,8 @@ describe('IPC constants', () => {
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
         'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
-        'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe'
+        'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe',
+        'liveSetAudioMonitor'
       ].sort()
     )
   })
@@ -67,6 +68,7 @@ describe('createLintoLiveApi', () => {
     await api.live.stop()
     await api.live.terminate()
     await api.live.showOutputWindow()
+    await api.live.setAudioMonitor(true)
     await api.live.getState()
     await api.live.getTranscript()
     await api.live.exportTranscript('srt')
@@ -94,6 +96,7 @@ describe('createLintoLiveApi', () => {
       [IPC.liveStop],
       [IPC.liveTerminate],
       ['live:show-output'],
+      ['live:set-audio-monitor', true],
       ['live:get-state'],
       ['live:get-transcript'],
       ['live:export-transcript', 'srt'],

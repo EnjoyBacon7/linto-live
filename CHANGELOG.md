@@ -12,6 +12,9 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   sur LinTO ; les sous-titres et la transcription se vident dans LinTO Live **et** dans LinTO
   Studio. Un effacement fait depuis LinTO Studio vide aussi LinTO Live. Remplace « Effacer les
   sous-titres », qui ne vidait que le bandeau localement.
+- **Écouter le retour audio** (réglage Micro) : le son du micro tel qu'il est envoyé à LinTO et
+  enregistré est joué sur la sortie audio du système, pour vérifier sa qualité. Désactivé à
+  chaque lancement ; à utiliser au casque (sur haut-parleurs, le micro le reprend : larsen).
 
 ### Modifié
 

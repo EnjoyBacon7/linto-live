@@ -67,7 +67,11 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
         setRemember(false)
       }
       setMethods(await window.lintoLive.auth.methods())
-    } catch (e) { setError(ipcErrorMessage(e)) }
+    } catch (e) {
+      // Rejected: show the saved instance again, the one the login will actually use.
+      setInstance(loaded.current)
+      setError(ipcErrorMessage(e))
+    }
   }
   const submit = (e: FormEvent): void => {
     e.preventDefault()
