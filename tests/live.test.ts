@@ -1543,6 +1543,26 @@ describe('OBS exit during a show', () => {
   })
 })
 
+describe('stream retry backoff across shows', () => {
+  it('starts the next show with the first (short) retry delay', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.startStream.mockRejectedValue(new Error('refused'))
+    for (let i = 0; i < 4; i++) {
+      c.emitState('stopped')
+      await vi.advanceTimersByTimeAsync(31_000)
+    }
+    await t.live.stop()
+    await t.live.start('Conf')
+    const afterStart = c.startStream.mock.calls.length
+    c.emitState('stopped')
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(c.startStream.mock.calls.length - afterStart).toBe(1)
+  })
+})
+
 describe('backup source', () => {
   const BACKUP = { kind: 'image', path: '/secours.png' } as const
 
@@ -2054,5 +2074,79 @@ describe('LiveController recording', () => {
     await flush()
     expect(t.ctl().stopRecord).toHaveBeenCalled()
     expect(t.last().recording).toBe('off')
+  })
+
+  it('a hung StopStream does not hold Arrêter past the stop deadline', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('active')
+    c.stopStream.mockImplementation(() => new Promise<boolean>((r) => setTimeout(() => r(true), 15_000)))
+    let done = false
+    const p = t.live.stop().then(() => { done = true })
+    await vi.advanceTimersByTimeAsync(10_500)
+    expect(done).toBe(true)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await p
+  })
+
+  it('a hung StopStream does not hold Arrêter when the stream had already dropped', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('active')
+    c.emitState('stopped')
+    c.stopStream.mockImplementation(() => new Promise<boolean>((r) => setTimeout(() => r(true), 15_000)))
+    let done = false
+    const p = t.live.stop().then(() => { done = true })
+    await vi.advanceTimersByTimeAsync(10_500)
+    expect(done).toBe(true)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await p
+  })
+})
+
+describe('stream state when OBS is lost (A-001)', () => {
+  it('leaves "active" when OBS restarts, and shows "error" if the re-attach fails', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.ctl().emitState('active')
+    expect(t.last()).toMatchObject({ phase: 'live', stream: 'active' })
+    t.controllerFactory.mockImplementationOnce(async () => {
+      const c = fakeController(t.log)
+      c.ensureScene.mockRejectedValue(new Error('boom'))
+      t.ctls.push(c)
+      return c
+    })
+    t.obs.emit('restarting', 1)
+    expect(t.last().stream).toBe('starting')
+    t.obs.emit('ready', { port: 1, password: 'x' })
+    await t.live.settled()
+    expect(t.last()).toMatchObject({ obs: 'down', stream: 'error' })
+  })
+})
+
+describe('Arrêter during an OBS revive (A-005)', () => {
+  it('stops without waiting for the remaining obs.start retries', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.obs.emit('exit', 1)
+    t.obs.start.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 20_000))
+      throw new Error('no')
+    })
+    const s = t.live.start('Conf')
+    await flush()
+    let done = false
+    const p = t.live.stop().then(() => { done = true })
+    // the in-flight obs.start may finish (20 s), but no further attempt nor backoff is waited for
+    await vi.advanceTimersByTimeAsync(20_100)
+    expect(t.obs.start).toHaveBeenCalledTimes(2) // boot + the one revive attempt in flight at stop()
+    expect(done).toBe(true)
+    await expect(s).resolves.toMatchObject({ ok: false, cancelled: true })
+    await p
   })
 })

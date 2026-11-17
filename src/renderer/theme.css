@@ -538,3 +538,16 @@ h3 {
   gap: 8px;
   padding: 14px 20px 18px;
 }
+
+/* Text for assistive tech only; no visual footprint. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

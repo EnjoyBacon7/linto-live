@@ -3,6 +3,7 @@ import { LintoHttpError, UnauthorizedError, type AuthMethod, type SavedLogin } f
 import type { LintoApi } from './api'
 import type { LintoUrls } from './instance'
 import { denyAllPermissions } from '../security'
+import { LINTO_TIMEOUT_MS, withTimeout } from './timeout'
 
 export type RedirectResult = { kind: 'token'; token: string } | { kind: 'exchange' } | { kind: 'none' }
 
@@ -133,11 +134,14 @@ export async function ssoLogin(
   if (method.path === 'oidc/organization') {
     const email = opts.email?.trim()
     if (!email) throw new Error("Email requis pour le SSO d'organisation.")
-    const r = await ses.fetch(`${urls.auth}/oidc/organization/resolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
-    })
+    const r = await withTimeout(() =>
+      ses.fetch(`${urls.auth}/oidc/organization/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+        signal: AbortSignal.timeout(LINTO_TIMEOUT_MS)
+      })
+    )
     if (r.status === 404) throw new Error('Aucune organisation SSO pour cet email.')
     if (!r.ok) throw new Error(`SSO: HTTP ${r.status}`)
     loginUrl += `?email=${encodeURIComponent(email)}`
@@ -160,9 +164,11 @@ export async function ssoLogin(
     }
     const exchange = async () => {
       try {
-        const r = await ses.fetch(`${urls.auth}/oidc/token`, { credentials: 'include' })
+        const r = await withTimeout(() =>
+          ses.fetch(`${urls.auth}/oidc/token`, { credentials: 'include', signal: AbortSignal.timeout(LINTO_TIMEOUT_MS) })
+        )
         if (!r.ok) throw new Error(`SSO: échange du jeton refusé (HTTP ${r.status})`)
-        const body = (await r.json()) as { auth_token?: string }
+        const body = (await withTimeout(() => r.json())) as { auth_token?: string }
         if (!body.auth_token) throw new Error('SSO: jeton absent de la réponse')
         finish(null, body.auth_token)
       } catch (e) {
