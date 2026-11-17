@@ -123,7 +123,9 @@ Conseils :
 5. **Démarrer** (⌘↩ / Ctrl+Entrée) : les sous-titres apparaissent sur la vidéo.
 6. **Arrêter** (⌘. / Ctrl+.) coupe les sous-titres et l'envoi du son **sans terminer** la session
    LinTO, qui peut être reprise plus tard ; la fenêtre de sortie reste ouverte, sur la caméra.
-   **Terminer la session…** (menu Session) la clôt définitivement côté LinTO.
+   **Terminer la session…** (menu Session) la clôt définitivement côté LinTO, comme « Arrêter et
+   enregistrer » dans LinTO Studio : la transcription (et ses traductions) est enregistrée comme
+   média dans LinTO Studio, puis la session est supprimée.
 
 La barre d'état en bas indique si LinTO reçoit bien le son. L'icône LinTO Live dans la barre des
 menus (macOS) ou la zone de notification (Linux) signale quand un direct est en cours. Quitter

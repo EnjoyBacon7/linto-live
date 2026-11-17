@@ -3,6 +3,8 @@
  * answers holds Démarrer / Arrêter / Terminer for undici's default 300 s.
  */
 export const LINTO_TIMEOUT_MS = 20_000
+/** Terminer: Studio stops the session (up to 15 s for the last captions), then saves the conversation before answering. */
+export const TERMINATE_TIMEOUT_MS = 60_000
 export const MSG_LINTO_TIMEOUT = 'LinTO ne répond pas (délai dépassé). Réessaie dans un instant.'
 
 /** Runs `f`, turning an AbortSignal.timeout abort into a readable error. */
