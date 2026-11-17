@@ -11,6 +11,8 @@ export interface StageProps {
   hasCamera: boolean
   /** Session selected in the sidebar (null: none). The transcript shows only if it belongs to it. */
   sessionName: string | null
+  /** Its LinTO id (null: unknown yet): off air, its transcript is loaded from LinTO. */
+  sessionId: string | null
   banners: ReactNode
 }
 
@@ -33,6 +35,24 @@ function useTranscript(): TranscriptData {
     return () => { alive = false; off() }
   }, [])
   return t
+}
+
+/**
+ * Off air, the selected session's transcript comes from LinTO (main replaces its copy and sends it as a
+ * 'transcript' event). Returns whether it is loading, and the error if it could not be loaded.
+ */
+function useSessionTranscript(sessionId: string | null, onAir: boolean): { loading: boolean; error: string | null } {
+  const [st, setSt] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null })
+  useEffect(() => {
+    if (onAir || !sessionId) { setSt({ loading: false, error: null }); return }
+    let alive = true
+    setSt({ loading: true, error: null })
+    window.lintoLive.live.viewTranscript(sessionId)
+      .then(() => { if (alive) setSt({ loading: false, error: null }) })
+      .catch((e) => { if (alive) setSt({ loading: false, error: ipcErrorMessage(e) }) })
+    return () => { alive = false }
+  }, [sessionId, onAir])
+  return st
 }
 
 /** Camera preview: main polls OBS for it only while it is displayed. */
@@ -124,9 +144,10 @@ const Finals = memo(function Finals({ finals }: { finals: TranscriptSegment[] })
 })
 
 /** Centre: banners on top, the camera preview (when a camera is chosen), then the live transcript with its history. */
-export function Stage({ onAir, hasCamera, sessionName, banners }: StageProps) {
+export function Stage({ onAir, hasCamera, sessionName, sessionId, banners }: StageProps) {
   const live = useTranscript()
-  // Main keeps the transcript of one show only: another session selected has nothing to show here yet.
+  const loaded = useSessionTranscript(sessionId, onAir)
+  // Main keeps one session's transcript: another one selected shows nothing until LinTO's has loaded.
   const mine = onAir || sessionName === null || live.sessionName === undefined || live.sessionName === sessionName
   const t = mine ? live : EMPTY
   const scroller = useRef<HTMLDivElement>(null)
@@ -160,7 +181,10 @@ export function Stage({ onAir, hasCamera, sessionName, banners }: StageProps) {
       <div className="stage-body">
         {empty ? (
           <p className="stage-placeholder">
-            {onAir ? 'En attente de paroles…' : 'La transcription s’affichera ici au démarrage du direct.'}
+            {onAir ? 'En attente de paroles…'
+              : loaded.loading ? 'Chargement de la transcription…'
+                : loaded.error ? `Transcription indisponible : ${loaded.error}`
+                  : 'La transcription s’affichera ici au démarrage du direct.'}
           </p>
         ) : (
           <div ref={scroller} className="transcript selectable" role="log" aria-live="polite" onScroll={onScroll}>

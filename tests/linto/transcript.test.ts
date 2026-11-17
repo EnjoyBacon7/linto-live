@@ -12,6 +12,40 @@ function log(max?: number) {
 }
 
 describe('TranscriptLog', () => {
+  it('history: LinTO\'s captions come first, merged with the live finals (by run and segment)', () => {
+    const { t } = log()
+    const run1 = '2026-11-10T08:00:00.000Z'
+    const run2 = '2026-11-10T09:00:00.000Z'
+    t.reset('Conf', 5)
+    t.final({ segmentId: 1, text: 'live un', astart: run2, start: 2, end: 3 })
+    t.final({ segmentId: 2, text: 'live deux', astart: run2, start: 4, end: 5 })
+    t.final({ segmentId: 1, text: 'sans astart' })
+    const u = t.history([
+      { segmentId: 1, text: 'ancien', astart: run1, start: 0, end: 1 },
+      { segmentId: 0, text: 'bot', locutor: 'bot', astart: run1 },
+      { segmentId: 1, text: 'live un', astart: run2, start: 2, end: 3 },
+      { segmentId: 1, text: 'live un', locutor: 'Alice', astart: run2, start: 2, end: 3 }
+    ])
+    expect(u.kind).toBe('snapshot')
+    const s = t.snapshot()
+    expect(s.sessionName).toBe('Conf')
+    expect(s.finals.map((f) => [f.text, f.locutor])).toEqual([
+      ['ancien', undefined], ['live un', 'Alice'], ['live deux', undefined], ['sans astart', undefined]
+    ])
+    // A final already in the history is not added again; one without astart always is.
+    expect(t.final({ segmentId: 2, text: 'live deux', astart: run2, start: 4, end: 5 })).toBeNull()
+    expect(t.final({ segmentId: 1, text: 'sans astart' })).not.toBeNull()
+    expect(t.snapshot().finals).toHaveLength(5)
+  })
+
+  it('history keeps the most recent finals past max', () => {
+    const { t } = log(2)
+    const astart = '2026-11-10T08:00:00.000Z'
+    t.history([0, 1, 2].map((n) => ({ segmentId: n, text: `s${n}`, astart, start: n, end: n })))
+    expect(t.snapshot()).toMatchObject({ finals: [{ text: 's1' }, { text: 's2' }], dropped: 1 })
+    expect(t.final({ segmentId: 0, text: 's0', astart, start: 0, end: 0 })).not.toBeNull() // dropped: no longer known
+  })
+
   it('keeps finals in order, the latest partial, and trims text', () => {
     const { t } = log()
     expect(t.partial({ segmentId: 1, text: ' Bon' })).toEqual({ kind: 'partial', segment: { id: 1, text: 'Bon', at: 1_000 } })

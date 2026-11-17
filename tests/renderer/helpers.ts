@@ -27,6 +27,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       setAudioMonitor: vi.fn().mockResolvedValue(undefined),
       getState: vi.fn().mockResolvedValue({ phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off' }),
       getTranscript: vi.fn().mockResolvedValue({ finals: [], partial: null }),
+      viewTranscript: vi.fn().mockResolvedValue({ finals: [], partial: null }),
       exportTranscript: vi.fn().mockResolvedValue({ saved: true }),
       ...over.live
     },

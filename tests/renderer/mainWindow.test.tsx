@@ -107,6 +107,19 @@ describe('Sidebar', () => {
     await waitFor(() => expect(row('Atelier').getAttribute('aria-selected')).toBe('true'))
   })
 
+  it('selecting a session off air loads its transcript from LinTO and shows it', async () => {
+    const viewTranscript = vi.fn(async (id: string) => {
+      const t = { sessionName: 'Atelier', finals: [{ id: 1, text: 'Déjà transcrit', at: Date.now() }], partial: null }
+      if (id === 's2') emit('transcript', { kind: 'snapshot', transcript: t })
+      return t
+    })
+    setup({ live: { viewTranscript } })
+    await renderMain()
+    await userEvent.click(row('Atelier'))
+    await waitFor(() => expect(viewTranscript).toHaveBeenCalledWith('s2'))
+    expect(await screen.findByText('Déjà transcrit')).toBeTruthy()
+  })
+
   it('refreshes the list every 30 s', async () => {
     vi.useFakeTimers()
     setup()

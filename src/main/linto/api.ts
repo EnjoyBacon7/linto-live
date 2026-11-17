@@ -5,6 +5,7 @@ import {
 import { orgRights } from '../../shared/rights'
 import type { LintoUrls } from './instance'
 import { LINTO_TIMEOUT_MS, TERMINATE_TIMEOUT_MS, withTimeout } from './timeout'
+import type { CaptionEvent } from './captions'
 
 export { ForbiddenError, LintoHttpError, NotFoundError, UnauthorizedError }
 
@@ -42,6 +43,24 @@ function errorBody(text: string): { message?: string; code?: string } {
 
 const SEARCH_PAGE_SIZE = 50
 const SEARCH_MAX_PAGES = 20
+/** Captions asked per page of a channel's history (LinTO pages from the newest). */
+const CAPTIONS_PAGE_SIZE = 1000
+
+/** A stored caption as LinTO sends it (`formatCaption`), or null when it is not one. */
+function toCaption(c: any): CaptionEvent | null {
+  if (!c || typeof c !== 'object' || typeof c.text !== 'string') return null
+  const out: CaptionEvent = { segmentId: typeof c.segmentId === 'number' ? c.segmentId : Number(c.segmentId) || 0, text: c.text }
+  if (typeof c.astart === 'string') out.astart = c.astart
+  if (c.start != null && Number.isFinite(Number(c.start))) out.start = Number(c.start)
+  if (c.end != null && Number.isFinite(Number(c.end))) out.end = Number(c.end)
+  if (typeof c.lang === 'string') out.lang = c.lang
+  if (typeof c.locutor === 'string') out.locutor = c.locutor
+  return out
+}
+
+function toCaptions(list: unknown): CaptionEvent[] {
+  return Array.isArray(list) ? list.map(toCaption).filter((c): c is CaptionEvent => c !== null) : []
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function toChannel(c: any): Channel {
@@ -88,7 +107,10 @@ export class LintoApi {
       const text = await res.text().catch(() => '')
       const { message, code } = errorBody(text)
       if (res.status === 401) {
-        if (auth && message === RESOURCE_DENIED_MESSAGE) throw new ForbiddenError(401, text, message, code)
+        // JSON from studio-api's routes; plain text (`Unauthorized: <message>`) from its proxy's after-result checks.
+        if (auth && (message === RESOURCE_DENIED_MESSAGE || (message === undefined && text.includes(RESOURCE_DENIED_MESSAGE)))) {
+          throw new ForbiddenError(401, text, message ?? RESOURCE_DENIED_MESSAGE, code)
+        }
         throw new UnauthorizedError()
       }
       if (res.status === 403) throw new ForbiddenError(403, text, message, code)
@@ -153,6 +175,9 @@ export class LintoApi {
     for (let page = 0; page < SEARCH_MAX_PAGES; page++) {
       const q = new URLSearchParams({
         ...params,
+        // studio-api forwards the organisation of the path only in the (ignored) body of this GET: without the
+        // query parameter, session-api answers every organisation's sessions (Studio's frontend sends it too).
+        organizationId: orgId,
         limit: String(SEARCH_PAGE_SIZE),
         offset: String(out.length) // = page * limit, and still correct if the server caps the page size
       })
@@ -197,8 +222,38 @@ export class LintoApi {
     }))
   }
 
+  /** The session, without its captions (LinTO sends them all by default). */
   async getSession(orgId: string, id: string): Promise<Session> {
-    return toSession(await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}`))
+    return toSession(await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${id}?withCaptions=false`))
+  }
+
+  /**
+   * The finalized captions LinTO stored for a session's channel, oldest first (at most `max`: the most recent
+   * ones), as LinTO Studio loads them. A LinTO without the paged route gets them from the whole session.
+   */
+  async channelCaptions(orgId: string, sessionId: string, channelId: number, max = Infinity): Promise<CaptionEvent[]> {
+    const pages: CaptionEvent[][] = []
+    let got = 0
+    try {
+      while (got < max) {
+        const limit = Math.min(CAPTIONS_PAGE_SIZE, max - got)
+        const q = new URLSearchParams({ limit: String(limit), offset: String(got) })
+        const r = await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${sessionId}/channels/${channelId}?${q}`)
+        const raw: unknown[] = Array.isArray(r?.closedCaptions) ? r.closedCaptions : []
+        pages.unshift(toCaptions(raw)) // each page is chronological; later pages are older
+        got += raw.length
+        const total = typeof r?.totalClosedCaptions === 'number' ? r.totalClosedCaptions : null
+        if (raw.length === 0 || (total !== null ? got >= total : raw.length < limit)) break
+      }
+    } catch (e) {
+      if (!(e instanceof NotFoundError) || got > 0) throw e
+      // Older LinTO: no paged route, the session carries every caption of its channels.
+      const s = await this.request(`${this.urls.api}/organizations/${orgId}/sessions/${sessionId}`)
+      const ch = Array.isArray(s?.channels) ? s.channels.find((c: any) => c?.id === channelId) : undefined
+      const all = toCaptions(ch?.closedCaptions)
+      return all.length > max ? all.slice(all.length - max) : all
+    }
+    return pages.flat()
   }
 
   /** Replaces the session's `meta` (send the whole object: LinTO does not merge it). */
