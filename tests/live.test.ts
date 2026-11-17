@@ -189,7 +189,7 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
     }
     broadcasts.push(b)
     return {
-      url: `tcp://127.0.0.1:${broadcasts.length}`,
+      url: `unix:/tmp/l${broadcasts.length}/obs.sock`,
       onClose: (cb: (e: Error | null) => void) => void listeners.push(cb),
       close: () => { b.closed = true; listeners.splice(0).forEach((l) => l(null)) }
     }
@@ -1798,8 +1798,8 @@ describe('LiveController online broadcast', () => {
     await t.live.start('Conf')
     await flush()
     expect(t.openBroadcast).toHaveBeenCalledWith({ server: SERVER, key: 'abcd-1234' })
-    expect(t.ctl().startBroadcast).toHaveBeenCalledWith('tcp://127.0.0.1:1')
-    expect(t.log.filter((l) => /Broadcast/.test(l))).toEqual([`openBroadcast:${SERVER}`, 'startBroadcast:tcp://127.0.0.1:1'])
+    expect(t.ctl().startBroadcast).toHaveBeenCalledWith('unix:/tmp/l1/obs.sock')
+    expect(t.log.filter((l) => /Broadcast/.test(l))).toEqual([`openBroadcast:${SERVER}`, 'startBroadcast:unix:/tmp/l1/obs.sock'])
     expect(t.ctl().startRecord).not.toHaveBeenCalled()
     expect(t.mkdirp).not.toHaveBeenCalled()
     expect(t.last()).toMatchObject({ phase: 'live', recording: 'on', recordingTarget: 'broadcast' })
@@ -1858,7 +1858,7 @@ describe('LiveController online broadcast', () => {
     await t.live.start('Conf')
     await flush()
     t.broadcasts[0].drop(new Error('le serveur de diffusion a fermé la connexion.'))
-    t.ctl().emitRecord({ active: false, path: 'tcp://127.0.0.1:1' }) // the relay then ends OBS's output
+    t.ctl().emitRecord({ active: false, path: 'unix:/tmp/l/obs.sock' }) // the relay then ends OBS's output
     expect(t.last()).toMatchObject({ phase: 'live', recording: 'error', warning: MSG_BROADCAST_FAILED + 'le serveur de diffusion a fermé la connexion.' })
     expect(t.saved).toEqual([])
   })
@@ -1868,7 +1868,7 @@ describe('LiveController online broadcast', () => {
     await t.live.boot()
     await t.live.start('Conf')
     await flush()
-    t.ctl().emitRecord({ active: false, path: 'tcp://127.0.0.1:1' })
+    t.ctl().emitRecord({ active: false, path: 'unix:/tmp/l/obs.sock' })
     expect(t.last()).toMatchObject({ recording: 'error', warning: MSG_BROADCAST_FAILED + MSG_BROADCAST_STOPPED })
     expect(t.broadcasts[0].closed).toBe(true)
   })
@@ -1887,7 +1887,7 @@ describe('LiveController online broadcast', () => {
     await t.live.settled()
     await flush()
     expect(t.openBroadcast).toHaveBeenLastCalledWith({ server: SERVER, key: 'old' })
-    expect(t.ctl().startBroadcast).toHaveBeenCalledWith('tcp://127.0.0.1:2')
+    expect(t.ctl().startBroadcast).toHaveBeenCalledWith('unix:/tmp/l2/obs.sock')
     await t.live.stop()
     await t.live.start('Conf')
     await flush()

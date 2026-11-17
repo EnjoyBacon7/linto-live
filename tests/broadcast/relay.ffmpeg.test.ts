@@ -26,7 +26,7 @@ describe.skipIf(!hasFfmpeg)('openBroadcast with ffmpeg on both ends', () => {
     const srvDone = new Promise((r) => srv.once('exit', r))
     await new Promise((r) => setTimeout(r, 700))
     const s = await openBroadcast({ server: `rtmp://127.0.0.1:${port}/live2`, key: 'cle-secrete' })
-    expect(s.url).toMatch(/^tcp:\/\/127\.0\.0\.1:\d+$/)
+    expect(s.url).toMatch(/^unix:\//)
     const src = spawn('ffmpeg', [
       '-v', 'error', '-re', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440',
       '-t', '3', '-c:v', 'libx264', '-g', '60', '-c:a', 'aac', '-f', 'flv', s.url

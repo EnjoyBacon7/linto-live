@@ -422,7 +422,7 @@ export class ObsController {
   }
 
   /**
-   * Broadcasts the output online: FLV to `url`, the app's local relay (`tcp://127.0.0.1:<port>`, see
+   * Broadcasts the output online: FLV to `url`, the app's relay (`unix:<private socket>`, see
    * broadcast/relay.ts), which publishes to the platform. OBS never gets the stream key.
    */
   async startBroadcast(url: string): Promise<void> {

@@ -112,7 +112,7 @@ function setup(meta?: Record<string, unknown>) {
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
     overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', decodeLuma: () => null, watermarkConfig: () => CFG,
     mkdirp: async () => {}, defaultRecordDir: '/rec',
-    openBroadcast: async () => ({ url: 'tcp://127.0.0.1:1', onClose: () => {}, close: () => {} })
+    openBroadcast: async () => ({ url: 'unix:/tmp/l/obs.sock', onClose: () => {}, close: () => {} })
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const styles = () => overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')

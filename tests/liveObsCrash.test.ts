@@ -81,7 +81,7 @@ it('OBS crashing during a camera change: the restarted OBS is re-attached and Ar
     decodeLuma: vi.fn(() => null),
     mkdirp: vi.fn(async () => {}),
     defaultRecordDir: '/tmp/linto-live-rec',
-    openBroadcast: async () => ({ url: 'tcp://127.0.0.1:1', onClose: () => {}, close: () => {} }),
+    openBroadcast: async () => ({ url: 'unix:/tmp/l/obs.sock', onClose: () => {}, close: () => {} }),
     platform: 'linux'
   } satisfies LiveDeps)
   await live.boot()

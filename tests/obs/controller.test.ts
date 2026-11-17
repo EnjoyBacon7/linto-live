@@ -526,8 +526,8 @@ describe('ObsController recording', () => {
 
   it('startBroadcast points the FFmpeg output at the local relay in FLV, then starts', async () => {
     const f = fakeClient()
-    await new ObsController(f.client).startBroadcast('tcp://127.0.0.1:4567')
-    expect(f.calls).toEqual(ffmpegStart('tcp://127.0.0.1:4567', 'flv', 'video/x-flv'))
+    await new ObsController(f.client).startBroadcast('unix:/tmp/l/obs.sock')
+    expect(f.calls).toEqual(ffmpegStart('unix:/tmp/l/obs.sock', 'flv', 'video/x-flv'))
   })
 
   it('fileStamp: local date and time, zero-padded', () => {

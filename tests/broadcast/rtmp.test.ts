@@ -1,4 +1,6 @@
-import { createServer, type Server, type Socket } from 'node:net'
+import { statSync } from 'node:fs'
+import { connect as netConnect, createServer, type Server, type Socket } from 'node:net'
+import { dirname } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { decode, encode, type Amf } from '../../src/main/broadcast/amf0'
 import { ChunkReader, MSG, chunk, endpoint } from '../../src/main/broadcast/rtmp'
@@ -129,9 +131,15 @@ describe('openBroadcast (RTMP session)', () => {
     expect(connect[2]).toMatchObject({ app: 'live2', tcUrl: `rtmp://127.0.0.1:${port}/live2` })
     expect(f.commands.find((c) => c[0] === 'publish')!.slice(3)).toEqual(['k-123', 'live'])
 
-    const { connect: tcp } = await import('node:net')
-    const u = new URL(s.url)
-    const obs = tcp({ host: u.hostname, port: Number(u.port) })
+    expect(s.url).toMatch(/^unix:\//)
+    const sockPath = s.url.slice('unix:'.length)
+    // Private: the directory is the user's only (no other local user can reach the socket).
+    expect(statSync(dirname(sockPath)).mode & 0o777).toBe(0o700)
+    const obs = netConnect({ path: sockPath })
+    await new Promise((r) => obs.once('connect', r))
+    // A second producer (another local process) is turned away: the socket accepts only one.
+    const intruder = netConnect({ path: sockPath })
+    await new Promise((r) => intruder.once('error', r).once('close', r))
     const tag = (type: number, body: string): Buffer => {
       const h = Buffer.alloc(11)
       h[0] = type
@@ -143,6 +151,7 @@ describe('openBroadcast (RTMP session)', () => {
     expect(f.media).toEqual([MSG.data, MSG.video, MSG.audio])
     s.close()
     obs.destroy()
+    expect(() => statSync(dirname(sockPath))).toThrow() // removed with the session
   })
 
   it('a refused key rejects with the server reason, the key redacted', async () => {

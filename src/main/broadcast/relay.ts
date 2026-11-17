@@ -1,10 +1,15 @@
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server, type Socket } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { endpoint, RtmpPublisher, type PublishTarget } from './rtmp'
 
 /**
- * Online broadcast without handing the stream key to OBS: OBS's FFmpeg output sends FLV to a local TCP port
- * (`tcp://127.0.0.1:<port>`, nothing secret), and the app publishes it to the platform over RTMP(S). OBS
+ * Online broadcast without handing the stream key to OBS: OBS's FFmpeg output sends FLV to a Unix socket of
+ * the app (`unix:<path>`, nothing secret), and the app publishes it to the platform over RTMP(S). OBS
  * would otherwise keep the key in its profile and write it to its log whenever the connection fails.
+ * The socket lives in a fresh 0700 directory: only the user's own processes can reach it (a loopback TCP
+ * port would let any local process connect first and broadcast its own video on the user's channel).
  */
 export interface BroadcastSession {
   /** Where OBS sends the FLV stream. */
@@ -47,7 +52,7 @@ export class FlvReader {
 
 /**
  * Connects to the platform and publishes (rejects with the reason, key never included), then waits for
- * OBS on a local port. Only the first local connection is taken.
+ * OBS on a private Unix socket. Only the first connection is taken.
  */
 export async function openBroadcast(target: PublishTarget): Promise<BroadcastSession> {
   const pub = new RtmpPublisher(endpoint(target))
@@ -60,7 +65,7 @@ export async function openBroadcast(target: PublishTarget): Promise<BroadcastSes
       return
     }
     obs = sock
-    server.close()
+    server.close() // nobody else can connect from now on
     const flv = new FlvReader()
     sock.on('data', (d: Buffer) => {
       let tags
@@ -81,25 +86,32 @@ export async function openBroadcast(target: PublishTarget): Promise<BroadcastSes
     // OBS stopped its output (Arrêter, or it gave up): the platform sees the end of the stream.
     sock.on('close', () => pub.close())
   })
+  // mkdtemp creates the directory 0700. Short base (os.tmpdir): socket paths are limited to ~104 bytes.
+  const dir = mkdtempSync(join(tmpdir(), 'linto-live-'))
+  const path = join(dir, 'obs.sock')
+  const cleanup = (): void => {
+    server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
-      server.listen(0, '127.0.0.1', () => resolve())
+      server.listen(path, () => resolve())
     })
   } catch (e) {
+    cleanup()
     pub.close()
     throw e
   }
-  const port = (server.address() as { port: number }).port
   pub.onClose(() => {
-    server.close()
+    cleanup()
     ;(obs as Socket | null)?.destroy() // the platform is gone: OBS's output stops and reports it
   })
   return {
-    url: `tcp://127.0.0.1:${port}`,
+    url: `unix:${path}`,
     onClose: (cb) => pub.onClose(cb),
     close: () => {
-      server.close()
+      cleanup()
       pub.close()
       ;(obs as Socket | null)?.destroy()
     }
