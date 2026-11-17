@@ -2055,6 +2055,37 @@ describe('LiveController recording', () => {
     expect(t.ctl().stopRecord).toHaveBeenCalled()
     expect(t.last().recording).toBe('off')
   })
+
+  it('a hung StopStream does not hold Arrêter past the stop deadline', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('active')
+    c.stopStream.mockImplementation(() => new Promise<boolean>((r) => setTimeout(() => r(true), 15_000)))
+    let done = false
+    const p = t.live.stop().then(() => { done = true })
+    await vi.advanceTimersByTimeAsync(10_500)
+    expect(done).toBe(true)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await p
+  })
+
+  it('a hung StopStream does not hold Arrêter when the stream had already dropped', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.start('Conf')
+    const c = t.ctl()
+    c.emitState('active')
+    c.emitState('stopped')
+    c.stopStream.mockImplementation(() => new Promise<boolean>((r) => setTimeout(() => r(true), 15_000)))
+    let done = false
+    const p = t.live.stop().then(() => { done = true })
+    await vi.advanceTimersByTimeAsync(10_500)
+    expect(done).toBe(true)
+    await vi.advanceTimersByTimeAsync(5_000)
+    await p
+  })
 })
 
 describe('stream state when OBS is lost (A-001)', () => {

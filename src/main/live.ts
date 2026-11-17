@@ -977,7 +977,7 @@ export class LiveController extends EventEmitter {
     const c = this.ctl
     if (!c) return
     if (!this.streamRunning) {
-      await c.stopStream().catch(() => {})
+      await Promise.race([c.stopStream().catch(() => {}), limit])
       return
     }
     this.stopRequested = true
@@ -985,7 +985,8 @@ export class LiveController extends EventEmitter {
     try {
       // false: OBS had no running output (e.g. the SRT connect is still pending) — no 'stopped' will
       // come; if the connect succeeds later, onStreamState stops the unwanted stream.
-      if (await c.stopStream()) await stopped
+      const sent = await Promise.race([c.stopStream(), limit.then(() => false)])
+      if (sent) await stopped
     } catch {
       /* OBS gone or already stopped */
     } finally {
