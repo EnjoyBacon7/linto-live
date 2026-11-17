@@ -242,6 +242,56 @@ describe('ObsController', () => {
     ])
   })
 
+  describe('virtual camera', () => {
+    /** Answers `fail[req]` as an obs-websocket error code, else success. */
+    function vcamClient(fail: Record<string, number> = {}) {
+      const calls: string[] = []
+      const handlers = new Map<string, (d: unknown) => void>()
+      const client: ObsClient = {
+        async call(req) {
+          calls.push(req)
+          if (fail[req] !== undefined) throw new CodedError(fail[req], req)
+          return { outputActive: false }
+        },
+        on: (evt, cb) => handlers.set(evt, cb),
+        off: (evt) => handlers.delete(evt),
+        disconnect: async () => {}
+      }
+      return { client, calls, handlers }
+    }
+
+    it('is available unless OBS answers « not available » (604); other errors propagate', async () => {
+      expect(await new ObsController(vcamClient().client).virtualCamAvailable()).toBe(true)
+      expect(await new ObsController(vcamClient({ GetVirtualCamStatus: 604 }).client).virtualCamAvailable()).toBe(false)
+      await expect(new ObsController(vcamClient({ GetVirtualCamStatus: 207 }).client).virtualCamAvailable()).rejects.toThrow()
+    })
+
+    it('starts and stops, already-running / not-running being no error', async () => {
+      const f = vcamClient()
+      const c = new ObsController(f.client)
+      await c.setVirtualCam(true)
+      await c.setVirtualCam(false)
+      expect(f.calls).toEqual(['StartVirtualCam', 'StopVirtualCam'])
+      const g = new ObsController(vcamClient({ StartVirtualCam: 500, StopVirtualCam: 501 }).client)
+      await g.setVirtualCam(true)
+      await g.setVirtualCam(false)
+      await expect(new ObsController(vcamClient({ StartVirtualCam: 604 }).client).setVirtualCam(true)).rejects.toThrow()
+    })
+
+    it('reports started / stopped and unsubscribes', () => {
+      const f = vcamClient()
+      const got: boolean[] = []
+      const off = new ObsController(f.client).virtualCamState$((a) => got.push(a))
+      const emit = f.handlers.get('VirtualcamStateChanged')!
+      emit({ outputState: 'OBS_WEBSOCKET_OUTPUT_STARTING' })
+      emit({ outputState: 'OBS_WEBSOCKET_OUTPUT_STARTED' })
+      emit({ outputState: 'OBS_WEBSOCKET_OUTPUT_STOPPED' })
+      expect(got).toEqual([true, false])
+      off()
+      expect(f.handlers.has('VirtualcamStateChanged')).toBe(false)
+    })
+  })
+
   it('audioLevel$ reports dB for Micro and unsubscribes', () => {
     const f = fakeClient()
     const c = new ObsController(f.client)

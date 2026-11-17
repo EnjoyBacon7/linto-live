@@ -199,6 +199,24 @@ describe('Démarrer', () => {
     expect((screen.getByLabelText('Écouter le retour audio') as HTMLInputElement).checked).toBe(true)
   })
 
+  it('« Caméra virtuelle » toggles the virtual camera, greyed out with the reason when the system has none', async () => {
+    setup()
+    await renderMain()
+    await openSection('Enregistrement et diffusion')
+    const check = screen.getByLabelText('Caméra virtuelle') as HTMLInputElement
+    expect(check.disabled).toBe(false)
+    await userEvent.click(check)
+    expect(api.live.setVirtualCam).toHaveBeenCalledWith(true)
+    const base = { phase: 'idle', stream: 'off', captions: 'offline', obs: 'running', output: 'off', recording: 'off' } as const
+    act(() => emit('live-state', { ...base, virtualCam: true }))
+    expect((screen.getByLabelText('Caméra virtuelle') as HTMLInputElement).checked).toBe(true)
+    act(() => emit('live-state', { ...base, virtualCam: false, virtualCamBlocked: 'Chargez v4l2loopback.' }))
+    const blocked = screen.getByLabelText('Caméra virtuelle') as HTMLInputElement
+    expect(blocked.disabled).toBe(true)
+    expect(blocked.closest('label')!.title).toBe('Chargez v4l2loopback.')
+    expect(description(blocked)).toBe('Chargez v4l2loopback.')
+  })
+
   it('the camera can be set back to « Aucune »', async () => {
     setup()
     await renderMain()

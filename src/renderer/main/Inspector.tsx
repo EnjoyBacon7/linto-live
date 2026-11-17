@@ -42,19 +42,33 @@ export interface InspectorProps {
   audioMonitor?: boolean
   audioMonitorAvailable?: boolean
   onAudioMonitorChange?(on: boolean): void
+  /** Virtual camera (the output offered to other apps as a camera); available only while OBS runs. */
+  virtualCam?: boolean
+  virtualCamAvailable?: boolean
+  /** Why this system has no virtual camera (greys the option out, with this as its tooltip). */
+  virtualCamBlocked?: string
+  onVirtualCamChange?(on: boolean): void
   /** Opens « Paramètres de diffusion » (server and stream key of the online broadcast). */
   onBroadcastSettings?(): void
 }
 
-export function Check({ label, ariaLabel, checked, disabled, onChange }: {
-  label: string; ariaLabel?: string; checked: boolean; disabled?: boolean; onChange(v: boolean): void
+/** `blockedReason`: why it is unavailable (disables it; tooltip and accessible description). */
+export function Check({ label, ariaLabel, checked, disabled, blockedReason, onChange }: {
+  label: string; ariaLabel?: string; checked: boolean; disabled?: boolean; blockedReason?: string; onChange(v: boolean): void
 }) {
+  const reasonId = useId()
+  const off = disabled || blockedReason !== undefined
+  // The reason sits next to the label, not inside it, so it describes the box without joining its name.
   return (
-    <label className={disabled ? 'check is-disabled' : 'check'}>
-      <input type="checkbox" checked={checked} disabled={disabled} aria-label={ariaLabel}
-        onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
-    </label>
+    <>
+      <label className={off ? 'check is-disabled' : 'check'} title={blockedReason}>
+        <input type="checkbox" checked={checked} disabled={off} aria-label={ariaLabel}
+          {...(blockedReason !== undefined ? { 'aria-describedby': reasonId } : {})}
+          onChange={(e) => onChange(e.target.checked)} />
+        <span>{label}</span>
+      </label>
+      {blockedReason !== undefined && <span id={reasonId} className="sr-only">{blockedReason}</span>}
+    </>
   )
 }
 
@@ -265,7 +279,10 @@ export function Inspector(p: InspectorProps) {
     profile, shown ? `${languages.find((l) => l.value === language)?.label ?? ''} · ${fontSize} px` : 'Sous-titres masqués'
   ].filter(Boolean).join(' · ')
   const overlays = [showWatermark && wm?.display ? 'Filigrane' : '', qr.display ? 'QR code' : ''].filter(Boolean)
-  const outputSummary = broadcasting ? `Diffusion · ${host ?? 'aucun serveur'}` : recording ? 'Enregistrement' : 'Désactivés'
+  const outputSummary = [
+    broadcasting ? `Diffusion · ${host ?? 'aucun serveur'}` : recording ? 'Enregistrement' : 'Désactivés',
+    p.virtualCam ? 'Caméra virtuelle' : ''
+  ].filter(Boolean).join(' · ')
 
   return (
     <aside className="inspector" aria-label="Réglages">
@@ -393,6 +410,11 @@ export function Inspector(p: InspectorProps) {
           </section>
         </fieldset>
         {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
+        {/* Independent of the radios: OBS's virtual camera is an output of its own, applied at once. */}
+        <Check label="Caméra virtuelle" checked={p.virtualCam === true}
+          disabled={!p.onVirtualCamChange || (!p.virtualCam && !p.virtualCamAvailable)}
+          {...(p.virtualCamBlocked && !p.virtualCam ? { blockedReason: p.virtualCamBlocked } : {})}
+          onChange={(v) => p.onVirtualCamChange?.(v)} />
       </Section>
     </aside>
   )
