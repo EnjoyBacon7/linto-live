@@ -164,7 +164,7 @@
 }
 
 .sidebar-org {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 /* ---------- Account menu (NSMenu look) ---------- */
@@ -646,7 +646,7 @@
 .inspector-note {
   margin: 0;
   font-size: 11px;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .check {
