@@ -69,3 +69,12 @@ export const CloseIcon = (p: IconProps) => <Icon {...p}><path d="m4.5 4.5 7 7M11
 export const SignOutIcon = (p: IconProps) => (
   <Icon {...p}><path d="M9.5 2.75H4a1.25 1.25 0 0 0-1.25 1.25v8A1.25 1.25 0 0 0 4 13.25h5.5M7 8h7M11.5 5.5 14 8l-2.5 2.5" /></Icon>
 )
+export const ChevronRightIcon = (p: IconProps) => <Icon {...p}><path d="m6 3.5 4.5 4.5L6 12.5" /></Icon>
+/** Settings: two sliders (opens a « Paramètres… » sheet). */
+export const SlidersIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M2.5 5h6M12.5 5h1M2.5 11h1M7.5 11h6" /><circle cx="10.5" cy="5" r="1.75" /><circle cx="5.5" cy="11" r="1.75" /></Icon>
+)
+/** Overlays: two stacked layers. */
+export const LayersIcon = (p: IconProps) => (
+  <Icon {...p}><path d="M8 2.5 14 5.75 8 9 2 5.75Z" /><path d="m2 9.25 6 3.25 6-3.25" /></Icon>
+)

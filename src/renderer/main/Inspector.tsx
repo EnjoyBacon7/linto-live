@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
   DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type Watermark
@@ -6,7 +6,7 @@ import {
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
 import { PopUp } from '../ui/PopUp'
-import { BroadcastIcon, CameraIcon, CaptionsIcon, MicIcon, RecordIcon } from '../ui/icons'
+import { BroadcastIcon, CameraIcon, CaptionsIcon, ChevronRightIcon, LayersIcon, MicIcon, SlidersIcon, WarningIcon } from '../ui/icons'
 import { broadcastHost, isBroadcastServer } from '../../shared/broadcast'
 
 /** Watermark of the selected session; `pending` = the session does not exist on LinTO yet. */
@@ -46,16 +46,98 @@ export interface InspectorProps {
   onBroadcastSettings?(): void
 }
 
-export function Check({ label, checked, disabled, onChange }: {
-  label: string; checked: boolean; disabled?: boolean; onChange(v: boolean): void
+export function Check({ label, ariaLabel, checked, disabled, onChange }: {
+  label: string; ariaLabel?: string; checked: boolean; disabled?: boolean; onChange(v: boolean): void
 }) {
   return (
     <label className={disabled ? 'check is-disabled' : 'check'}>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" checked={checked} disabled={disabled} aria-label={ariaLabel}
+        onChange={(e) => onChange(e.target.checked)} />
       <span>{label}</span>
     </label>
   )
 }
+
+function Radio({ name, label, checked, disabled, onSelect }: {
+  name: string; label: string; checked: boolean; disabled?: boolean; onSelect(): void
+}) {
+  return (
+    <label className={disabled ? 'check is-disabled' : 'check'}>
+      <input type="radio" name={name} checked={checked} disabled={disabled} onChange={(e) => { if (e.target.checked) onSelect() }} />
+      <span>{label}</span>
+    </label>
+  )
+}
+
+/* ---------- Collapsible sections ---------- */
+
+const OPEN_KEY = 'linto-live.inspector.open'
+
+function readOpen(): Record<string, boolean> {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}')
+    return v && typeof v === 'object' ? v as Record<string, boolean> : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Open/closed state of a section, remembered across launches (a UI preference, not a setting). */
+function useOpen(id: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const [open, setOpen] = useState(() => readOpen()[id] ?? initial)
+  const set = (v: boolean): void => {
+    setOpen(v)
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify({ ...readOpen(), [id]: v })) } catch { /* private mode: not remembered */ }
+  }
+  return [open, set]
+}
+
+/**
+ * Disclosure section (like the Finder / Xcode inspector): the header toggles the body; closed, it shows a
+ * one-line summary of the current values so nothing is hidden from view, only its controls.
+ */
+function Section({ id, title, label, icon, summary, attention, accessory, initiallyOpen = true, children }: {
+  id: string; title: string
+  /** Accessible name of the section (a region); absent = unnamed. */
+  label?: string
+  icon: ReactNode; summary: string
+  /** Something needs a look (shown closed as a warning sign with this text as tooltip). */
+  attention?: string
+  /** Shown in the header while closed (e.g. the level meter). */
+  accessory?: ReactNode
+  initiallyOpen?: boolean; children: ReactNode
+}) {
+  const [open, setOpen] = useOpen(id, initiallyOpen)
+  const bodyId = useId()
+  return (
+    // Named (a landmark region) only when asked: « Micro » would clash with the micro menu's own name.
+    <section className={open ? 'insp-section is-open' : 'insp-section'} {...(label ? { 'aria-label': label } : {})}>
+      <h3 className="insp-head">
+        <button type="button" className="insp-toggle" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(!open)}
+          // Closed: « Titre : résumé » (open, the name comes from the title text, not clashing with « Micro » the menu).
+          {...(open ? {} : { 'aria-label': `${title} : ${[summary, attention].filter(Boolean).join('. ')}` })}>
+          <ChevronRightIcon size={10} strokeWidth={2} className="insp-chevron" />
+          {icon}
+          <span className="insp-title">{title}</span>
+          {!open && attention && <span className="insp-attention" title={attention}><WarningIcon size={12} /></span>}
+          {!open && <span className="insp-summary" title={summary}>{summary}</span>}
+        </button>
+        {!open && accessory && <span className="insp-accessory">{accessory}</span>}
+      </h3>
+      <div id={bodyId} className="insp-body" hidden={!open}>{children}</div>
+    </section>
+  )
+}
+
+/** Icon-only button that opens a « Paramètres… » sheet (its name stays the full action for screen readers). */
+function SettingsButton({ label, disabled, onClick }: { label: string; disabled?: boolean; onClick(): void }) {
+  return (
+    <Button variant="plain" className="insp-icon-btn" aria-label={label} title={label} disabled={disabled} onClick={onClick}
+      icon={<SlidersIcon size={14} />} />
+  )
+}
+
+/* ---------- Fields ---------- */
 
 /** Font size field: saved only once it is a whole number within range (typing « 4 » on the way to 48 saves nothing). */
 function FontSize({ value, disabled, onChange }: { value: number; disabled: boolean; onChange(v: number): void }) {
@@ -66,16 +148,19 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
     return s.trim() !== '' && Number.isInteger(n) && n >= SUBTITLE_FONT_SIZE_MIN && n <= SUBTITLE_FONT_SIZE_MAX ? n : null
   }
   return (
-    <label className="field inspector-inline">
-      <span className="field-label">Taille de la police (px)</span>
-      <input className="field-input" type="number" min={SUBTITLE_FONT_SIZE_MIN} max={SUBTITLE_FONT_SIZE_MAX}
-        value={draft} disabled={disabled} aria-invalid={valid(draft) === null}
-        onChange={(e) => {
-          setDraft(e.target.value)
-          const n = valid(e.target.value)
-          if (n !== null && n !== value) onChange(n)
-        }}
-        onBlur={() => { if (valid(draft) === null) setDraft(String(value)) }} />
+    <label className="insp-row">
+      <span className="insp-row-label">Taille</span>
+      <span className="insp-size">
+        <input className="field-input" type="number" min={SUBTITLE_FONT_SIZE_MIN} max={SUBTITLE_FONT_SIZE_MAX}
+          aria-label="Taille de la police (px)" value={draft} disabled={disabled} aria-invalid={valid(draft) === null}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            const n = valid(e.target.value)
+            if (n !== null && n !== value) onChange(n)
+          }}
+          onBlur={() => { if (valid(draft) === null) setDraft(String(value)) }} />
+        <span className="insp-unit" aria-hidden="true">px</span>
+      </span>
     </label>
   )
 }
@@ -88,17 +173,14 @@ function ProperNouns({ value, disabled, onChange }: { value: string[]; disabled:
   const parse = (s: string): string[] => s.split('\n').map((l) => l.trim()).filter(Boolean)
   return (
     <>
-    <label className="field">
-      <span className="field-label">Noms propres attendus (un par ligne)</span>
-      <textarea className="field-input proper-nouns" rows={5} value={draft} disabled={disabled} spellCheck={false}
-        placeholder={'Camille Bizeul\nLinagora\nSaint-Brieuc'}
+      <textarea className="field-input proper-nouns" rows={4} value={draft} disabled={disabled} spellCheck={false}
+        aria-label="Noms propres attendus (un par ligne)" placeholder={'Un nom par ligne\nLinagora\nSaint-Brieuc'}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
           const next = parse(draft)
           if (next.join('\n') !== joined) onChange(next)
         }} />
-    </label>
-    <p className="inspector-note">Expérimental : les mots de LinTO qui se prononcent comme l’un de ces noms sont remplacés.</p>
+      <p className="inspector-note">Expérimental : les mots de LinTO qui se prononcent comme l’un de ces noms sont remplacés.</p>
     </>
   )
 }
@@ -118,6 +200,9 @@ const baseName = (path: string): string => path.split(/[/\\]/).filter(Boolean).p
 
 const encodeSource = (s: VideoSource | undefined): string =>
   !s || s.kind === 'none' ? 'none' : s.kind === 'device' ? `device:${s.id}` : `file:${s.path}`
+
+const sourceName = (s: VideoSource | undefined, devices: { id: string; name: string }[]): string | null =>
+  !s || s.kind === 'none' ? null : s.kind === 'device' ? devices.find((d) => d.id === s.id)?.name ?? null : baseName(s.path)
 
 /** Video source menu: Aucune, each device, the current file (kept selectable), then the pickers. */
 function SourcePopUp({ label, source, devices, disabled, onChange }: {
@@ -144,27 +229,51 @@ function SourcePopUp({ label, source, devices, disabled, onChange }: {
     options={options} disabled={disabled} onChange={change} />
 }
 
-/** Right pane (inspector): camera (optional), micro + level, transcription profile (read-only here), subtitles. */
+const PENDING_NOTE = 'Réglable une fois la session créée sur LinTO (au démarrage).'
+
+/**
+ * Right pane (inspector), in collapsible sections that summarise themselves when closed:
+ * Vidéo, Micro, Transcription (profile, subtitles, proper nouns), Incrustations (watermark, QR code),
+ * Enregistrement et diffusion (one choice: OBS has a single output for both).
+ */
 export function Inspector(p: InspectorProps) {
   const { data, settings, profile, onChange } = p
   const opts = (items: { id: string; name: string }[] = []) => items.map((d) => ({ value: d.id, label: d.name }))
   const shown = settings?.subtitlesVisible !== false
   const wm = p.watermark && 'watermark' in p.watermark ? p.watermark.watermark : null
+  const wmPending = !!p.watermark && 'pending' in p.watermark
   const qr = { ...DEFAULT_QR, ...settings?.qr }
+  const languages = p.languages ?? [{ value: 'original', label: 'Langue originale' }]
   const language = p.languages?.some((l) => l.value === p.language) ? p.language! : 'original'
   const wmEditable = !!wm && p.watermarkBlocked === undefined
+  const fontSize = settings?.subtitleFontSize ?? DEFAULT_SUBTITLE_FONT_SIZE
   // The broadcast wins when both are set (OBS has one output for them): the inspector shows it that way.
   const broadcasting = settings?.broadcastEnabled === true
   const recording = settings?.recordEnabled === true && !broadcasting
   const hasServer = isBroadcastServer(settings?.broadcastServer)
+  const host = hasServer ? broadcastHost(settings!.broadcastServer!) : null
+  const showWatermark = !!data?.watermarkEnabled && shown
+  const qrNotPublic = qr.display && p.visibility !== undefined && p.visibility !== 'public'
+    ? 'Le public devra se connecter à LinTO pour ouvrir ce lien : rendre la session publique dans LinTO Studio.' : undefined
+
+  const videoDevices = data?.videoDevices ?? []
+  const primary = sourceName(settings?.primarySource, videoDevices)
+  const backup = sourceName(settings?.backupSource, videoDevices)
+  const videoSummary = [primary ?? 'Aucune', backup ? `secours : ${backup}` : ''].filter(Boolean).join(' · ')
+  const micSummary = data?.audioDevices.find((d) => d.id === settings?.audioDeviceId)?.name ?? 'Aucun'
+  const transcriptionSummary = [
+    profile, shown ? `${languages.find((l) => l.value === language)?.label ?? ''} · ${fontSize} px` : 'Sous-titres masqués'
+  ].filter(Boolean).join(' · ')
+  const overlays = [showWatermark && wm?.display ? 'Filigrane' : '', qr.display ? 'QR code' : ''].filter(Boolean)
+  const outputSummary = broadcasting ? `Diffusion · ${host ?? 'aucun serveur'}` : recording ? 'Enregistrement' : 'Désactivés'
+
   return (
     <aside className="inspector" aria-label="Réglages">
-      <section className="inspector-group">
-        <h3 className="inspector-label"><CameraIcon size={14} />Vidéo</h3>
+      <Section id="video" title="Vidéo" icon={<CameraIcon size={14} />} summary={videoSummary}>
         {/* Optional: without a source the app is a plain LinTO client (audio only, transcript here). */}
-        <SourcePopUp label="Source principale" source={settings?.primarySource} devices={data?.videoDevices ?? []}
+        <SourcePopUp label="Source principale" source={settings?.primarySource} devices={videoDevices}
           disabled={!data} onChange={(v) => onChange({ primarySource: v })} />
-        <SourcePopUp label="Source de secours" source={settings?.backupSource} devices={data?.videoDevices ?? []}
+        <SourcePopUp label="Source de secours" source={settings?.backupSource} devices={videoDevices}
           disabled={!data} onChange={(v) => onChange({ backupSource: v })} />
         <Check label="Écran noir = source absente" checked={settings?.blackIsAbsent !== false}
           disabled={!settings || !settings.backupSource || settings.backupSource.kind === 'none'}
@@ -172,111 +281,119 @@ export function Inspector(p: InspectorProps) {
         {p.videoOnAir && (
           <p className="inspector-note">À l’antenne : {p.videoOnAir === 'backup' ? 'secours' : 'principale'}</p>
         )}
-      </section>
-      <section className="inspector-group">
-        <h3 className="inspector-label"><MicIcon size={14} />Micro</h3>
+      </Section>
+
+      <Section id="mic" title="Micro" icon={<MicIcon size={14} />} summary={micSummary} accessory={<VuMeter compact />}>
         <PopUp label="Micro" className="inspector-control" value={settings?.audioDeviceId ?? ''} placeholder="Choisir…"
           options={opts(data?.audioDevices)} disabled={!data} onChange={(v) => onChange({ audioDeviceId: v })} />
         <VuMeter />
         <Check label="Écouter le retour audio" checked={p.audioMonitor === true}
           disabled={!p.onAudioMonitorChange || (!p.audioMonitor && !p.audioMonitorAvailable)}
           onChange={(v) => p.onAudioMonitorChange?.(v)} />
-      </section>
-      <section className="inspector-group">
-        <h3 className="inspector-label"><CaptionsIcon size={14} />Profil de transcription</h3>
-        <p className={profile ? 'inspector-value' : 'inspector-value is-empty'}>{profile ?? '—'}</p>
-      </section>
-      <section className="inspector-group" aria-label="Sous-titres">
-        <h3 className="inspector-label"><CaptionsIcon size={14} />Sous-titres</h3>
+      </Section>
+
+      <Section id="transcription" title="Transcription" label="Sous-titres" icon={<CaptionsIcon size={14} />}
+        summary={transcriptionSummary}>
+        <div className="insp-row">
+          <span className="insp-row-label">Profil</span>
+          <span className={profile ? 'inspector-value insp-ellipsis' : 'inspector-value is-empty'} title={profile ?? undefined}>{profile ?? '—'}</span>
+        </div>
         <Check label="Afficher le sous-titre" checked={shown} disabled={!settings}
           onChange={(v) => onChange({ subtitlesVisible: v })} />
         {shown && (
           <>
-            <label className="field inspector-inline">
-              <span className="field-label">Langue affichée</span>
-              <PopUp label="Langue affichée" value={language}
-                options={p.languages ?? [{ value: 'original', label: 'Langue originale' }]} disabled={!p.languages}
-                onChange={(v) => p.onLanguageChange?.(v)} />
+            <label className="insp-row">
+              <span className="insp-row-label">Langue</span>
+              <PopUp label="Langue affichée" className="inspector-control" value={language}
+                options={languages} disabled={!p.languages} onChange={(v) => p.onLanguageChange?.(v)} />
             </label>
-            {!data?.watermarkEnabled && p.watermark && 'pending' in p.watermark && (
-              <p className="inspector-note">Réglable une fois la session créée sur LinTO (au démarrage).</p>
-            )}
-            <FontSize value={settings?.subtitleFontSize ?? DEFAULT_SUBTITLE_FONT_SIZE} disabled={!settings}
-              onChange={(v) => onChange({ subtitleFontSize: v })} />
-            {data?.watermarkEnabled && (
-              <div className="inspector-subgroup">
-                <Check label="Afficher le filigrane" checked={wm?.display ?? false} disabled={!wmEditable}
-                  onChange={(v) => p.onWatermarkChange?.({ display: v })} />
-                <Check label="Épingler le filigrane" checked={wm?.pinned ?? false} disabled={!wmEditable || !wm?.display}
-                  onChange={(v) => p.onWatermarkChange?.({ pinned: v })} />
-                <Button className="inspector-control" disabled={!wmEditable} onClick={() => p.onWatermarkSettings?.()}>
-                  Paramètres du filigrane…
-                </Button>
-                {wm && p.watermarkBlocked && <p className="inspector-note">{p.watermarkBlocked}</p>}
-                {p.watermark && 'pending' in p.watermark && (
-                  <p className="inspector-note">Réglable une fois la session créée sur LinTO (au démarrage).</p>
-                )}
-              </div>
-            )}
-            <Button className="inspector-control" disabled={!p.onAir}
-              blockedReason={p.clearBlocked} onClick={() => p.onClearTranscript?.()}>
-              Effacer la transcription…
-            </Button>
+            {!data?.watermarkEnabled && wmPending && <p className="inspector-note">{PENDING_NOTE}</p>}
+            <FontSize value={fontSize} disabled={!settings} onChange={(v) => onChange({ subtitleFontSize: v })} />
           </>
         )}
-        <div className="inspector-subgroup">
-          <Check label="Corriger les noms propres" checked={settings?.properNounsEnabled === true} disabled={!settings}
-            onChange={(v) => onChange({ properNounsEnabled: v })} />
-          {settings?.properNounsEnabled === true && (
-            <ProperNouns value={settings.properNouns ?? []} disabled={false}
-              onChange={(v) => onChange({ properNouns: v })} />
-          )}
-        </div>
-        <div className="inspector-subgroup">
-          <Check label="Afficher le QR code" checked={qr.display} disabled={!settings}
-            onChange={(v) => onChange({ qr: { ...qr, display: v } })} />
-          <Check label="Épingler le QR code" checked={qr.pinned} disabled={!settings || !qr.display}
-            onChange={(v) => onChange({ qr: { ...qr, pinned: v } })} />
-          <Button className="inspector-control" disabled={!settings} onClick={() => p.onQrSettings?.()}>
-            Paramètres du QR code…
+        <Check label="Corriger les noms propres" checked={settings?.properNounsEnabled === true} disabled={!settings}
+          onChange={(v) => onChange({ properNounsEnabled: v })} />
+        {settings?.properNounsEnabled === true && (
+          <ProperNouns value={settings.properNouns ?? []} disabled={false} onChange={(v) => onChange({ properNouns: v })} />
+        )}
+        {shown && (
+          <Button className="inspector-control" disabled={!p.onAir}
+            blockedReason={p.clearBlocked} onClick={() => p.onClearTranscript?.()}>
+            Effacer la transcription…
           </Button>
-          {qr.display && p.visibility !== undefined && p.visibility !== 'public' && (
-            <p className="inspector-note">
-              Le public devra se connecter à LinTO pour ouvrir ce lien : rendre la session publique dans LinTO Studio.
-            </p>
-          )}
+        )}
+      </Section>
+
+      <Section id="overlays" title="Incrustations" label="Incrustations" icon={<LayersIcon size={14} />} initiallyOpen={false}
+        summary={overlays.length ? overlays.join(', ') : 'Aucune'} {...(qrNotPublic ? { attention: qrNotPublic } : {})}>
+        {showWatermark && (
+          <div className="insp-item">
+            <div className="insp-item-head">
+              <span className="insp-item-title">Filigrane</span>
+              <SettingsButton label="Paramètres du filigrane…" disabled={!wmEditable} onClick={() => p.onWatermarkSettings?.()} />
+            </div>
+            <div className="insp-checks">
+              <Check label="Afficher" ariaLabel="Afficher le filigrane" checked={wm?.display ?? false} disabled={!wmEditable}
+                onChange={(v) => p.onWatermarkChange?.({ display: v })} />
+              <Check label="Épingler" ariaLabel="Épingler le filigrane" checked={wm?.pinned ?? false} disabled={!wmEditable || !wm?.display}
+                onChange={(v) => p.onWatermarkChange?.({ pinned: v })} />
+            </div>
+            {wm && p.watermarkBlocked && <p className="inspector-note">{p.watermarkBlocked}</p>}
+            {wmPending && <p className="inspector-note">{PENDING_NOTE}</p>}
+          </div>
+        )}
+        <div className="insp-item">
+          <div className="insp-item-head">
+            <span className="insp-item-title">QR code</span>
+            <SettingsButton label="Paramètres du QR code…" disabled={!settings} onClick={() => p.onQrSettings?.()} />
+          </div>
+          <div className="insp-checks">
+            <Check label="Afficher" ariaLabel="Afficher le QR code" checked={qr.display} disabled={!settings}
+              onChange={(v) => onChange({ qr: { ...qr, display: v } })} />
+            <Check label="Épingler" ariaLabel="Épingler le QR code" checked={qr.pinned} disabled={!settings || !qr.display}
+              onChange={(v) => onChange({ qr: { ...qr, pinned: v } })} />
+          </div>
+          {qrNotPublic && <p className="inspector-note">{qrNotPublic}</p>}
         </div>
-      </section>
-      <section className="inspector-group" aria-label="Enregistrement">
-        <h3 className="inspector-label"><RecordIcon size={14} />Enregistrement</h3>
-        {/* One OBS output for both: ticking one unticks the other. */}
-        <Check label="Enregistrer le direct" checked={recording} disabled={!settings}
-          onChange={(v) => onChange(v ? { recordEnabled: true, broadcastEnabled: false } : { recordEnabled: false })} />
+      </Section>
+
+      <Section id="output" title="Enregistrement et diffusion" label="Enregistrement et diffusion" icon={<BroadcastIcon size={14} />} initiallyOpen={false}
+        summary={outputSummary}>
+        {/* One OBS output for both: a single choice. */}
+        <fieldset className="insp-radios">
+          <legend className="sr-only">Pendant le direct</legend>
+          <Radio name="output" label="Ni enregistrer ni diffuser" checked={!recording && !broadcasting} disabled={!settings}
+            onSelect={() => onChange({ recordEnabled: false, broadcastEnabled: false })} />
+          <section className="insp-item" aria-label="Enregistrement">
+            <Radio name="output" label="Enregistrer le direct" checked={recording} disabled={!settings}
+              onSelect={() => onChange({ recordEnabled: true, broadcastEnabled: false })} />
+            <div className="insp-detail">
+              <span className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
+                title={settings?.recordDir}>
+                {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Vidéos (Films sur macOS) › LinTO Live'}
+              </span>
+              <Button className="insp-small-btn" disabled={!settings} title="Dossier des enregistrements" onClick={() => {
+                void window.lintoLive.setup.pickFolder().then((dir) => { if (dir) onChange({ recordDir: dir }) }, () => {})
+              }}>
+                Choisir…
+              </Button>
+            </div>
+          </section>
+          <section className="insp-item" aria-label="Diffusion en ligne">
+            <Radio name="output" label="Diffuser en ligne" checked={broadcasting} disabled={!settings || (!broadcasting && !hasServer)}
+              onSelect={() => onChange({ broadcastEnabled: true, recordEnabled: false })} />
+            <div className="insp-detail">
+              <span className={hasServer ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
+                title={hasServer ? settings!.broadcastServer : undefined}>
+                {host ?? 'Aucun serveur'}
+                {hasServer && !settings?.broadcastKeySet ? ' (sans clé)' : ''}
+              </span>
+              <SettingsButton label="Paramètres de diffusion…" disabled={!settings} onClick={() => p.onBroadcastSettings?.()} />
+            </div>
+          </section>
+        </fieldset>
         {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
-        <p className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
-          title={settings?.recordDir}>
-          {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Vidéos (Films sur macOS) › LinTO Live'}
-        </p>
-        <Button className="inspector-control" disabled={!settings} onClick={() => {
-          void window.lintoLive.setup.pickFolder().then((dir) => { if (dir) onChange({ recordDir: dir }) }, () => {})
-        }}>
-          Choisir…
-        </Button>
-      </section>
-      <section className="inspector-group" aria-label="Diffusion en ligne">
-        <h3 className="inspector-label"><BroadcastIcon size={14} />Diffusion en ligne</h3>
-        <Check label="Diffuser en ligne" checked={broadcasting} disabled={!settings || (!broadcasting && !hasServer)}
-          onChange={(v) => onChange(v ? { broadcastEnabled: true, recordEnabled: false } : { broadcastEnabled: false })} />
-        {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
-        <p className={hasServer ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
-          title={hasServer ? settings!.broadcastServer : undefined}>
-          {hasServer ? broadcastHost(settings!.broadcastServer!) : 'Aucun serveur'}
-          {hasServer && !settings?.broadcastKeySet ? ' (sans clé)' : ''}
-        </p>
-        <Button className="inspector-control" disabled={!settings} onClick={() => p.onBroadcastSettings?.()}>
-          Paramètres de diffusion…
-        </Button>
-      </section>
+      </Section>
     </aside>
   )
 }

@@ -62,8 +62,13 @@ const unavailable = (b: HTMLButtonElement): boolean => b.disabled || b.getAttrib
 const description = (el: Element): string =>
   (el.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent ?? '').join(' ').trim()
 const toolbar = () => screen.getByRole('toolbar')
+/** Opens a collapsed inspector section (Incrustations, Enregistrement et diffusion start closed). */
+const openSection = async (title: string) => {
+  const t = screen.getByRole('button', { name: (n) => n === title || n.startsWith(title + ' ') })
+  if (t.getAttribute('aria-expanded') !== 'true') await userEvent.click(t)
+}
 
-beforeEach(() => { vi.useRealTimers() })
+beforeEach(() => { vi.useRealTimers(); localStorage.clear() })
 afterEach(() => { cleanup(); vi.useRealTimers() })
 
 describe('Sidebar', () => {
@@ -1015,6 +1020,7 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     const NOTE = /Le public devra se connecter à LinTO/
     setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'organization' }])
     await renderMain()
+    await openSection('Incrustations')
     await userEvent.click(row('Conférence'))
     expect(screen.queryByText(NOTE)).toBeNull()
     await userEvent.click(box('Afficher le QR code'))
@@ -1025,6 +1031,7 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
   it('no QR note when the session is public', async () => {
     setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'public' }])
     await renderMain()
+    await openSection('Incrustations')
     await userEvent.click(row('Conférence'))
     await userEvent.click(box('Afficher le QR code'))
     expect(screen.queryByText(/Le public devra se connecter à LinTO/)).toBeNull()
@@ -1040,6 +1047,7 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
   it('watermark controls need a session that exists on LinTO, and save on it', async () => {
     setup()
     await renderMain()
+    await openSection('Incrustations')
     expect(box('Afficher le filigrane').disabled).toBe(true)
     await userEvent.click(row('Conférence'))
     expect(box('Afficher le filigrane').disabled).toBe(false)
@@ -1054,6 +1062,7 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
   it('« Paramètres du filigrane… » edits text, frequency and duration', async () => {
     setup()
     await renderMain()
+    await openSection('Incrustations')
     await userEvent.click(row('Conférence'))
     await userEvent.click(btn('Paramètres du filigrane…'))
     const dialog = screen.getByRole('dialog', { name: 'Paramètres du filigrane' })
@@ -1074,6 +1083,7 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     setup({ sessions: { list: vi.fn().mockResolvedValue(SESSIONS), setWatermark: vi.fn().mockRejectedValue(new Error(
       "Error invoking remote method 'sessions:set-watermark': Error: Tu n'as pas le droit de modifier cette session.")) } })
     await renderMain()
+    await openSection('Incrustations')
     await userEvent.click(row('Conférence'))
     const calls = fn(api.sessions.list).mock.calls.length
     await userEvent.click(box('Afficher le filigrane'))
@@ -1152,6 +1162,7 @@ describe('organisation rights', () => {
   it('without the right: the watermark of a session cannot be changed', async () => {
     setup({}, member())
     await renderMain()
+    await openSection('Incrustations')
     await userEvent.click(row('Conférence'))
     const box = screen.getByRole('checkbox', { name: 'Afficher le filigrane' }) as HTMLInputElement
     expect(box.disabled).toBe(true)
@@ -1192,6 +1203,7 @@ describe('Enregistrement', () => {
   it('choosing a folder saves recordDir', async () => {
     setup({ setup: { pickFolder: vi.fn().mockResolvedValue('/Users/x/Rec') } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(screen.getByText('Vidéos (Films sur macOS) › LinTO Live')).toBeTruthy()
     await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
     expect(api.setup.pickFolder).toHaveBeenCalled()
@@ -1202,6 +1214,7 @@ describe('Enregistrement', () => {
   it('cancelled folder picker saves nothing', async () => {
     setup({ setup: { pickFolder: vi.fn().mockResolvedValue(null) } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
     expect(api.setup.save).not.toHaveBeenCalled()
   })
@@ -1209,17 +1222,19 @@ describe('Enregistrement', () => {
   it('the checkbox saves recordEnabled; on air it applies at the next Démarrer', async () => {
     setup()
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(screen.queryByText('S’applique au prochain Démarrer.')).toBeNull()
     await userEvent.click(screen.getByLabelText('Enregistrer le direct'))
     expect(api.setup.save).toHaveBeenCalledWith({ recordEnabled: true, broadcastEnabled: false })
     act(() => emit('live-state', live()))
-    const region = screen.getByRole('region', { name: 'Enregistrement' })
+    const region = screen.getByRole('region', { name: 'Enregistrement et diffusion' })
     expect(await within(region).findByText('S’applique au prochain Démarrer.')).toBeTruthy()
   })
 
   it('proper nouns: the toggle saves properNounsEnabled and shows the list, saved on blur one name per line', async () => {
     setup({}, setupData({ properNouns: ['LINAGORA'] }))
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(screen.queryByLabelText('Noms propres attendus (un par ligne)')).toBeNull()
     await userEvent.click(screen.getByLabelText('Corriger les noms propres'))
     expect(api.setup.save).toHaveBeenCalledWith({ properNounsEnabled: true })
@@ -1228,6 +1243,7 @@ describe('Enregistrement', () => {
   it('proper nouns: the list is edited only while the toggle is on', async () => {
     setup({}, setupData({ properNounsEnabled: true, properNouns: ['LINAGORA'] }))
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     const box = screen.getByLabelText('Noms propres attendus (un par ligne)')
     expect((box as HTMLTextAreaElement).value).toBe('LINAGORA')
     await userEvent.type(box, '{enter}  Issy-les-Moulineaux {enter}{enter}')
@@ -1239,12 +1255,14 @@ describe('Enregistrement', () => {
   it('REC pill shows while recording', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'on' })) } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(within(toolbar()).getByText('REC')).toBeTruthy()
   })
 
   it('no REC pill when not recording', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'off' })) } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(within(toolbar()).queryByText('REC')).toBeNull()
   })
 })
@@ -1256,6 +1274,7 @@ describe('Diffusion en ligne', () => {
   it('cannot be ticked before a server is set', async () => {
     setup()
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect((within(region()).getByLabelText('Diffuser en ligne') as HTMLInputElement).disabled).toBe(true)
     expect(within(region()).getByText('Aucun serveur')).toBeTruthy()
   })
@@ -1263,6 +1282,7 @@ describe('Diffusion en ligne', () => {
   it('ticking it unticks the recording (OBS has one output for both), and the reverse', async () => {
     setup({}, setupData({ broadcastServer: SERVER, broadcastKeySet: true, recordEnabled: true }))
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(within(region()).getByText('a.rtmp.youtube.com')).toBeTruthy()
     await userEvent.click(within(region()).getByLabelText('Diffuser en ligne'))
     expect(api.setup.save).toHaveBeenLastCalledWith({ broadcastEnabled: true, recordEnabled: false })
@@ -1275,6 +1295,7 @@ describe('Diffusion en ligne', () => {
   it('the sheet saves the server and the stream key apart; an invalid server is refused', async () => {
     setup({ setup: { setBroadcast: vi.fn().mockResolvedValue(undefined) } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
     const server = await screen.findByLabelText('Serveur (RTMP ou RTMPS)')
     await userEvent.type(server, 'https://youtube.com')
@@ -1296,6 +1317,7 @@ describe('Diffusion en ligne', () => {
       setBroadcast: vi.fn().mockResolvedValue(undefined)
     } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
     expect((await screen.findByLabelText('Clé de stream') as HTMLInputElement).placeholder).toMatch(/Enregistrée/)
     await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
@@ -1309,6 +1331,7 @@ describe('Diffusion en ligne', () => {
       setBroadcast: vi.fn().mockResolvedValue(undefined)
     } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
     const server = await screen.findByLabelText('Serveur (RTMP ou RTMPS)')
     await userEvent.clear(server)
@@ -1323,8 +1346,45 @@ describe('Diffusion en ligne', () => {
   it('EN LIGNE pill instead of REC while broadcasting', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'on', recordingTarget: 'broadcast' })) } as never })
     await renderMain()
+    await openSection('Enregistrement et diffusion')
     expect(within(toolbar()).getByText('EN LIGNE')).toBeTruthy()
     expect(within(toolbar()).queryByText('REC')).toBeNull()
+  })
+})
+
+describe('Inspector: collapsible sections', () => {
+  const toggle = (name: string | RegExp) => screen.getByRole('button', { name })
+
+  it('a closed section summarises its values; the open state is remembered', async () => {
+    setup({}, setupData({ broadcastServer: 'rtmp://a.rtmp.youtube.com/live2', broadcastKeySet: true, broadcastEnabled: true, qr: { display: true, pinned: false, frequency: 60, duration: 15 } }))
+    await renderMain()
+    expect(toggle('Incrustations : QR code').getAttribute('aria-expanded')).toBe('false')
+    expect(toggle('Enregistrement et diffusion : Diffusion · a.rtmp.youtube.com')).toBeTruthy()
+    await userEvent.click(toggle(/^Vidéo/))
+    expect(toggle('Vidéo : Capture HDMI').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('combobox', { name: 'Source principale' })).toBeNull()
+    cleanup()
+    await renderMain()
+    expect(toggle('Vidéo : Capture HDMI').getAttribute('aria-expanded')).toBe('false')
+    await userEvent.click(toggle('Vidéo : Capture HDMI'))
+    expect(screen.getByRole('combobox', { name: 'Source principale' })).toBeTruthy()
+  })
+
+  it('closed, the micro section keeps a level meter in its header', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(toggle(/^Micro/))
+    expect(toggle('Micro : Micro USB')).toBeTruthy()
+    act(() => emit('audio-level', -20))
+    expect(screen.getByRole('meter', { name: 'Niveau audio' }).getAttribute('aria-valuenow')).toBe('-20')
+  })
+
+  it('« Ni enregistrer ni diffuser » turns both off', async () => {
+    setup({}, setupData({ recordEnabled: true }))
+    await renderMain()
+    await openSection('Enregistrement et diffusion')
+    await userEvent.click(screen.getByRole('radio', { name: 'Ni enregistrer ni diffuser' }))
+    expect(api.setup.save).toHaveBeenLastCalledWith({ recordEnabled: false, broadcastEnabled: false })
   })
 })
 
