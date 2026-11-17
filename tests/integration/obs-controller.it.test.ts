@@ -82,6 +82,20 @@ describe.skipIf(!run)('ObsController (real OBS)', () => {
     expect([SRC_VIDEO, SRC_AUDIO, SRC_OVERLAY]).toHaveLength(3)
   }, 90_000)
 
+  it('turns the micro audio feedback on (monitor and output) and off', async () => {
+    const raw = new OBSWebSocket()
+    await raw.connect(`ws://127.0.0.1:${conn!.port}`, conn!.password)
+    const type = async (): Promise<string> => (await raw.call('GetInputAudioMonitorType', { inputName: SRC_AUDIO })).monitorType
+    try {
+      await ctl!.setAudioMonitor(true)
+      expect(await type()).toBe('OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT')
+      await ctl!.setAudioMonitor(false)
+      expect(await type()).toBe('OBS_MONITORING_TYPE_NONE')
+    } finally {
+      await raw.disconnect()
+    }
+  }, 30_000)
+
   it('swaps the primary to an image and back, stacks a hidden backup above it', async () => {
     // 1×1 white PNG
     const png = join(userData, 'white.png')

@@ -49,6 +49,7 @@ function fakeController(log: string[]) {
     setBackupVisible: vi.fn(async (_on: boolean) => {}),
     probePrimary: vi.fn(async () => 'data:image/png;base64,AAAA'),
     setAudioDevice: vi.fn(async () => {}),
+    setAudioMonitor: vi.fn(async (_on: boolean) => {}),
     setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}),
     screenshot: vi.fn(async () => 'data:image/jpg;base64,AAAA'),
@@ -206,6 +207,41 @@ describe('LiveController', () => {
     expect(t.ctl().setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
     expect(t.last().obs).toBe('running')
     expect(t.last().phase).toBe('idle')
+  })
+
+  it('audio feedback is off at boot (also reset in OBS) and toggles on the attached OBS', async () => {
+    const t = setup()
+    await t.live.boot()
+    expect(t.ctl().setAudioMonitor).toHaveBeenCalledWith(false)
+    expect(t.last().audioMonitor).toBe(false)
+    await t.live.setAudioMonitor(true)
+    expect(t.ctl().setAudioMonitor).toHaveBeenLastCalledWith(true)
+    expect(t.last().audioMonitor).toBe(true)
+    expect(t.settings.update).not.toHaveBeenCalled() // never saved
+    await t.live.setAudioMonitor(false)
+    expect(t.ctl().setAudioMonitor).toHaveBeenLastCalledWith(false)
+    expect(t.last().audioMonitor).toBe(false)
+  })
+
+  it('audio feedback is re-applied after an OBS restart', async () => {
+    const t = setup()
+    await t.live.boot()
+    await t.live.setAudioMonitor(true)
+    const first = t.ctl()
+    t.obs.emit('restarting', 1)
+    t.obs.emit('ready', { port: 4100, password: 'pw2' })
+    await t.live.settled()
+    expect(t.ctl()).not.toBe(first)
+    expect(t.ctl().setAudioMonitor).toHaveBeenCalledWith(true)
+    expect(t.last().audioMonitor).toBe(true)
+  })
+
+  it('audio feedback OBS refuses is reported and shown off', async () => {
+    const t = setup()
+    await t.live.boot()
+    t.ctl().setAudioMonitor.mockRejectedValueOnce(new Error('boom'))
+    await expect(t.live.setAudioMonitor(true)).rejects.toThrow('Retour audio indisponible : boom')
+    expect(t.last().audioMonitor).toBe(false)
   })
 
   it('start reused session streams and projects', async () => {

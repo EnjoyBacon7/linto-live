@@ -108,7 +108,8 @@ Conseils :
    Public, Protégée par mot de passe ou Privée). Un nom déjà utilisé reprend la session existante
    au lieu d'en créer une deuxième.
 3. **Régler** dans le panneau de droite : **caméra** (ou carte de capture, facultative : « Aucune »
-   pour n'envoyer que le son), **micro** (c'est ce son qui est transcrit), taille des sous-titres,
+   pour n'envoyer que le son), **micro** (c'est ce son qui est transcrit ; **Écouter le retour
+   audio** le fait entendre, au casque, tel qu'il part vers LinTO et est enregistré), taille des sous-titres,
    affichage des sous-titres et du filigrane.
    Avec une caméra, son aperçu s'affiche en haut du centre de la fenêtre. En dessous, la
    transcription au fil de la parole, avec tout ce qui a été dit depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter

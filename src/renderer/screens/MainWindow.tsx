@@ -217,6 +217,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       void refresh()
     }
   }
+  const setAudioMonitor = (on: boolean): void => {
+    window.lintoLive.live.setAudioMonitor(on).catch((e) => setError(ipcErrorMessage(e)))
+  }
   const showOutput = (): void => {
     window.lintoLive.live.showOutputWindow().catch((e) => setError(ipcErrorMessage(e)))
   }
@@ -410,6 +413,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           <Stage onAir={onAir} hasCamera={!!settings?.primarySource && settings.primarySource.kind !== 'none'} sessionName={sel?.name ?? null} banners={hasBanner ? banners : null} />
           <Inspector data={data} settings={settings} profile={profile} onChange={saveSettings}
             onAir={onAir} onClearSubtitles={clearSubtitles}
+            audioMonitor={state.audioMonitor === true} audioMonitorAvailable={state.obs === 'running'}
+            onAudioMonitorChange={setAudioMonitor}
             {...(state.videoOnAir ? { videoOnAir: state.videoOnAir } : {})}
             watermark={watermarkTarget} onWatermarkChange={saveWatermark}
             onQrSettings={() => { if (!sheetRef.current) setSheet({ kind: 'qr' }) }}
