@@ -42,9 +42,9 @@ export function QrSheet({ open, qr, onApply, onCancel }: QrSheetProps) {
       <form className="sheet-form" onSubmit={submit}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}>
         <TextField label="Fréquence (secondes)" type="number" min={1} value={frequency}
-          aria-invalid={f === null} onChange={(e) => setFrequency(e.target.value)} />
+          error={f === null ? 'Saisissez un nombre supérieur à 0.' : undefined} onChange={(e) => setFrequency(e.target.value)} />
         <TextField label="Durée (secondes)" type="number" min={1} value={duration}
-          aria-invalid={d === null} onChange={(e) => setDuration(e.target.value)} />
+          error={d === null ? 'Saisissez un nombre supérieur à 0.' : undefined} onChange={(e) => setDuration(e.target.value)} />
         <p className="sheet-detail">
           Le QR code du lien public de la session apparaît toutes les « fréquence » secondes pendant « durée »
           secondes, ou en permanence s'il est épinglé.
