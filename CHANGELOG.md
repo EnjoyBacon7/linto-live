@@ -4,7 +4,7 @@ Toutes les modifications notables de LinTO Live sont consignées ici.
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le projet respecte le
 [versionnage sémantique](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [0.5.0] - 2026-11-17
 
 ### Ajouté
 
@@ -34,6 +34,23 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - **Terminer la session** fait désormais comme « Arrêter et enregistrer » dans LinTO Studio : la
   transcription et ses traductions sont enregistrées comme média dans LinTO Studio, puis la session
   est supprimée. Auparavant, la session était seulement close et n'apparaissait pas dans les médias.
+- **Accessibilité** : bouton principal et élément de menu surligné plus contrastés (4,9:1), anneau
+  de focus opaque visible sur tous les fonds, textes informatifs plus lisibles. Démarrer, Terminer,
+  Nouvelle session et Effacer la transcription restent atteignables au clavier quand ils sont
+  indisponibles, et le lecteur d'écran annonce pourquoi.
+
+### Corrigé
+
+- **Fiabilité du direct** : le flux ne reste plus affiché « actif » quand OBS est perdu ; la
+  relance du flux repart de zéro à chaque direct ; Arrêter interrompt les tentatives de relance
+  d'OBS et n'attend plus indéfiniment l'arrêt du flux.
+- **Connexion** : la connexion SSO échoue avec un message au bout de 20 s au lieu de rester bloquée ;
+  l'écran de connexion réaffiche l'instance mémorisée quand la nouvelle est refusée ; Entrée dans le
+  champ mot de passe valide le formulaire.
+- **Clavier et lecteur d'écran** : le menu Compte se pilote au clavier (flèches, Début/Fin, Tab) ;
+  le statut de chaque session est annoncé ; un nombre invalide dans les réglages du QR code ou du
+  filigrane affiche une erreur.
+- Un chemin d'enregistrement long ne fait plus défiler l'inspecteur horizontalement.
 
 ## [0.4.0] - 2026-11-16
 
@@ -139,6 +156,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.5.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.2.0...v0.3.0
