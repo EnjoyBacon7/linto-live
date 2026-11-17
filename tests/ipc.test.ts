@@ -169,6 +169,7 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { properNounsEnabled: true, properNouns: ['LINAGORA', 'Issy-les-Moulineaux'] },
       { properNouns: [] },
       { broadcastEnabled: true, recordEnabled: false },
+      { micGainDb: 0 }, { micGainDb: -30 }, { micGainDb: 20 }, { micGainDb: -4.5 },
       { instance: 'https://studio.linto.ai', profileId: 2, subtitleFontSize: 40 }
     ]
     for (const p of ok) expect(checkSettingsPatch(p)).toEqual(p)
@@ -200,7 +201,8 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { subtitleLanguages: { s1: 'en' } },
       { broadcastEnabled: 'yes' },
       { broadcastServer: 'rtmp://a.rtmp.youtube.com/live2' }, // only with its key, via setup.setBroadcast
-      { broadcastKeySet: true }
+      { broadcastKeySet: true },
+      { micGainDb: '6' }, { micGainDb: 21 }, { micGainDb: -31 }, { micGainDb: NaN }, { micGainDb: null }
     ]
     for (const p of bad) expect(() => checkSettingsPatch(p), JSON.stringify(p)).toThrow('Réglages invalides.')
   })

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -179,6 +179,27 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
   )
 }
 
+const formatDb = (db: number): string => `${db > 0 ? '+' : db < 0 ? '−' : ''}${Math.abs(db)} dB`
+
+/** Micro gain slider: each step is applied (and saved) at once, so the level meter shows its effect while dragging. */
+function MicGain({ value, disabled, onChange }: { value: number; disabled: boolean; onChange(v: number): void }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  return (
+    <label className="field mic-gain">
+      <span className="field-label">Gain <span className="mic-gain-value">{formatDb(draft)}</span></span>
+      <input type="range" min={MIC_GAIN_MIN} max={MIC_GAIN_MAX} step={1} value={draft} disabled={disabled}
+        aria-label="Gain du micro" aria-valuetext={formatDb(draft)} title="Double-clic : 0 dB"
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          setDraft(n)
+          if (n !== value) onChange(n)
+        }}
+        onDoubleClick={() => { setDraft(0); if (value !== 0) onChange(0) }} />
+    </label>
+  )
+}
+
 /** EXPERIMENTAL: expected proper nouns, one per line; saved when the field loses focus. */
 function ProperNouns({ value, disabled, onChange }: { value: string[]; disabled: boolean; onChange(v: string[]): void }) {
   const joined = value.join('\n')
@@ -304,6 +325,11 @@ export function Inspector(p: InspectorProps) {
         <PopUp label="Micro" className="inspector-control" value={settings?.audioDeviceId ?? ''} placeholder="Choisir…"
           options={opts(data?.audioDevices)} disabled={!data} onChange={(v) => onChange({ audioDeviceId: v })} />
         <VuMeter />
+        <MicGain value={micGainDb(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ micGainDb: v })} />
+        <p className="inspector-note">
+          Si le niveau atteint le rouge, baissez le gain. Un limiteur évite la saturation au-delà ; un micro qui
+          sature déjà à la source se règle dans les réglages son du système.
+        </p>
         <Check label="Écouter le retour audio" checked={p.audioMonitor === true}
           disabled={!p.onAudioMonitorChange || (!p.audioMonitor && !p.audioMonitorAvailable)}
           onChange={(v) => p.onAudioMonitorChange?.(v)} />

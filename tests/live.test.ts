@@ -57,6 +57,7 @@ function fakeController(log: string[]) {
     probePrimary: vi.fn(async () => 'data:image/png;base64,AAAA'),
     setAudioDevice: vi.fn(async () => {}),
     setAudioMonitor: vi.fn(async (_on: boolean) => {}),
+    setMicGain: vi.fn(async (_db: number) => {}),
     setOverlayUrl: vi.fn(async () => {}),
     audioLevel$: vi.fn(() => () => {}),
     screenshot: vi.fn(async () => 'data:image/jpg;base64,AAAA'),
@@ -256,6 +257,17 @@ describe('LiveController', () => {
     expect(t.ctl().setOverlayUrl).toHaveBeenCalledWith('http://127.0.0.1:5555/?k=t')
     expect(t.last().obs).toBe('running')
     expect(t.last().phase).toBe('idle')
+  })
+
+  it('micro gain: applied at boot (0 dB when unset), then on change only, clamped', async () => {
+    const t = setup()
+    await t.live.boot()
+    expect(t.ctl().setMicGain).toHaveBeenCalledWith(0)
+    t.ctl().setMicGain.mockClear()
+    await t.live.saveSettings({ micGainDb: -6 })
+    expect(t.ctl().setMicGain).toHaveBeenLastCalledWith(-6)
+    await t.live.saveSettings({ audioDeviceId: 'mic' })
+    expect(t.ctl().setMicGain).toHaveBeenCalledTimes(1)
   })
 
   it('audio feedback is off at boot (also reset in OBS) and toggles on the attached OBS', async () => {

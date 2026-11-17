@@ -17,6 +17,7 @@ interface FakeObs { port: number; crashOn: string | null; connections: number; c
 const RESPONSES: Record<string, unknown> = {
   GetSceneList: { scenes: [{ sceneName: 'LinTO Live' }, { sceneName: 'LinTO Pause' }] },
   GetInputList: { inputs: [{ inputName: 'Salle' }, { inputName: 'Sous-titres' }, { inputName: 'Micro' }] },
+  GetSourceFilterList: { filters: [{ filterName: 'Gain' }, { filterName: 'Limiteur' }] },
   GetSceneItemList: { sceneItems: [{ sourceName: 'Salle' }, { sourceName: 'Sous-titres' }, { sourceName: 'Micro' }] },
   GetSceneItemId: { sceneItemId: 1 },
   GetStreamStatus: { outputActive: false }

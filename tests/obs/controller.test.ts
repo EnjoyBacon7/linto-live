@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { FFMPEG_OUTPUT, fileStamp,
+import { FFMPEG_OUTPUT, FILTER_GAIN, FILTER_LIMITER, fileStamp, LIMITER_THRESHOLD_DB,
   ObsController, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_VIDEO, type ObsClient
 } from '../../src/main/obs/controller'
 
@@ -22,6 +22,12 @@ function fakeClient(
   const scenes = new Map<string, { sourceName: string; sceneItemId: number; sceneItemEnabled: boolean }[]>()
   const inputs = new Map<string, { inputKind: string; inputSettings: Record<string, unknown> }>()
   const handlers = new Map<string, Set<(d: unknown) => void>>()
+  /** Filters per source, in OBS order. */
+  const filters = new Map<string, { filterName: string; filterKind: string; filterSettings: Record<string, unknown> }[]>()
+  const filtersOf = (name: unknown) => {
+    if (!filters.has(name as string)) filters.set(name as string, [])
+    return filters.get(name as string)!
+  }
   const sceneOf = (name: unknown) => scenes.get(name as string) ?? []
   const addItem = (sceneName: unknown, sourceName: string, enabled: unknown) => {
     const sceneItemId = nextId++
@@ -85,6 +91,26 @@ function fakeClient(
           if (it) it.sceneItemEnabled = data!.sceneItemEnabled as boolean
           return {}
         }
+        case 'GetSourceFilterList':
+          return { filters: filtersOf(data!.sourceName).map((f, filterIndex) => ({ ...f, filterIndex })) }
+        case 'CreateSourceFilter':
+          filtersOf(data!.sourceName).push({
+            filterName: data!.filterName as string, filterKind: data!.filterKind as string,
+            filterSettings: (data!.filterSettings ?? {}) as Record<string, unknown>
+          })
+          return {}
+        case 'SetSourceFilterSettings': {
+          const fl = filtersOf(data!.sourceName).find((x) => x.filterName === data!.filterName)
+          if (!fl) throw new CodedError(600, 'No filter was found.')
+          Object.assign(fl.filterSettings, data!.filterSettings)
+          return {}
+        }
+        case 'SetSourceFilterIndex': {
+          const list = filtersOf(data!.sourceName)
+          const [fl] = list.splice(list.findIndex((x) => x.filterName === data!.filterName), 1)
+          list.splice(data!.filterIndex as number, 0, fl)
+          return {}
+        }
         case 'GetInputPropertiesListPropertyItems':
           return { propertyItems: opts.items ?? [] }
         case 'GetSourceScreenshot':
@@ -125,7 +151,7 @@ function fakeClient(
   /** Source names of a scene, bottom first. */
   const order = (sceneName: string) => sceneOf(sceneName).map((x) => x.sourceName)
   const item = (sceneName: string, sourceName: string) => sceneOf(sceneName).find((x) => x.sourceName === sourceName)
-  return { client, calls, emit, handlers, setStarting, inputs, order, item }
+  return { client, calls, emit, handlers, setStarting, inputs, order, item, filters: filtersOf }
 }
 const of = (calls: Call[], req: string) => calls.filter((c) => c.req === req)
 
@@ -229,6 +255,33 @@ describe('ObsController', () => {
     const c = new ObsController(f.client)
     await c.setAudioDevice('mic1')
     expect(of(f.calls, 'SetInputSettings')[0].data).toMatchObject({ inputName: SRC_AUDIO, inputSettings: { device_id: 'mic1' } })
+  })
+
+  it('ensureScene puts a gain then a limiter on Micro, once, ahead of filters added by hand', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    expect(f.filters(SRC_AUDIO)).toEqual([
+      { filterName: FILTER_GAIN, filterKind: 'gain_filter', filterSettings: { db: 0 } },
+      { filterName: FILTER_LIMITER, filterKind: 'limiter_filter', filterSettings: { threshold: LIMITER_THRESHOLD_DB, release_time: 60 } }
+    ])
+    // A filter added in OBS by hand: the gain stays first, the limiter last.
+    f.filters(SRC_AUDIO).push({ filterName: 'Bruit', filterKind: 'noise_suppress_filter_v2', filterSettings: {} })
+    await c.setMicGain(6)
+    await c.ensureScene('darwin')
+    expect(f.filters(SRC_AUDIO).map((x) => x.filterName)).toEqual([FILTER_GAIN, 'Bruit', FILTER_LIMITER])
+    expect(f.filters(SRC_AUDIO)[0].filterSettings).toEqual({ db: 6 }) // the gain set is kept
+    expect(of(f.calls, 'CreateSourceFilter')).toHaveLength(2)
+  })
+
+  it('setMicGain sets the gain filter in dB', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setMicGain(-12)
+    expect(of(f.calls, 'SetSourceFilterSettings')[0].data).toEqual({
+      sourceName: SRC_AUDIO, filterName: FILTER_GAIN, filterSettings: { db: -12 }
+    })
   })
 
   it('setAudioMonitor monitors Micro while still sending it out, or stops monitoring', async () => {
