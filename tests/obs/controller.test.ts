@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
+import { FFMPEG_OUTPUT, fileStamp,
   ObsController, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_VIDEO, type ObsClient
 } from '../../src/main/obs/controller'
 
@@ -510,17 +510,28 @@ describe('ObsController sources', () => {
 })
 
 describe('ObsController recording', () => {
-  it('startRecord sets directory, filename and starts, in that order', async () => {
+  const ffmpegStart = (url: string, name: string, mime: string) => [
+    { req: 'SetProfileParameter', data: { parameterCategory: 'AdvOut', parameterName: 'FFURL', parameterValue: url } },
+    { req: 'SetProfileParameter', data: { parameterCategory: 'AdvOut', parameterName: 'FFFormat', parameterValue: name } },
+    { req: 'SetProfileParameter', data: { parameterCategory: 'AdvOut', parameterName: 'FFFormatMimeType', parameterValue: mime } },
+    { req: 'SetOutputSettings', data: { outputName: FFMPEG_OUTPUT, outputSettings: { url, format_name: name, format_mime_type: mime } } },
+    { req: 'StartRecord', data: undefined }
+  ]
+
+  it('startRecord points the FFmpeg output at `<dir>/<name> <date time>.mkv` (profile and output), then starts', async () => {
     const f = fakeClient()
-    await new ObsController(f.client).startRecord('/rec', 'Réunion')
-    expect(f.calls).toEqual([
-      { req: 'SetRecordDirectory', data: { recordDirectory: '/rec' } },
-      {
-        req: 'SetProfileParameter',
-        data: { parameterCategory: 'Output', parameterName: 'FilenameFormatting', parameterValue: 'Réunion %CCYY-%MM-%DD %hh-%mm-%ss' }
-      },
-      { req: 'StartRecord', data: undefined }
-    ])
+    await new ObsController(f.client).startRecord('/rec', 'Réunion', new Date(2026, 10, 3, 9, 5, 7))
+    expect(f.calls).toEqual(ffmpegStart('/rec/Réunion 2026-11-03 09-05-07.mkv', 'matroska', 'video/x-matroska'))
+  })
+
+  it('startBroadcast points the FFmpeg output at the local relay in FLV, then starts', async () => {
+    const f = fakeClient()
+    await new ObsController(f.client).startBroadcast('unix:/tmp/l/obs.sock')
+    expect(f.calls).toEqual(ffmpegStart('unix:/tmp/l/obs.sock', 'flv', 'video/x-flv'))
+  })
+
+  it('fileStamp: local date and time, zero-padded', () => {
+    expect(fileStamp(new Date(2026, 0, 2, 3, 4, 5))).toBe('2026-01-02 03-04-05')
   })
 
   it('stopRecord returns the path', async () => {

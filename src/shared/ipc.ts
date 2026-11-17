@@ -29,8 +29,13 @@ export interface LiveState {
   startedAt?: number
   /** Video source shown in OBS; absent when no backup source is configured. */
   videoOnAir?: 'primary' | 'backup'
-  /** Recording of the show to a file: 'error' when it could not start or stopped by itself (the show goes on). */
+  /**
+   * The show's second OBS output — a recording to a file, or an online broadcast (`recordingTarget`):
+   * 'error' when it could not start or stopped by itself (the show goes on).
+   */
   recording: 'off' | 'on' | 'error'
+  /** What `recording` is about for the show on air (absent when that show has neither). */
+  recordingTarget?: 'file' | 'broadcast'
   /** Audio feedback: the micro, as sent to LinTO and recorded, plays on the system output (absent = off). */
   audioMonitor?: boolean
   warning?: string
@@ -71,6 +76,11 @@ export interface LintoLiveApi {
     pickMedia(kind: 'image' | 'video'): Promise<string | null>
     /** Lets the user pick (or create) a folder; its path, or null if they cancelled. */
     pickFolder(): Promise<string | null>
+    /**
+     * Saves the online broadcast's server and stream key together (the key encrypted, never read back).
+     * `key` absent: kept if the server is unchanged, forgotten otherwise; blank: forgotten.
+     */
+    setBroadcast(server: string, key?: string): Promise<void>
   }
   sessions: {
     list(): Promise<SessionSummary[]>
@@ -133,6 +143,7 @@ export const IPC = {
   setupSave: 'setup:save',
   setupPickMedia: 'setup:pick-media',
   setupPickFolder: 'setup:pick-folder',
+  setupSetBroadcast: 'setup:set-broadcast',
   sessionsList: 'sessions:list',
   sessionsLookup: 'sessions:lookup',
   sessionsSetWatermark: 'sessions:set-watermark',
@@ -211,7 +222,8 @@ const isQr = (v: unknown): v is QrSettings =>
 export function checkSettingsPatch(raw: unknown): Partial<Settings> {
   const bad = (): never => { throw new Error('Réglages invalides.') }
   if (!isObj(raw)) return bad()
-  if ('subtitleLanguages' in raw) return bad()
+  // The broadcast server goes with its key (setup.setBroadcast), never alone.
+  if ('subtitleLanguages' in raw || 'broadcastKeySet' in raw || 'broadcastServer' in raw) return bad()
   if ('primarySource' in raw && !isVideoSource(raw.primarySource)) return bad()
   if ('backupSource' in raw && !isVideoSource(raw.backupSource)) return bad()
   if ('recordDir' in raw && !absolute(raw.recordDir)) return bad()
@@ -220,7 +232,7 @@ export function checkSettingsPatch(raw: unknown): Partial<Settings> {
     const v = raw.properNouns
     if (!Array.isArray(v) || v.length > 1000 || !v.every((n) => typeof n === 'string' && n.length <= 200)) return bad()
   }
-  for (const k of ['blackIsAbsent', 'recordEnabled', 'properNounsEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
+  for (const k of ['blackIsAbsent', 'recordEnabled', 'properNounsEnabled', 'broadcastEnabled'] as const) if (k in raw && typeof raw[k] !== 'boolean') return bad()
   return raw as Partial<Settings>
 }
 
@@ -248,7 +260,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       load: () => call(IPC.setupLoad),
       save: (s) => call(IPC.setupSave, s),
       pickMedia: (kind) => call(IPC.setupPickMedia, kind),
-      pickFolder: () => call(IPC.setupPickFolder)
+      pickFolder: () => call(IPC.setupPickFolder),
+      setBroadcast: (server, key) => (key === undefined ? call(IPC.setupSetBroadcast, server) : call(IPC.setupSetBroadcast, server, key))
     },
     sessions: {
       list: () => call(IPC.sessionsList),

@@ -97,11 +97,11 @@ function setup(meta?: Record<string, unknown>) {
     audioLevel$: vi.fn(() => () => {}), screenshot: vi.fn(async () => ''), startStream: vi.fn(async () => {}),
     stopStream: vi.fn(async () => true), streamState$: vi.fn(() => () => {}), openOutputWindow: vi.fn(async () => {}),
     showLive: vi.fn(async () => {}), showPause: vi.fn(async () => {}), resetProjectorState: vi.fn(), disconnect: vi.fn(async () => {}), ping: vi.fn(async () => {}),
-    startRecord: vi.fn(async () => {}), stopRecord: vi.fn(async () => null), recordState$: vi.fn(() => () => {})
+    startRecord: vi.fn(async () => {}), startBroadcast: vi.fn(async () => {}), stopRecord: vi.fn(async () => null), recordState$: vi.fn(() => () => {})
   }
   const overlay = { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) }
   let data: Settings = { instance: 'https://x', orgId: 'o', profileId: 1, primarySource: { kind: 'device', id: 'v' }, audioDeviceId: 'a' }
-  const settings = { get: vi.fn(() => ({ ...data })), update: vi.fn((p: Partial<Settings>) => { data = { ...data, ...p } }), setToken: vi.fn() }
+  const settings = { get: vi.fn(() => ({ ...data })), update: vi.fn((p: Partial<Settings>) => { data = { ...data, ...p } }), setToken: vi.fn(), getBroadcastKey: vi.fn(() => null) }
   const deps = {
     obs, controllerFactory: vi.fn(async () => ctl),
     api: {
@@ -111,7 +111,8 @@ function setup(meta?: Record<string, unknown>) {
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
     overlay, settings, platform: 'darwin' as const, qrSvg: async () => '<svg/>', decodeLuma: () => null, watermarkConfig: () => CFG,
-    mkdirp: async () => {}, defaultRecordDir: '/rec'
+    mkdirp: async () => {}, defaultRecordDir: '/rec',
+    openBroadcast: async () => ({ url: 'unix:/tmp/l/obs.sock', onClose: () => {}, close: () => {} })
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const styles = () => overlay.push.mock.calls.map((c) => c[0]).filter((m) => m.type === 'style')

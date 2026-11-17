@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_START_CANCELLED, MSG_OBS_HUNG, WATCHDOG_MS, WATCHDOG_MISSES, MSG_NO_STREAM, MSG_RTMP_ONLY, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_PRIMARY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, PREVIEW_MS, msgDeleted, msgTerminated,
+  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_PRIMARY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, MSG_BROADCAST_FAILED, MSG_BROADCAST_NOT_STARTED,
+  MSG_BROADCAST_STOPPED, MSG_BROADCAST_NO_SERVER, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
 import type { StreamState } from '../src/main/obs/controller'
 import { createNameCorrector } from '../src/main/linto/properNouns'
+import type { PublishTarget } from '../src/main/broadcast/rtmp'
 import type { Luma } from '../src/main/obs/fallback'
 import type { LiveState } from '../src/shared/ipc'
 import {
@@ -81,6 +83,10 @@ function fakeController(log: string[]) {
       log.push(`startRecord:${base}`)
       if (c.recordStarts) queueMicrotask(() => recordCb?.({ active: true }))
     }),
+    startBroadcast: vi.fn(async (url: string) => {
+      log.push(`startBroadcast:${url}`)
+      if (c.recordStarts) queueMicrotask(() => recordCb?.({ active: true }))
+    }),
     stopRecord: vi.fn(async (): Promise<string | null> => {
       log.push('stopRecord')
       queueMicrotask(() => recordCb?.({ active: false, path: c.recordPath }))
@@ -102,7 +108,7 @@ function fakeController(log: string[]) {
 }
 type FakeCtl = ReturnType<typeof fakeController>
 
-function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null } = {}) {
+function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null; broadcastKey?: string } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
@@ -162,17 +168,36 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
       data = { ...data, ...p }
     }),
     setToken: vi.fn(),
-    getToken: vi.fn(() => 'tok')
+    getToken: vi.fn(() => 'tok'),
+    getBroadcastKey: vi.fn((): string | null => opts.broadcastKey ?? null)
   }
   const qrSvg = vi.fn(async (url: string) => `<svg>${url}</svg>`)
   const decodeLuma = vi.fn((_d: string) => (opts.luma ? opts.luma() : PICTURE))
   const mkdirp = vi.fn(async (dir: string) => {
     log.push(`mkdirp:${dir}`)
   })
+  /** Fake platform connections: each one records its target, can fail to open, and can be dropped. */
+  const broadcasts: { target: PublishTarget; closed: boolean; drop: (e: Error) => void }[] = []
+  let broadcastError: Error | null = null
+  const openBroadcast = vi.fn(async (target: PublishTarget) => {
+    log.push(`openBroadcast:${target.server}`)
+    if (broadcastError) throw broadcastError
+    const listeners: ((e: Error | null) => void)[] = []
+    const b = {
+      target, closed: false,
+      drop: (e: Error) => { b.closed = true; listeners.splice(0).forEach((l) => l(e)) }
+    }
+    broadcasts.push(b)
+    return {
+      url: `unix:/tmp/l${broadcasts.length}/obs.sock`,
+      onClose: (cb: (e: Error | null) => void) => void listeners.push(cb),
+      close: () => { b.closed = true; listeners.splice(0).forEach((l) => l(null)) }
+    }
+  })
   const deps = {
     obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const,
     mkdirp, defaultRecordDir: REC_DIR,
-    nameCorrector: (names: string[]) => createNameCorrector(names, new Set(['macro']))
+    nameCorrector: (names: string[]) => createNameCorrector(names, new Set(['macro'])), openBroadcast
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
@@ -182,6 +207,7 @@ function setup(opts: { sessions?: Session[]; settings?: Partial<Settings>; luma?
   const ctl = (): FakeCtl => ctls[ctls.length - 1]
   return {
     live, obs, controllerFactory, ctls, ctl, api, captions, overlay, settings, qrSvg, decodeLuma, mkdirp, log, states, saved,
+    openBroadcast, broadcasts, failBroadcast: (e: Error | null) => { broadcastError = e },
     last: () => live.getState()
   }
 }
@@ -1759,6 +1785,113 @@ describe('backup source', () => {
     expect(t.ctl().probePrimary).not.toHaveBeenCalled()
     expect(t.ctl().setBackupVisible).toHaveBeenCalledWith(false)
     expect(t.last()).not.toHaveProperty('videoOnAir')
+  })
+})
+
+describe('LiveController online broadcast', () => {
+  const SERVER = 'rtmp://a.rtmp.youtube.com/live2'
+  const bc = (over: Partial<Settings> = {}) => ({ broadcastEnabled: true, broadcastServer: SERVER, ...over })
+
+  it('publishes with the key read at Démarrer, then points OBS at the local relay — never at the key', async () => {
+    const t = setup({ settings: bc({ recordEnabled: true }), broadcastKey: 'abcd-1234' })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    expect(t.openBroadcast).toHaveBeenCalledWith({ server: SERVER, key: 'abcd-1234' })
+    expect(t.ctl().startBroadcast).toHaveBeenCalledWith('unix:/tmp/l1/obs.sock')
+    expect(t.log.filter((l) => /Broadcast/.test(l))).toEqual([`openBroadcast:${SERVER}`, 'startBroadcast:unix:/tmp/l1/obs.sock'])
+    expect(t.ctl().startRecord).not.toHaveBeenCalled()
+    expect(t.mkdirp).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'on', recordingTarget: 'broadcast' })
+    await t.live.stop()
+    await flush()
+    expect(t.ctl().stopRecord).toHaveBeenCalledTimes(1)
+    expect(t.broadcasts[0].closed).toBe(true)
+    expect(t.last()).toMatchObject({ phase: 'idle', recording: 'off' })
+    expect(t.last()).not.toHaveProperty('recordingTarget')
+    expect(t.saved).toEqual([]) // a broadcast leaves no file
+  })
+
+  it('a recording says so in the state too', async () => {
+    const t = setup({ settings: { recordEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    expect(t.last()).toMatchObject({ recording: 'on', recordingTarget: 'file' })
+  })
+
+  it('without a server: an error, the show goes on', async () => {
+    const t = setup({ settings: { broadcastEnabled: true } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    expect(t.openBroadcast).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error', warning: MSG_BROADCAST_FAILED + MSG_BROADCAST_NO_SERVER })
+  })
+
+  it('the platform refuses: its reason, OBS not started, the show goes on', async () => {
+    const t = setup({ settings: bc(), broadcastKey: 'k' })
+    t.failBroadcast(new Error('le serveur refuse la diffusion (NetStream.Publish.BadName) : vérifier la clé de stream.'))
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    expect(t.ctl().startBroadcast).not.toHaveBeenCalled()
+    expect(t.last()).toMatchObject({
+      phase: 'live', recording: 'error',
+      warning: MSG_BROADCAST_FAILED + 'le serveur refuse la diffusion (NetStream.Publish.BadName) : vérifier la clé de stream.'
+    })
+  })
+
+  it('OBS never starts sending: error after the wait, the platform connection closed', async () => {
+    const t = setup({ settings: bc(), broadcastKey: 'k' })
+    await t.live.boot()
+    t.ctl().recordStarts = false
+    await t.live.start('Conf')
+    await vi.advanceTimersByTimeAsync(RECORD_WAIT_MS)
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error', warning: MSG_BROADCAST_FAILED + MSG_BROADCAST_NOT_STARTED })
+    expect(t.broadcasts[0].closed).toBe(true)
+  })
+
+  it('the platform drops the connection during the show: its reason, nothing announced', async () => {
+    const t = setup({ settings: bc(), broadcastKey: 'k' })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    t.broadcasts[0].drop(new Error('le serveur de diffusion a fermé la connexion.'))
+    t.ctl().emitRecord({ active: false, path: 'unix:/tmp/l/obs.sock' }) // the relay then ends OBS's output
+    expect(t.last()).toMatchObject({ phase: 'live', recording: 'error', warning: MSG_BROADCAST_FAILED + 'le serveur de diffusion a fermé la connexion.' })
+    expect(t.saved).toEqual([])
+  })
+
+  it('OBS stops its output by itself: broadcast error, the platform connection closed', async () => {
+    const t = setup({ settings: bc(), broadcastKey: 'k' })
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    t.ctl().emitRecord({ active: false, path: 'unix:/tmp/l/obs.sock' })
+    expect(t.last()).toMatchObject({ recording: 'error', warning: MSG_BROADCAST_FAILED + MSG_BROADCAST_STOPPED })
+    expect(t.broadcasts[0].closed).toBe(true)
+  })
+
+  it('OBS restart: publishes again with the key of this show; a new key applies at the next Démarrer', async () => {
+    let key = 'old'
+    const t = setup({ settings: bc() })
+    t.settings.getBroadcastKey.mockImplementation(() => key)
+    await t.live.boot()
+    await t.live.start('Conf')
+    await flush()
+    key = 'new'
+    t.obs.emit('restarting', 1)
+    expect(t.broadcasts[0].closed).toBe(true) // that OBS run is gone
+    await t.obs.start()
+    await t.live.settled()
+    await flush()
+    expect(t.openBroadcast).toHaveBeenLastCalledWith({ server: SERVER, key: 'old' })
+    expect(t.ctl().startBroadcast).toHaveBeenCalledWith('unix:/tmp/l2/obs.sock')
+    await t.live.stop()
+    await t.live.start('Conf')
+    await flush()
+    expect(t.openBroadcast).toHaveBeenLastCalledWith({ server: SERVER, key: 'new' })
   })
 })
 

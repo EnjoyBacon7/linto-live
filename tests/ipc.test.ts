@@ -15,7 +15,7 @@ describe('IPC constants', () => {
         'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe',
-        'liveSetAudioMonitor'
+        'liveSetAudioMonitor', 'setupSetBroadcast'
       ].sort()
     )
   })
@@ -166,6 +166,7 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { blackIsAbsent: false, recordEnabled: true },
       { properNounsEnabled: true, properNouns: ['LINAGORA', 'Issy-les-Moulineaux'] },
       { properNouns: [] },
+      { broadcastEnabled: true, recordEnabled: false },
       { instance: 'https://studio.linto.ai', profileId: 2, subtitleFontSize: 40 }
     ]
     for (const p of ok) expect(checkSettingsPatch(p)).toEqual(p)
@@ -194,7 +195,10 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { properNouns: 'LINAGORA' },
       { properNouns: ['LINAGORA', 3] },
       { properNouns: ['x'.repeat(201)] },
-      { subtitleLanguages: { s1: 'en' } }
+      { subtitleLanguages: { s1: 'en' } },
+      { broadcastEnabled: 'yes' },
+      { broadcastServer: 'rtmp://a.rtmp.youtube.com/live2' }, // only with its key, via setup.setBroadcast
+      { broadcastKeySet: true }
     ]
     for (const p of bad) expect(() => checkSettingsPatch(p), JSON.stringify(p)).toThrow('Réglages invalides.')
   })

@@ -148,6 +148,15 @@ export interface Settings {
   properNouns?: string[]
   /** EXPERIMENTAL: the proper-noun correction is on (default false); the list is kept when it is off. */
   properNounsEnabled?: boolean
+  /**
+   * Broadcast each show online, read at Démarrer (default false). OBS has one output besides the stream to
+   * LinTO: broadcasting and recording exclude each other (the broadcast wins if both are set).
+   */
+  broadcastEnabled?: boolean
+  /** RTMP(S) server of the online broadcast (see isBroadcastServer); its stream key is stored apart, encrypted. */
+  broadcastServer?: string
+  /** Read-only (SettingsStore.get): a stream key is saved (setBroadcastKey). */
+  broadcastKeySet?: boolean
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
 }

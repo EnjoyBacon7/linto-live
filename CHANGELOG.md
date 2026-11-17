@@ -20,9 +20,17 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - **Écouter le retour audio** (réglage Micro) : le son du micro tel qu'il est envoyé à LinTO et
   enregistré est joué sur la sortie audio du système, pour vérifier sa qualité. Désactivé à
   chaque lancement ; à utiliser au casque (sur haut-parleurs, le micro le reprend : larsen).
+- **Diffusion en ligne** (YouTube, Twitch, PeerTube, serveur RTMP/RTMPS) : la sortie Full HD,
+  sous-titres compris, est envoyée au serveur et à la clé de stream saisis dans « Paramètres de
+  diffusion… » (clé chiffrée). L'application publie elle-même le flux : la clé ne passe jamais par
+  OBS (ni sa configuration ni ses journaux), et une clé refusée est signalée avec la raison de la
+  plateforme. Pastille **EN LIGNE** pendant la diffusion. Diffusion et
+  enregistrement s'excluent (OBS n'a qu'une sortie en plus de celle vers LinTO).
 
 ### Modifié
 
+- L'enregistrement passe par la sortie FFmpeg d'OBS (même MKV 1920×1080 H.264/AAC), qui sert aussi
+  à la diffusion en ligne.
 - **Terminer la session** fait désormais comme « Arrêter et enregistrer » dans LinTO Studio : la
   transcription et ses traductions sont enregistrées comme média dans LinTO Studio, puis la session
   est supprimée. Auparavant, la session était seulement close et n'apparaissait pas dans les médias.

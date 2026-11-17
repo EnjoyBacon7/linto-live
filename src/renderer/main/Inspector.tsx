@@ -6,7 +6,8 @@ import {
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
 import { PopUp } from '../ui/PopUp'
-import { CameraIcon, CaptionsIcon, MicIcon, RecordIcon } from '../ui/icons'
+import { BroadcastIcon, CameraIcon, CaptionsIcon, MicIcon, RecordIcon } from '../ui/icons'
+import { broadcastHost, isBroadcastServer } from '../../shared/broadcast'
 
 /** Watermark of the selected session; `pending` = the session does not exist on LinTO yet. */
 export type WatermarkTarget = { watermark: Watermark } | { pending: true } | null
@@ -41,6 +42,8 @@ export interface InspectorProps {
   audioMonitor?: boolean
   audioMonitorAvailable?: boolean
   onAudioMonitorChange?(on: boolean): void
+  /** Opens « Paramètres de diffusion » (server and stream key of the online broadcast). */
+  onBroadcastSettings?(): void
 }
 
 export function Check({ label, checked, disabled, onChange }: {
@@ -150,6 +153,10 @@ export function Inspector(p: InspectorProps) {
   const qr = { ...DEFAULT_QR, ...settings?.qr }
   const language = p.languages?.some((l) => l.value === p.language) ? p.language! : 'original'
   const wmEditable = !!wm && p.watermarkBlocked === undefined
+  // The broadcast wins when both are set (OBS has one output for them): the inspector shows it that way.
+  const broadcasting = settings?.broadcastEnabled === true
+  const recording = settings?.recordEnabled === true && !broadcasting
+  const hasServer = isBroadcastServer(settings?.broadcastServer)
   return (
     <aside className="inspector" aria-label="Réglages">
       <section className="inspector-group">
@@ -248,8 +255,9 @@ export function Inspector(p: InspectorProps) {
       </section>
       <section className="inspector-group" aria-label="Enregistrement">
         <h3 className="inspector-label"><RecordIcon size={14} />Enregistrement</h3>
-        <Check label="Enregistrer le direct" checked={settings?.recordEnabled === true} disabled={!settings}
-          onChange={(v) => onChange({ recordEnabled: v })} />
+        {/* One OBS output for both: ticking one unticks the other. */}
+        <Check label="Enregistrer le direct" checked={recording} disabled={!settings}
+          onChange={(v) => onChange(v ? { recordEnabled: true, broadcastEnabled: false } : { recordEnabled: false })} />
         {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
         <p className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
           title={settings?.recordDir}>
@@ -260,6 +268,23 @@ export function Inspector(p: InspectorProps) {
         }}>
           Choisir…
         </Button>
+      </section>
+      <section className="inspector-group" aria-label="Diffusion en ligne">
+        <h3 className="inspector-label"><BroadcastIcon size={14} />Diffusion en ligne</h3>
+        <Check label="Diffuser en ligne" checked={broadcasting} disabled={!settings || (!broadcasting && !hasServer)}
+          onChange={(v) => onChange(v ? { broadcastEnabled: true, recordEnabled: false } : { broadcastEnabled: false })} />
+        {p.onAir && <p className="inspector-note">S’applique au prochain Démarrer.</p>}
+        <p className={hasServer ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
+          title={hasServer ? settings!.broadcastServer : undefined}>
+          {hasServer ? broadcastHost(settings!.broadcastServer!) : 'Aucun serveur'}
+          {hasServer && !settings?.broadcastKeySet ? ' (sans clé)' : ''}
+        </p>
+        <Button className="inspector-control" disabled={!settings} onClick={() => p.onBroadcastSettings?.()}>
+          Paramètres de diffusion…
+        </Button>
+        {!broadcasting && !hasServer && (
+          <p className="inspector-note">YouTube, Twitch… : saisir le serveur et la clé de stream de la plateforme.</p>
+        )}
       </section>
     </aside>
   )

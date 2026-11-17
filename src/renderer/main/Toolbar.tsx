@@ -1,6 +1,6 @@
 import { Button } from '../ui/Button'
 import { StatusDot } from '../ui/StatusDot'
-import { DisplayIcon, PlayIcon, RecordIcon, StopIcon } from '../ui/icons'
+import { BroadcastIcon, DisplayIcon, PlayIcon, RecordIcon, StopIcon } from '../ui/icons'
 import { useElapsed } from './useLive'
 
 export type Busy = 'start' | 'stop' | 'terminate' | 'switch' | null
@@ -14,6 +14,8 @@ export interface ToolbarProps {
   onAir: boolean
   /** The show is being recorded to disk: red « REC » pill. */
   recording?: boolean
+  /** The show is being broadcast online: red « EN LIGNE » pill. */
+  broadcasting?: boolean
   startedAt?: number
   busy: Busy
   canStart: boolean
@@ -62,6 +64,12 @@ export function Toolbar(p: ToolbarProps) {
           <span className="rec-pill" title="Enregistrement en cours">
             <RecordIcon size={10} />
             <span>REC</span>
+          </span>
+        )}
+        {p.broadcasting && (
+          <span className="rec-pill" title="Diffusion en ligne en cours">
+            <BroadcastIcon size={12} />
+            <span>EN LIGNE</span>
           </span>
         )}
         {p.onAir ? (

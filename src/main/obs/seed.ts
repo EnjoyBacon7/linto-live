@@ -7,24 +7,33 @@ export interface SeedOptions {
 }
 
 /**
- * Advanced output mode: two encoders on the full HD canvas. The stream only carries the room audio to
- * LinTO, so its encoder rescales to 640×360 at a low bitrate; the recording keeps the full output
- * (QR code readable, sharp subtitles).
+ * Advanced output mode, two outputs on the full HD canvas. The stream output only carries the room audio to
+ * LinTO, so its encoder rescales to 640×360 at a low bitrate. The recording output is OBS's « Custom Output
+ * (FFmpeg) »: its URL is set at each start (ObsController.startRecord / startBroadcast), either a local MKV
+ * file or an RTMP(S) server (online broadcast, see Settings.broadcast), at the full output (QR code
+ * readable, sharp subtitles). OBS has a single stream output and LinTO uses it: this is the only native
+ * second output. Its type is fixed when OBS creates its outputs (launch), hence always FFmpeg.
  */
 const STREAM = { width: 640, height: 360, videoKbps: 200 }
-const RECORD = { videoKbps: 6000 }
+const RECORD = { videoKbps: 6000, audioKbps: 128, gop: 60 }
 const AUDIO_KBPS = 128
-/** OBS_SCALE_DISABLE / OBS_SCALE_BILINEAR (libobs enum obs_scale_type). */
-const SCALE_DISABLE = 0
+/** OBS_SCALE_BILINEAR (libobs enum obs_scale_type). */
 const SCALE_BILINEAR = 3
+/** FFmpeg AVCodecID values OBS stores next to the encoder names (AV_CODEC_ID_H264, AV_CODEC_ID_AAC). */
+const AV_CODEC_ID_H264 = 27
+const AV_CODEC_ID_AAC = 86018
 
 /**
- * Advanced-mode encoder ids (OBS 32 encoder ids, not the Simple-mode aliases): the hardware H.264
+ * Advanced-mode stream encoder id (OBS 32 encoder ids, not the Simple-mode aliases): the hardware H.264
  * encoder (VideoToolbox) on macOS — the app ships for Apple Silicon only — and x264 on Linux.
  */
 const videoEncoder = (p: NodeJS.Platform): string => (p === 'darwin' ? 'com.apple.videotoolbox.videoencoder.ave.avc' : 'obs_x264')
 
-/** Encoder settings, read by OBS from streamEncoder.json / recordEncoder.json in the profile directory. */
+/** FFmpeg (libavcodec) H.264 encoder of the recording output: hardware on macOS, x264 on Linux. */
+const ffVideoEncoder = (p: NodeJS.Platform): { name: string; options: string } =>
+  p === 'darwin' ? { name: 'h264_videotoolbox', options: '' } : { name: 'libx264', options: 'preset=veryfast' }
+
+/** Encoder settings, read by OBS from streamEncoder.json in the profile directory. */
 function encoderSettings(p: NodeJS.Platform, kbps: number, x264Preset: string): Record<string, unknown> {
   const common = { rate_control: 'CBR', bitrate: kbps, keyint_sec: 2 }
   return p === 'darwin' ? { ...common, profile: 'high' } : { ...common, preset: x264Preset, profile: 'high' }
@@ -52,6 +61,7 @@ const obsTrayIcon = (p: NodeJS.Platform): string => String(p === 'darwin')
 
 function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
   const { width, height, fps } = o.canvas
+  const ff = ffVideoEncoder(o.platform)
   const tray = obsTrayIcon(o.platform)
   return {
     'global.ini': [['General', GENERAL]],
@@ -85,13 +95,27 @@ function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
           ['Rescale', 'true'],
           ['RescaleFilter', String(SCALE_BILINEAR)],
           ['RescaleRes', `${STREAM.width}x${STREAM.height}`],
-          ['RecType', 'Standard'],
-          ['RecEncoder', videoEncoder(o.platform)],
-          ['RecFormat2', 'mkv'],
-          ['RecTracks', '1'],
-          ['RecRescale', 'false'],
-          ['RecRescaleFilter', String(SCALE_DISABLE)],
-          ['Track1Bitrate', String(AUDIO_KBPS)]
+          ['Track1Bitrate', String(AUDIO_KBPS)],
+          ['RecType', 'FFmpeg'],
+          // The URL (file path or server) is ours, set at each start: OBS must not build a file name.
+          ['FFOutputToFile', 'false'],
+          ['FFURL', ''],
+          ['FFFormat', 'matroska'],
+          ['FFFormatMimeType', 'video/x-matroska'],
+          ['FFMCustom', ''],
+          ['FFVEncoder', ff.name],
+          ['FFVEncoderId', String(AV_CODEC_ID_H264)],
+          ['FFVCustom', ff.options],
+          ['FFVBitrate', String(RECORD.videoKbps)],
+          // A keyframe every 2 s (30 fps): what streaming platforms ask for.
+          ['FFVGOPSize', String(RECORD.gop)],
+          ['FFRescale', 'false'],
+          ['FFAEncoder', 'aac'],
+          ['FFAEncoderId', String(AV_CODEC_ID_AAC)],
+          ['FFACustom', ''],
+          ['FFABitrate', String(RECORD.audioKbps)],
+          // Bit mask of the audio tracks: track 1 (the micro) only.
+          ['FFAudioMixes', '1']
         ]
       ]
     ]
@@ -107,8 +131,7 @@ const PROFILE_DIR = 'basic/profiles/LinTO Live/'
 function ownedFiles(o: SeedOptions): Record<string, string> {
   const json = (v: unknown): string => JSON.stringify(v, null, 2)
   return {
-    [PROFILE_DIR + 'streamEncoder.json']: json(encoderSettings(o.platform, STREAM.videoKbps, 'ultrafast')),
-    [PROFILE_DIR + 'recordEncoder.json']: json(encoderSettings(o.platform, RECORD.videoKbps, 'veryfast'))
+    [PROFILE_DIR + 'streamEncoder.json']: json(encoderSettings(o.platform, STREAM.videoKbps, 'ultrafast'))
   }
 }
 

@@ -76,11 +76,12 @@ it('OBS crashing during a camera change: the restarted OBS is re-attached and Ar
     },
     captions: Object.assign(new EventEmitter(), { open: vi.fn(), close: vi.fn() }),
     overlay: { start: vi.fn(async () => ({ url: 'http://127.0.0.1:1/?k=t' })), push: vi.fn(), stop: vi.fn(async () => {}) },
-    settings: { get: () => ({ ...data }), update: (p: Partial<Settings>) => { data = { ...data, ...p } }, setToken: vi.fn() },
+    settings: { get: () => ({ ...data }), update: (p: Partial<Settings>) => { data = { ...data, ...p } }, setToken: vi.fn(), getBroadcastKey: () => null },
     qrSvg: vi.fn(async (url: string) => `<svg>${url}</svg>`),
     decodeLuma: vi.fn(() => null),
     mkdirp: vi.fn(async () => {}),
     defaultRecordDir: '/tmp/linto-live-rec',
+    openBroadcast: async () => ({ url: 'unix:/tmp/l/obs.sock', onClose: () => {}, close: () => {} }),
     platform: 'linux'
   } satisfies LiveDeps)
   await live.boot()

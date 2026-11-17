@@ -1213,9 +1213,10 @@ describe('Enregistrement', () => {
     await renderMain()
     expect(screen.queryByText('S’applique au prochain Démarrer.')).toBeNull()
     await userEvent.click(screen.getByLabelText('Enregistrer le direct'))
-    expect(api.setup.save).toHaveBeenCalledWith({ recordEnabled: true })
+    expect(api.setup.save).toHaveBeenCalledWith({ recordEnabled: true, broadcastEnabled: false })
     act(() => emit('live-state', live()))
-    expect(await screen.findByText('S’applique au prochain Démarrer.')).toBeTruthy()
+    const region = screen.getByRole('region', { name: 'Enregistrement' })
+    expect(await within(region).findByText('S’applique au prochain Démarrer.')).toBeTruthy()
   })
 
   it('proper nouns: the toggle saves properNounsEnabled and shows the list, saved on blur one name per line', async () => {
@@ -1246,6 +1247,85 @@ describe('Enregistrement', () => {
   it('no REC pill when not recording', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'off' })) } as never })
     await renderMain()
+    expect(within(toolbar()).queryByText('REC')).toBeNull()
+  })
+})
+
+describe('Diffusion en ligne', () => {
+  const region = () => screen.getByRole('region', { name: 'Diffusion en ligne' })
+  const SERVER = 'rtmp://a.rtmp.youtube.com/live2'
+
+  it('cannot be ticked before a server is set', async () => {
+    setup()
+    await renderMain()
+    expect((within(region()).getByLabelText('Diffuser en ligne') as HTMLInputElement).disabled).toBe(true)
+    expect(within(region()).getByText('Aucun serveur')).toBeTruthy()
+  })
+
+  it('ticking it unticks the recording (OBS has one output for both), and the reverse', async () => {
+    setup({}, setupData({ broadcastServer: SERVER, broadcastKeySet: true, recordEnabled: true }))
+    await renderMain()
+    expect(within(region()).getByText('a.rtmp.youtube.com')).toBeTruthy()
+    await userEvent.click(within(region()).getByLabelText('Diffuser en ligne'))
+    expect(api.setup.save).toHaveBeenLastCalledWith({ broadcastEnabled: true, recordEnabled: false })
+    expect((screen.getByLabelText('Enregistrer le direct') as HTMLInputElement).checked).toBe(false)
+    await userEvent.click(screen.getByLabelText('Enregistrer le direct'))
+    expect(api.setup.save).toHaveBeenLastCalledWith({ recordEnabled: true, broadcastEnabled: false })
+    expect((within(region()).getByLabelText('Diffuser en ligne') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('the sheet saves the server and the stream key apart; an invalid server is refused', async () => {
+    setup({ setup: { setBroadcast: vi.fn().mockResolvedValue(undefined) } as never })
+    await renderMain()
+    await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
+    const server = await screen.findByLabelText('Serveur (RTMP ou RTMPS)')
+    await userEvent.type(server, 'https://youtube.com')
+    expect(screen.getByRole('alert').textContent).toMatch(/rtmp:\/\//)
+    expect((screen.getByRole('button', { name: 'Appliquer' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.clear(server)
+    await userEvent.type(server, SERVER)
+    await userEvent.type(screen.getByLabelText('Clé de stream'), 'abcd-1234')
+    await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
+    expect(api.setup.setBroadcast).toHaveBeenCalledWith(SERVER, 'abcd-1234')
+    expect(api.setup.save).not.toHaveBeenCalled()
+    expect(within(region()).getByText('a.rtmp.youtube.com')).toBeTruthy()
+    expect((within(region()).getByLabelText('Diffuser en ligne') as HTMLInputElement).disabled).toBe(false)
+  })
+
+  it('a saved key is kept when the key field is left empty', async () => {
+    setup({ setup: {
+      load: vi.fn().mockResolvedValue(setupData({ broadcastServer: SERVER, broadcastKeySet: true })),
+      setBroadcast: vi.fn().mockResolvedValue(undefined)
+    } as never })
+    await renderMain()
+    await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
+    expect((await screen.findByLabelText('Clé de stream') as HTMLInputElement).placeholder).toMatch(/Enregistrée/)
+    await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
+    expect(api.setup.setBroadcast).not.toHaveBeenCalled()
+    expect(api.setup.save).not.toHaveBeenCalled()
+  })
+
+  it('a new server without a new key forgets the saved one (a key is never sent to another server)', async () => {
+    setup({ setup: {
+      load: vi.fn().mockResolvedValue(setupData({ broadcastServer: SERVER, broadcastKeySet: true })),
+      setBroadcast: vi.fn().mockResolvedValue(undefined)
+    } as never })
+    await renderMain()
+    await userEvent.click(within(region()).getByRole('button', { name: 'Paramètres de diffusion…' }))
+    const server = await screen.findByLabelText('Serveur (RTMP ou RTMPS)')
+    await userEvent.clear(server)
+    await userEvent.type(server, 'rtmp://live.twitch.tv/app')
+    expect(screen.getByText(/appartient à l'ancien serveur/)).toBeTruthy()
+    expect((screen.getByLabelText('Clé de stream') as HTMLInputElement).placeholder).toBe('')
+    await userEvent.click(screen.getByRole('button', { name: 'Appliquer' }))
+    expect(api.setup.setBroadcast).toHaveBeenCalledWith('rtmp://live.twitch.tv/app')
+    expect(within(region()).getByText(/\(sans clé\)/)).toBeTruthy()
+  })
+
+  it('EN LIGNE pill instead of REC while broadcasting', async () => {
+    setup({ live: { getState: vi.fn().mockResolvedValue(live({ recording: 'on', recordingTarget: 'broadcast' })) } as never })
+    await renderMain()
+    expect(within(toolbar()).getByText('EN LIGNE')).toBeTruthy()
     expect(within(toolbar()).queryByText('REC')).toBeNull()
   })
 })

@@ -44,26 +44,30 @@ describe('seedFiles', () => {
     const b = f['basic/profiles/LinTO Live/basic.ini']
     for (const l of ['Rescale=true', 'RescaleRes=640x360', 'RescaleFilter=3', 'TrackIndex=1', 'Track1Bitrate=128']) expect(b).toContain(l)
   })
-  it('basic.ini: records the full-resolution output to MKV with its own encoder, track 1 only', () => {
+  it('basic.ini: the second output is FFmpeg, full resolution, its URL set by the app at each start, track 1 only', () => {
     const b = f['basic/profiles/LinTO Live/basic.ini']
-    for (const l of ['RecType=Standard', 'RecFormat2=mkv', 'RecTracks=1', 'RecRescale=false', 'RecRescaleFilter=0']) expect(b).toContain(l)
+    for (const l of [
+      'RecType=FFmpeg', 'FFOutputToFile=false', 'FFURL=\n', 'FFFormat=matroska', 'FFFormatMimeType=video/x-matroska',
+      'FFRescale=false', 'FFVBitrate=6000', 'FFVGOPSize=60', 'FFVEncoderId=27', 'FFAEncoder=aac', 'FFAEncoderId=86018',
+      'FFABitrate=128', 'FFAudioMixes=1'
+    ]) expect(b).toContain(l)
   })
-  it('basic.ini: hardware H.264 (VideoToolbox) on macOS, x264 on Linux, for both encoders', () => {
+  it('basic.ini: hardware H.264 (VideoToolbox) on macOS, x264 on Linux, for both outputs', () => {
     const mac = f['basic/profiles/LinTO Live/basic.ini']
     expect(mac).toMatch(/^Encoder=com\.apple\.videotoolbox\.videoencoder\.ave\.avc$/m)
-    expect(mac).toContain('RecEncoder=com.apple.videotoolbox.videoencoder.ave.avc\n')
+    expect(mac).toContain('FFVEncoder=h264_videotoolbox\n')
     const linux = seedFiles({ ...o, platform: 'linux' })['basic/profiles/LinTO Live/basic.ini']
     expect(linux).toMatch(/^Encoder=obs_x264$/m)
-    expect(linux).toContain('RecEncoder=obs_x264\n')
+    expect(linux).toContain('FFVEncoder=libx264\n')
+    expect(linux).toContain('FFVCustom=preset=veryfast\n')
     expect(linux).not.toContain('videotoolbox')
   })
-  it('encoder settings: cheap stream (200 kbps), ~6000 kbps recording; x264 presets on Linux', () => {
+  it('encoder settings: cheap stream (200 kbps); x264 preset on Linux', () => {
     const dir = 'basic/profiles/LinTO Live/'
     expect(JSON.parse(f[dir + 'streamEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 200, keyint_sec: 2 })
-    expect(JSON.parse(f[dir + 'recordEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 6000, keyint_sec: 2 })
+    expect(f).not.toHaveProperty(dir + 'recordEncoder.json')
     const linux = seedFiles({ ...o, platform: 'linux' })
     expect(JSON.parse(linux[dir + 'streamEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 200, preset: 'ultrafast' })
-    expect(JSON.parse(linux[dir + 'recordEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 6000, preset: 'veryfast' })
   })
   it('scene collection', () => {
     const s = JSON.parse(f['basic/scenes/LinTO Live.json'])
@@ -120,11 +124,11 @@ describe('writeSeed', () => {
   })
   it('rewrites the encoder settings files on every launch (they are ours)', async () => {
     const d = await tmp()
-    const p = join(d, 'basic/profiles/LinTO Live/recordEncoder.json')
+    const p = join(d, 'basic/profiles/LinTO Live/streamEncoder.json')
     await mkdir(join(d, 'basic/profiles/LinTO Live'), { recursive: true })
     await writeFile(p, '{"bitrate":2500}')
     await writeSeed(d, o)
-    expect(JSON.parse(await readFile(p, 'utf8')).bitrate).toBe(6000)
+    expect(JSON.parse(await readFile(p, 'utf8')).bitrate).toBe(200)
   })
   it('re-applies our user.ini keys on an existing install', async () => {
     const d = await tmp()
