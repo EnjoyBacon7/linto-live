@@ -53,6 +53,11 @@ type SheetState =
   | null
 
 const REFRESH_MS = 30_000
+/**
+ * After going on/off air or a stream change, LinTO updates the session status only once its transcriber sees
+ * (or loses) the stream: the list is read again at once, then at these delays, instead of waiting for REFRESH_MS.
+ */
+export const TRANSITION_REFRESH_MS = [2_000, 5_000, 10_000]
 
 export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut, commands }: MainWindowProps) {
   const [data, setData] = useState<SetupData | null>(null)
@@ -127,14 +132,24 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   useEffect(() => {
     if (liveName) setSel((cur) => (cur && !cur.pending && cur.name === liveName ? cur : { name: liveName }))
   }, [liveName])
-  // Going on/off air changes session statuses: refresh. Off air, « réutilisée/nouvelle » no longer applies.
+  // Off air, « réutilisée/nouvelle » no longer applies.
   const wasOnAir = useRef(onAir)
   useEffect(() => {
     if (wasOnAir.current === onAir) return
     wasOnAir.current = onAir
     if (!onAir) setReused(null)
+  }, [onAir])
+  // Going on/off air or the stream starting/stopping changes session statuses on LinTO, a few seconds later.
+  const transition = `${onAir}:${state.stream}`
+  const lastTransition = useRef(transition)
+  useEffect(() => {
+    if (lastTransition.current === transition) return
+    lastTransition.current = transition
     void refresh()
-  }, [onAir, refresh])
+    const timers = TRANSITION_REFRESH_MS.map((ms) =>
+      setTimeout(() => { if (!authRequiredRef.current) void refresh() }, ms))
+    return () => { for (const t of timers) clearTimeout(t) }
+  }, [transition, refresh])
 
   // ---- Derived ----
   const summary = sel && !sel.pending ? sessions?.find((s) => s.name === sel.name) : undefined
