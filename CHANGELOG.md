@@ -24,6 +24,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - **À propos (Linux)** : la fenêtre « À propos de LinTO Live » affiche le nom, la version, l'icône
   et le site du projet.
 
+### Corrigé
+
+- **Icône sur Linux** : la fenêtre de LinTO Live s'affichait sans icône dans le dock, la barre des
+  tâches et Alt-Tab (Flatpak notamment, sous Wayland). Son identifiant (`app_id` / `WM_CLASS`) est
+  désormais `ai.linto.live`, le même que celui de son entrée de menu.
+
 ## [0.5.0] - 2026-11-17
 
 ### Ajouté
