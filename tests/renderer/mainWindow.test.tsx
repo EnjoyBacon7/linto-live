@@ -136,6 +136,21 @@ describe('Sidebar', () => {
     expect(fn(api.sessions.list).mock.calls.length).toBe(calls + 1)
   })
 
+  it('reads the list again a few times after the stream starts, so the LinTO status catches up', async () => {
+    vi.useFakeTimers()
+    setup()
+    render(<App />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    act(() => emit('live-state', live({ stream: 'starting' })))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    const onAir = fn(api.sessions.list).mock.calls.length
+    act(() => emit('live-state', live({ stream: 'active' })))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10) })
+    expect(fn(api.sessions.list).mock.calls.length).toBe(onAir + 1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(fn(api.sessions.list).mock.calls.length).toBe(onAir + 1 + 3) // the previous burst was cancelled
+  })
+
   it('footer shows the instance host; the menu logs out', async () => {
     setup()
     await renderMain()
