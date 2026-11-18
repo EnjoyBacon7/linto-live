@@ -121,7 +121,7 @@ export interface LintoLiveApi {
     /** Saves the finalized transcript where the user picks (save dialog); false if they cancelled. */
     exportTranscript(format: TranscriptExportFormat): Promise<{ saved: boolean }>
   }
-  /** First-launch permissions page (macOS camera and microphone, notifications). */
+  /** First-launch page (macOS camera and microphone, Linux system checks, notifications). */
   permissions: {
     status(): Promise<PermissionsStatus>
     /** Shows the system prompt when the user was never asked; the access now. */

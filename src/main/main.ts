@@ -25,6 +25,7 @@ import { lumaOfBgra } from './obs/fallback'
 import { obsExecutable } from './obs/locate'
 import { MAC_OBS_RUNTIME_DIR, placeObsRuntime } from './obs/runtime'
 import { virtualCamPreflight, virtualCamUnavailableReason } from './obs/virtualCam'
+import { linuxSystemChecks } from './systemChecks'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
 import { asLintoAction } from './linto/accessMessages'
@@ -48,7 +49,8 @@ import { LiveController } from './live'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
-  TEST_NOTIFICATION, deferObsBoot, isMediaPermission, permissionsStatus, privacySettingsUrl, requestMediaAccess, type MediaAccessApi
+  TEST_NOTIFICATION, deferObsBoot, isMediaPermission, linuxPermissionsStatus, permissionsStatus, privacySettingsUrl, requestMediaAccess,
+  type MediaAccessApi
 } from './permissions'
 import {
   QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
@@ -68,6 +70,10 @@ let win: BrowserWindow | null = null
 /** Module-level so the menu-bar icon is never garbage-collected. */
 let tray: Tray | null = null
 
+/** Linux window / About icon (macOS uses the bundle's icon). */
+const linuxIconPath = (): string =>
+  app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), 'build', 'icon.png')
+
 function createWindow(settings: SettingsStore): BrowserWindow {
   const bounds = restoreBounds(
     settings.get().windowBounds,
@@ -81,9 +87,7 @@ function createWindow(settings: SettingsStore): BrowserWindow {
     title: 'LinTO Live',
     ...windowChrome(process.platform, nativeTheme.shouldUseDarkColors),
     // Linux: the taskbar / Alt-Tab icon comes from the window (macOS uses the bundle's icon).
-    ...(process.platform === 'linux'
-      ? { icon: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), 'build', 'icon.png') }
-      : {}),
+    ...(process.platform === 'linux' ? { icon: linuxIconPath() } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -140,6 +144,16 @@ function main(): void {
   const platform = process.platform
   const flatpak = process.env.FLATPAK_ID !== undefined
   const paths = appPaths(app.getPath('userData'), platform)
+  // « À propos » on Linux shows only what is set here (macOS reads the bundle's Info.plist).
+  if (platform === 'linux') {
+    app.setAboutPanelOptions({
+      applicationName: 'LinTO Live',
+      applicationVersion: app.getVersion(),
+      copyright: '© LINAGORA',
+      website: 'https://github.com/EnjoyBacon7/linto-live',
+      iconPath: linuxIconPath()
+    })
+  }
   // Linux without a usable keyring (no gnome-keyring / KWallet, or none unlocked): safeStorage falls
   // back to 'basic_text' and refuses to encrypt. Allow Chromium's fixed-key obfuscation so encryptString
   // does not throw, but nothing secret is persisted with it (token in memory, password not remembered).
@@ -500,12 +514,16 @@ function main(): void {
     return live.setVirtualCam(on)
   })
 
-  // ---- First-launch permissions page (macOS) ----
+  // ---- First-launch page: macOS permissions, Linux system checks ----
   const mediaAccess: MediaAccessApi | null = platform === 'darwin' ? systemPreferences : null
   const permissions = (): ReturnType<typeof permissionsStatus> =>
     permissionsStatus(platform, settings.get().permissionsOnboarded === true, mediaAccess)
   let bootObs: (() => void) | null = null
-  ipcMain.handle(IPC.permissionsStatus, () => permissions())
+  ipcMain.handle(IPC.permissionsStatus, async () => {
+    if (platform !== 'linux') return permissions()
+    const system = await linuxSystemChecks({ flatpak, canRememberLogin: canRemember() })
+    return linuxPermissionsStatus(settings.get().permissionsOnboarded === true, system)
+  })
   ipcMain.handle(IPC.permissionsRequest, (_e, kind: unknown) => {
     if (!isMediaPermission(kind)) throw new Error('Autorisation inconnue.')
     return mediaAccess ? requestMediaAccess(mediaAccess, kind) : 'granted'

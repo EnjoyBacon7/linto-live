@@ -1,9 +1,10 @@
-import type { MediaAccess, MediaPermission, PermissionsStatus } from '../shared/types'
+import type { MediaAccess, MediaPermission, PermissionsStatus, SystemCheck } from '../shared/types'
 
 /**
  * First-launch permissions (macOS). OBS captures the camera and the microphone, but it runs as a child of
  * LinTO Live, so macOS asks for (and remembers) these accesses in LinTO Live's name: asking them from the
- * app itself, on a page that says why, is what lets OBS use the devices. Linux has no such prompts.
+ * app itself, on a page that says why, is what lets OBS use the devices. Linux has no such prompts: the
+ * same page lists what the system lacks instead (systemChecks.ts).
  */
 
 export const MEDIA_PERMISSIONS: readonly MediaPermission[] = ['camera', 'microphone']
@@ -30,6 +31,11 @@ export function permissionsStatus(platform: NodeJS.Platform, onboarded: boolean,
   const microphone = asMediaAccess(sys.getMediaAccessStatus('microphone'))
   // Already granted (an older version, or reset settings): nothing to ask.
   return { needed: !onboarded && (camera !== 'granted' || microphone !== 'granted'), camera, microphone }
+}
+
+/** Linux: the page shows once, and only when the system lacks something (as macOS skips it when all is granted). */
+export function linuxPermissionsStatus(onboarded: boolean, system: SystemCheck[]): PermissionsStatus {
+  return { needed: !onboarded && system.some((c) => !c.ok), camera: 'granted', microphone: 'granted', system }
 }
 
 /**

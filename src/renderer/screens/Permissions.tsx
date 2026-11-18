@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { MediaAccess, MediaPermission } from '../../shared/types'
+import type { MediaAccess, MediaPermission, SystemCheck, SystemCheckId } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 import { Button } from '../ui/Button'
-import { BellIcon, CameraIcon, CheckIcon, MicIcon, WarningIcon } from '../ui/icons'
+import { BellIcon, CameraIcon, CheckIcon, DisplayIcon, LockIcon, MicIcon, WarningIcon } from '../ui/icons'
 import logo from '../assets/linto.svg'
 import './permissions.css'
 
@@ -28,21 +28,48 @@ const MEDIA: MediaRow[] = [
   }
 ]
 
+/** Linux: what each system check is for (the fix comes from main, which knows the install type). */
+const SYSTEM: Record<SystemCheckId, { title: string; why: string; icon: ReactNode }> = {
+  keyring: {
+    title: 'Trousseau de clés',
+    why: 'Pour retenir ta connexion à LinTO d’un lancement à l’autre.',
+    icon: <LockIcon size={20} />
+  },
+  'virtual-camera': {
+    title: 'Caméra virtuelle',
+    why: 'Pour utiliser l’image sous-titrée comme webcam dans Teams, Zoom ou un navigateur. Facultatif.',
+    icon: <CameraIcon size={20} />
+  },
+  tray: {
+    title: 'Zone de notification',
+    why: 'Pour garder LinTO Live à portée de main pendant un direct, fenêtre fermée.',
+    icon: <DisplayIcon size={20} />
+  }
+}
+
 export interface PermissionsProps {
   /** The user is done (whatever they granted): main remembers it and starts OBS. */
   onDone: () => void
 }
 
-/** First-launch page (macOS): asks for the camera, the microphone and the notifications, saying why. */
+/**
+ * First-launch page. macOS: asks for the camera, the microphone and the notifications, saying why.
+ * Linux (no such prompts): lists what the system lacks for some features, and how to get it.
+ */
 export function Permissions({ onDone }: PermissionsProps) {
   const [access, setAccess] = useState<Record<MediaPermission, MediaAccess>>({ camera: 'unknown', microphone: 'unknown' })
   const [busy, setBusy] = useState<MediaPermission | 'finish' | null>(null)
   const [notified, setNotified] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [system, setSystem] = useState<SystemCheck[]>([])
+  const mac = window.lintoLive.platform === 'darwin'
 
   const refresh = useCallback(() => {
     window.lintoLive.permissions.status()
-      .then((s) => setAccess({ camera: s.camera, microphone: s.microphone }))
+      .then((s) => {
+        setAccess({ camera: s.camera, microphone: s.microphone })
+        setSystem(s.system ?? [])
+      })
       .catch((e) => setError(ipcErrorMessage(e)))
   }, [])
   useEffect(() => {
@@ -87,6 +114,14 @@ export function Permissions({ onDone }: PermissionsProps) {
   }
 
   const allGranted = access.camera === 'granted' && access.microphone === 'granted'
+  const systemOk = system.every((c) => c.ok)
+  const note = mac
+    ? allGranted
+      ? 'Tout est prêt. Tu pourras changer ces accès à tout moment dans Réglages Système › Confidentialité et sécurité.'
+      : 'Tu peux continuer sans tout autoriser et changer ces accès plus tard dans Réglages Système › Confidentialité et sécurité. Sans caméra ni micro, le direct n’aura ni image ni transcription.'
+    : systemOk
+      ? 'Tout est prêt.'
+      : 'Tu peux continuer : rien de tout cela n’empêche un direct. Ce qui manque pourra être installé plus tard.'
 
   return (
     <div className="perm-window">
@@ -97,12 +132,14 @@ export function Permissions({ onDone }: PermissionsProps) {
             <img className="perm-logo" src={logo} alt="LinTO" width={64} height={64} draggable={false} />
             <h1 className="perm-title">Bienvenue dans LinTO Live</h1>
             <p className="perm-lead secondary">
-              Pour filmer et transcrire tes directs, LinTO Live a besoin de quelques autorisations de macOS.
+              {mac
+                ? 'Pour filmer et transcrire tes directs, LinTO Live a besoin de quelques autorisations de macOS.'
+                : 'Quelques fonctions de LinTO Live dépendent de ton système : voici ce qui est prêt et ce qui manque.'}
             </p>
           </div>
 
           <ul className="perm-list" aria-label="Autorisations">
-            {MEDIA.map((m) => (
+            {mac && MEDIA.map((m) => (
               <PermissionRow key={m.kind} icon={m.icon} title={m.title} why={m.why}>
                 <MediaAction
                   title={m.title}
@@ -114,6 +151,15 @@ export function Permissions({ onDone }: PermissionsProps) {
                 />
               </PermissionRow>
             ))}
+            {!mac && system.map((c) => (
+              <PermissionRow key={c.id} icon={SYSTEM[c.id].icon} title={SYSTEM[c.id].title} why={SYSTEM[c.id].why} fix={c.fix}>
+                {c.ok ? (
+                  <span className="perm-state perm-granted"><CheckIcon className="perm-check" />Prêt</span>
+                ) : (
+                  <span className="perm-state perm-denied"><WarningIcon className="perm-warn" />À installer</span>
+                )}
+              </PermissionRow>
+            ))}
             <PermissionRow
               icon={<BellIcon size={20} />}
               title="Notifications"
@@ -122,9 +168,11 @@ export function Permissions({ onDone }: PermissionsProps) {
               {notified ? (
                 <div className="perm-action">
                   <span className="perm-state secondary">Notification envoyée</span>
-                  <Button variant="plain" onClick={() => openSettings('notifications')} aria-label="Ouvrir les réglages des notifications">
-                    Réglages…
-                  </Button>
+                  {mac && (
+                    <Button variant="plain" onClick={() => openSettings('notifications')} aria-label="Ouvrir les réglages des notifications">
+                      Réglages…
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Button onClick={testNotification} disabled={busy !== null} aria-label="Activer les notifications">Activer</Button>
@@ -134,11 +182,7 @@ export function Permissions({ onDone }: PermissionsProps) {
 
           {error && <p className="perm-error" role="alert">{error}</p>}
 
-          <p className="perm-note secondary">
-            {allGranted
-              ? 'Tout est prêt. Tu pourras changer ces accès à tout moment dans Réglages Système › Confidentialité et sécurité.'
-              : 'Tu peux continuer sans tout autoriser et changer ces accès plus tard dans Réglages Système › Confidentialité et sécurité. Sans caméra ni micro, le direct n’aura ni image ni transcription.'}
-          </p>
+          <p className="perm-note secondary">{note}</p>
 
           <div className="perm-actions">
             <Button variant="primary" size="large" disabled={busy !== null} onClick={() => void finish()}>Continuer</Button>
@@ -149,13 +193,21 @@ export function Permissions({ onDone }: PermissionsProps) {
   )
 }
 
-function PermissionRow({ icon, title, why, children }: { icon: ReactNode; title: string; why: string; children: ReactNode }) {
+function PermissionRow({ icon, title, why, fix, children }: {
+  icon: ReactNode
+  title: string
+  why: string
+  /** Linux check not met: what to install. */
+  fix?: string | undefined
+  children: ReactNode
+}) {
   return (
     <li className="perm-row">
       <span className="perm-icon">{icon}</span>
       <div className="perm-text">
         <span className="perm-name">{title}</span>
         <span className="perm-why secondary">{why}</span>
+        {fix && <span className="perm-fix">{fix}</span>}
       </div>
       {children}
     </li>

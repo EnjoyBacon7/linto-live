@@ -161,7 +161,7 @@ export interface Settings {
   broadcastKeySet?: boolean
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
-  /** The first-launch permissions page was gone through (macOS): it is not shown again. */
+  /** The first-launch page was gone through (macOS permissions, Linux system checks): it is not shown again. */
   permissionsOnboarded?: boolean
 }
 
@@ -218,9 +218,20 @@ export type MediaPermission = 'camera' | 'microphone'
 /** Electron's systemPreferences.getMediaAccessStatus, 'unknown' for anything else. */
 export type MediaAccess = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'
 
+/** What the first-launch page checks on Linux (no privacy prompts there, but features the system may lack). */
+export type SystemCheckId = 'keyring' | 'virtual-camera' | 'tray'
+export interface SystemCheck {
+  id: SystemCheckId
+  ok: boolean
+  /** When not ok: what is missing and how to get it. */
+  fix?: string
+}
+
 export interface PermissionsStatus {
   /** Show the first-launch permissions page. */
   needed: boolean
   camera: MediaAccess
   microphone: MediaAccess
+  /** Linux: features the system lacks or provides (the page shows them instead of camera and micro). */
+  system?: SystemCheck[]
 }
