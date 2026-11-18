@@ -50,6 +50,36 @@ describe('Permissions', () => {
   })
 })
 
+describe('Permissions on Linux', () => {
+  const linux = (system: unknown[]) => makeApi({
+    permissions: { status: vi.fn().mockResolvedValue({ needed: true, camera: 'granted', microphone: 'granted', system }) }
+  })
+
+  it('lists the system checks with their fix, no camera or micro prompt', async () => {
+    window.lintoLive = { ...linux([
+      { id: 'keyring', ok: true },
+      { id: 'virtual-camera', ok: false, fix: 'Installe le paquet v4l2loopback-dkms.' },
+      { id: 'tray', ok: true }
+    ]), platform: 'linux' }
+    render(<Permissions onDone={() => {}} />)
+    expect(await screen.findByText('Installe le paquet v4l2loopback-dkms.')).toBeTruthy()
+    expect(screen.getByText('Caméra virtuelle')).toBeTruthy()
+    expect(screen.getAllByText('Prêt')).toHaveLength(2)
+    expect(screen.getByText('À installer')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Autoriser/ })).toBeNull()
+    expect(screen.queryByText(/Réglages Système/)).toBeNull()
+    expect(screen.getByText(/rien de tout cela n’empêche un direct/)).toBeTruthy()
+  })
+
+  it('tests notifications without offering a settings pane', async () => {
+    window.lintoLive = { ...linux([{ id: 'tray', ok: false, fix: 'x' }]), platform: 'linux' }
+    render(<Permissions onDone={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Activer les notifications' }))
+    expect(await screen.findByText('Notification envoyée')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Ouvrir les réglages des notifications' })).toBeNull()
+  })
+})
+
 describe('App first launch', () => {
   it('shows the permissions page first, then Login', async () => {
     window.lintoLive = makeApi({

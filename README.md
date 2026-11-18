@@ -85,6 +85,9 @@ Paquets nécessaires selon la distribution :
 
 Conseils :
 
+- Au premier lancement, si le système n'a pas tout ce que certaines fonctions demandent
+  (trousseau de clés pour retenir la connexion, `v4l2loopback` pour la caméra virtuelle, zone de
+  notification), une page le signale et indique quoi installer. Rien de cela n'empêche un direct.
 - Préférer une **session X11** (« Ubuntu on Xorg » à l'écran de connexion). Sous Wayland, ça
   fonctionne via XWayland, mais le placement de la fenêtre de sortie sur le bon écran n'est pas
   garanti.

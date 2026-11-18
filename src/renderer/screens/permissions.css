@@ -97,6 +97,13 @@
   color: var(--text-2);
 }
 
+.perm-fix {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text);
+  user-select: text;
+}
+
 .perm-action {
   flex: none;
   display: flex;

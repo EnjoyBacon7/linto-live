@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  asMediaAccess, deferObsBoot, isMediaPermission, permissionsStatus, privacySettingsUrl, requestMediaAccess, type MediaAccessApi
+  asMediaAccess, deferObsBoot, isMediaPermission, linuxPermissionsStatus, permissionsStatus, privacySettingsUrl, requestMediaAccess, type MediaAccessApi
 } from '../src/main/permissions'
 
 function sys(status: Record<string, string>): MediaAccessApi & { askForMediaAccess: ReturnType<typeof vi.fn> } {
@@ -25,6 +25,19 @@ describe('permissionsStatus', () => {
   it('maps unexpected statuses to unknown', () => {
     expect(asMediaAccess('weird')).toBe('unknown')
     expect(asMediaAccess('restricted')).toBe('restricted')
+  })
+})
+
+describe('linuxPermissionsStatus', () => {
+  const ok = [{ id: 'keyring', ok: true }, { id: 'tray', ok: true }] as const
+  const missing = [{ id: 'keyring', ok: true }, { id: 'tray', ok: false, fix: 'x' }] as const
+  it('shows the page once, only when something is missing', () => {
+    expect(linuxPermissionsStatus(false, [...missing])).toEqual({ needed: true, camera: 'granted', microphone: 'granted', system: missing })
+    expect(linuxPermissionsStatus(false, [...ok]).needed).toBe(false)
+    expect(linuxPermissionsStatus(true, [...missing]).needed).toBe(false)
+  })
+  it('never holds OBS back (no prompt to wait for)', () => {
+    expect(deferObsBoot(linuxPermissionsStatus(false, [...missing]))).toBe(false)
   })
 })
 

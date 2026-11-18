@@ -14,6 +14,15 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   système). Sur macOS, qui n'autorise l'extension caméra d'OBS que depuis le dossier Applications,
   la copie d'OBS utilisée par LinTO Live est désormais placée dans `/Applications/.LinTO Live`
   (dossier masqué, supprimé à la désinstallation).
+- **Page de premier lancement sous Linux** : comme la page d'autorisations de macOS, elle s'affiche
+  une fois si le système n'a pas ce dont certaines fonctions ont besoin, et dit comment l'obtenir :
+  trousseau de clés (connexion retenue), module `v4l2loopback` (caméra virtuelle), zone de
+  notification (GNOME sans l'extension AppIndicator). Elle permet aussi d'essayer les notifications.
+
+### Corrigé
+
+- **À propos (Linux)** : la fenêtre « À propos de LinTO Live » affiche le nom, la version, l'icône
+  et le site du projet.
 
 ## [0.5.0] - 2026-11-17
 
