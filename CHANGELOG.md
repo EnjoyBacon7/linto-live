@@ -15,6 +15,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   la copie d'OBS utilisée par LinTO Live est désormais placée dans `/Applications/.LinTO Live`
   (dossier masqué, supprimé à la désinstallation).
 
+### Corrigé
+
+- **Icône sur Linux** : la fenêtre de LinTO Live s'affichait sans icône dans le dock, la barre des
+  tâches et Alt-Tab (Flatpak notamment, sous Wayland). Son identifiant (`app_id` / `WM_CLASS`) est
+  désormais `ai.linto.live`, le même que celui de son entrée de menu.
+
 ## [0.5.0] - 2026-11-17
 
 ### Ajouté

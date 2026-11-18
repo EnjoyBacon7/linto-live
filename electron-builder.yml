@@ -67,8 +67,9 @@ linux:
   maintainer: EnjoyBacon7 <59032058+EnjoyBacon7@users.noreply.github.com>
   category: AudioVideo
   synopsis: LinTO live captions over a hidden OBS
-  # linto-live.desktop (package.json desktopName) with StartupWMClass=linto-live, the window class
-  # Electron sets: docks/taskbars attach the running window to the launcher entry and its icon.
+  # ai.linto.live.desktop (package.json desktopName) with StartupWMClass=ai.linto.live: Electron uses
+  # desktopName as the Wayland app_id and X11 WM_CLASS, so docks/taskbars attach the running window to
+  # the launcher entry and its icon. Must equal appId: the Flatpak always names its entry <appId>.desktop.
   syncDesktopName: true
   # OBS 32.1 built from source by scripts/build-obs-linux.sh: bin/obs, lib/, share/obs/, COPYING.
   extraResources:

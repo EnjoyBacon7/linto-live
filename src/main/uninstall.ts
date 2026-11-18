@@ -10,7 +10,7 @@ export interface UninstallInput {
   exePath: string
   appImage?: string
   personalObsInstalled: boolean
-  /** Resolved by the caller: ~/.local/share/applications/*linto-live*.desktop (linux). */
+  /** Resolved by the caller: ~/.local/share/applications/*linto-live*.desktop and *ai.linto.live*.desktop (linux). */
   desktopFiles: string[]
 }
 

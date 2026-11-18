@@ -6,7 +6,7 @@
   "description": "LinTO Live - drives a hidden OBS and shows LinTO live captions",
   "author": "LINAGORA",
   "homepage": "https://github.com/EnjoyBacon7/linto-live",
-  "desktopName": "linto-live.desktop",
+  "desktopName": "ai.linto.live.desktop",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",

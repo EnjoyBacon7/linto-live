@@ -562,7 +562,7 @@ function main(): void {
       const desktopFiles =
         platform === 'linux' && existsSync(appsDir)
           ? readdirSync(appsDir)
-              .filter((f) => f.includes('linto-live') && f.endsWith('.desktop'))
+              .filter((f) => (f.includes('linto-live') || f.includes('ai.linto.live')) && f.endsWith('.desktop'))
               .map((f) => join(appsDir, f))
           : []
       plan = uninstallTargets({

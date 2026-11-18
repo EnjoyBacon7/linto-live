@@ -182,7 +182,7 @@ LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$PWD/../squashfs-root/resources/obs/bin/obs" npm
 
 - [ ] In-app uninstall: afterwards the AppImage file itself is gone (moved to the trash, per
       Task 15), and so is every Task 15 Linux path: `~/.config/LinTO Live` (userData, includes
-      `obs-home`), `~/.cache/LinTO Live`, and `~/.local/share/applications/*linto-live*.desktop`
+      `obs-home`), `~/.cache/LinTO Live`, and `~/.local/share/applications/*linto-live*.desktop` / `*ai.linto.live*.desktop`
       if a desktop integration created one.
 - [ ] No OBS process remains (`pgrep -f resources/obs/bin/obs` is empty), `~/.config/obs-studio`
       still absent.
