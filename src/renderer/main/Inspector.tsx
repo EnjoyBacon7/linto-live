@@ -1,10 +1,11 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
+import { CaptureSheet } from './CaptureSheet'
 import { PopUp } from '../ui/PopUp'
 import { BroadcastIcon, CameraIcon, CaptionsIcon, ChevronRightIcon, LayersIcon, MicIcon, SlidersIcon, WarningIcon } from '../ui/icons'
 import { broadcastHost, isBroadcastServer } from '../../shared/broadcast'
@@ -233,35 +234,56 @@ function MiddleEllipsis({ text }: { text: string }) {
 
 const baseName = (path: string): string => path.split(/[/\\]/).filter(Boolean).pop() ?? path
 
-const encodeSource = (s: VideoSource | undefined): string =>
-  !s || s.kind === 'none' ? 'none' : s.kind === 'device' ? `device:${s.id}` : `file:${s.path}`
+const CAPTURE_LABEL: Record<CaptureKind, string> = { screen: 'Écran', window: 'Fenêtre' }
 
-const sourceName = (s: VideoSource | undefined, devices: { id: string; name: string }[]): string | null =>
-  !s || s.kind === 'none' ? null : s.kind === 'device' ? devices.find((d) => d.id === s.id)?.name ?? null : baseName(s.path)
+const encodeSource = (s: VideoSource | undefined): string => {
+  if (!s || s.kind === 'none') return 'none'
+  if (s.kind === 'device') return `device:${s.id}`
+  if (s.kind === 'image' || s.kind === 'video') return `file:${s.path}`
+  return `${s.kind}:${s.id}`
+}
 
-/** Video source menu: Aucune, each device, the current file (kept selectable), then the pickers. */
+const sourceName = (s: VideoSource | undefined, devices: { id: string; name: string }[]): string | null => {
+  if (!s || s.kind === 'none') return null
+  if (s.kind === 'device') return devices.find((d) => d.id === s.id)?.name ?? null
+  if (s.kind === 'image' || s.kind === 'video') return baseName(s.path)
+  return `${CAPTURE_LABEL[s.kind]} : ${s.name}`
+}
+
+/** Video source menu: Aucune, each device, the current file or capture (kept selectable), then the pickers. */
 function SourcePopUp({ label, source, devices, disabled, onChange }: {
   label: string; source: VideoSource | undefined; devices: { id: string; name: string }[]; disabled: boolean
   onChange(s: VideoSource): void
 }) {
+  const [capture, setCapture] = useState<CaptureKind | null>(null)
+  const current = source && source.kind !== 'none' && source.kind !== 'device'
+    ? [{ value: encodeSource(source), label: sourceName(source, devices) ?? '' }] : []
   const options = [
     { value: 'none', label: 'Aucune' },
     ...devices.map((d) => ({ value: `device:${d.id}`, label: d.name })),
-    ...(source && (source.kind === 'image' || source.kind === 'video')
-      ? [{ value: `file:${source.path}`, label: baseName(source.path) }] : []),
+    ...current,
+    { value: 'pick:screen', label: 'Écran…' },
+    { value: 'pick:window', label: 'Fenêtre…' },
     { value: 'pick:image', label: 'Image…' },
     { value: 'pick:video', label: 'Vidéo…' }
   ]
   const change = (v: string): void => {
     if (v === 'none') onChange({ kind: 'none' })
     else if (v.startsWith('device:')) onChange({ kind: 'device', id: v.slice(7) })
+    else if (v === 'pick:screen' || v === 'pick:window') setCapture(v === 'pick:screen' ? 'screen' : 'window')
     else if (v.startsWith('pick:')) {
       const kind = v === 'pick:image' ? 'image' : 'video'
       void window.lintoLive.setup.pickMedia(kind).then((path) => { if (path) onChange({ kind, path }) }, () => {})
     }
   }
-  return <PopUp label={label} className="inspector-control" value={encodeSource(source)} placeholder="Choisir…"
-    options={options} disabled={disabled} onChange={change} />
+  return (
+    <>
+      <PopUp label={label} className="inspector-control" value={encodeSource(source)} placeholder="Choisir…"
+        options={options} disabled={disabled} onChange={change} />
+      <CaptureSheet kind={capture} onCancel={() => setCapture(null)}
+        onPick={(t) => { const kind = capture!; setCapture(null); onChange({ kind, id: t.id, name: t.name }) }} />
+    </>
+  )
 }
 
 const PENDING_NOTE = 'Réglable une fois la session créée sur LinTO (au démarrage).'

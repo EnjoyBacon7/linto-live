@@ -118,7 +118,23 @@ export interface SavedLogin { email: string; password: string }
 export interface QrSettings { display: boolean; pinned: boolean; frequency: number; duration: number }
 export const DEFAULT_QR: QrSettings = { display: false, pinned: false, frequency: 60, duration: 15 }
 
-export type VideoSource = { kind: 'none' } | { kind: 'device'; id: string } | { kind: 'image' | 'video'; path: string }
+/** Screen or window capture (a display, or one application window). */
+export type CaptureKind = 'screen' | 'window'
+
+/**
+ * A video source. Captures keep the name OBS gave the screen or window: listing them costs a capture
+ * permission on macOS, so the label is not looked up again.
+ */
+export type VideoSource =
+  | { kind: 'none' }
+  | { kind: 'device'; id: string }
+  | { kind: 'image'; path: string }
+  | { kind: 'video'; path: string }
+  | { kind: 'screen'; id: string; name: string }
+  | { kind: 'window'; id: string; name: string }
+
+/** The screens or windows OBS can capture, or why they cannot be listed (macOS: no screen recording access). */
+export type CaptureTargets = { ok: true; items: DeviceItem[] } | { ok: false; access: MediaAccess }
 
 export interface Settings {
   instance: string

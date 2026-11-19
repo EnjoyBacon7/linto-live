@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
   DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
-  type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
+  type CaptureKind, type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
 import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
@@ -31,6 +31,7 @@ function sameSource(a: VideoSource = NO_SOURCE, b: VideoSource = NO_SOURCE): boo
   if (a.kind !== b.kind) return false
   if (a.kind === 'device') return a.id === (b as typeof a).id
   if (a.kind === 'image' || a.kind === 'video') return a.path === (b as typeof a).path
+  if (a.kind === 'screen' || a.kind === 'window') return a.id === (b as typeof a).id
   return true
 }
 
@@ -51,6 +52,8 @@ export const MSG_OUTPUT_FAILED = 'Fenêtre de sortie : '
 export const MSG_RECORD_FAILED = 'Enregistrement impossible : '
 export const MSG_BROADCAST_FAILED = 'Diffusion en ligne impossible : '
 export const MSG_PRIMARY_FAILED = 'Source principale indisponible : '
+export const MSG_NO_SCREEN_ACCESS =
+  'macOS n’autorise pas LinTO Live à enregistrer l’écran (Réglages Système › Confidentialité et sécurité › Enregistrement de l’écran).'
 const MSG_RECORD_NOT_STARTED = "OBS n'a pas démarré l'enregistrement."
 const MSG_RECORD_STOPPED = "OBS a arrêté l'enregistrement."
 export const MSG_BROADCAST_NOT_STARTED = "OBS n'a pas démarré la diffusion."
@@ -126,7 +129,7 @@ export type LiveObsController = Pick<
   | 'startRecord' | 'startBroadcast' | 'stopRecord' | 'recordState$'
   | 'virtualCamAvailable' | 'setVirtualCam' | 'virtualCamState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
->
+> & Partial<Pick<ObsController, 'listCaptureTargets'>>
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession' | 'clearSession'>
   & Partial<Pick<LintoApi, 'channelCaptions'>>
 export interface LiveCaptions {
@@ -167,6 +170,11 @@ export interface LiveDeps {
    * (null = go; else why not). Absent: no check, and a generic reason.
    */
   virtualCam?: { unavailableReason: string; preflight?: () => Promise<string | null> }
+  /**
+   * macOS: the screen recording access is granted. Without it a screen or window source is not handed to OBS
+   * (it would wait on the access); absent = always granted.
+   */
+  canCaptureScreen?: () => boolean
 }
 
 /** Font size actually used on the canvas: the saved one if valid, else the default. */
@@ -689,6 +697,19 @@ export class LiveController extends EventEmitter {
     return { videoDevices, audioDevices }
   }
 
+  /** The source to hand OBS (an absent one = none); null for a screen or window capture without the access. */
+  private capturable(src: VideoSource = NO_SOURCE): VideoSource | null {
+    const capture = src.kind === 'screen' || src.kind === 'window'
+    return capture && this.d.canCaptureScreen && !this.d.canCaptureScreen() ? null : src
+  }
+
+  /** Screens or windows OBS can capture (none while OBS is not connected). */
+  async listCaptureTargets(kind: CaptureKind): Promise<DeviceItem[]> {
+    const c = this.ctl
+    if (!c?.listCaptureTargets) return []
+    return c.listCaptureTargets(kind)
+  }
+
   /** Persists setup choices and applies device changes to OBS right away. */
   saveSettings(patch: Partial<Settings>): Promise<void> {
     return this.enqueue(async () => {
@@ -699,12 +720,16 @@ export class LiveController extends EventEmitter {
       if (!c) return
       // 'none' (the plain LinTO client): the video source is emptied.
       if (patch.primarySource !== undefined && !sameSource(patch.primarySource, before.primarySource)) {
-        await c.setSource('primary', patch.primarySource)
+        const primary = this.capturable(patch.primarySource)
+        if (primary === null) throw new Error(MSG_NO_SCREEN_ACCESS)
+        await c.setSource('primary', primary)
         if (this.state.warning?.startsWith(MSG_PRIMARY_FAILED)) this.setState({ warning: undefined })
       }
       // The monitor reads primarySource and blackIsAbsent live: only a backup change concerns it.
       if (patch.backupSource !== undefined && !sameSource(patch.backupSource, before.backupSource)) {
-        await c.setSource('backup', patch.backupSource)
+        const backup = this.capturable(patch.backupSource)
+        if (backup === null) throw new Error(MSG_NO_SCREEN_ACCESS)
+        await c.setSource('backup', backup)
         if (this.ctl !== c) return // OBS restarted meanwhile: attach re-applies everything
         // Another backup file keeps the running monitor (the recreated input keeps its visibility).
         if ((patch.backupSource.kind === 'none') !== (this.monitor === null)) this.syncMonitor(c)
@@ -849,8 +874,11 @@ export class LiveController extends EventEmitter {
     const s = this.d.settings.get()
     let warning: string | undefined
     let sourceWarning: string | undefined
-    await ready.setSource('primary', s.primarySource ?? NO_SOURCE).catch((e) => (sourceWarning = MSG_PRIMARY_FAILED + errMsg(e)))
-    const backupSet = await ready.setSource('backup', s.backupSource ?? NO_SOURCE).then(() => true, () => false)
+    const primary = this.capturable(s.primarySource)
+    if (primary === null) sourceWarning = MSG_PRIMARY_FAILED + MSG_NO_SCREEN_ACCESS
+    await ready.setSource('primary', primary ?? NO_SOURCE).catch((e) => (sourceWarning = MSG_PRIMARY_FAILED + errMsg(e)))
+    const backup = this.capturable(s.backupSource)
+    const backupSet = backup !== null && await ready.setSource('backup', backup).then(() => true, () => false)
     this.syncMonitor(ready, backupSet)
     if (s.audioDeviceId) await ready.setAudioDevice(s.audioDeviceId).catch(() => {})
     // Always set (also 0 dB): OBS saves the filter with the scene collection.

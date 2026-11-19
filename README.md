@@ -111,7 +111,8 @@ Conseils :
    Public, Protégée par mot de passe ou Privée). Un nom déjà utilisé reprend la session existante
    au lieu d'en créer une deuxième.
 3. **Régler** dans le panneau de droite : **caméra** (ou carte de capture, facultative : « Aucune »
-   pour n'envoyer que le son), **micro** (c'est ce son qui est transcrit ; **Écouter le retour
+   pour n'envoyer que le son ; « Écran… » ou « Fenêtre… » diffusent à la place un écran ou la
+   fenêtre d'une application, par exemple une présentation), **micro** (c'est ce son qui est transcrit ; **Écouter le retour
    audio** le fait entendre, au casque, tel qu'il part vers LinTO et est enregistré), taille des sous-titres,
    affichage des sous-titres et du filigrane.
    Avec une caméra, son aperçu s'affiche en haut du centre de la fenêtre. En dessous, la
@@ -144,8 +145,14 @@ l'application pendant un direct revient à cliquer sur Arrêter.
 - **QR code** : « Afficher le QR code » place un QR code vers la session sur la vidéo ; « Épingler »
   le garde visible en permanence ; sinon il apparaît périodiquement, par défaut toutes les 60 s
   pendant 15 s (fréquence et durée réglables dans « Paramètres du QR code… »).
-- **Source de secours** : en plus de la source principale, une caméra, une image ou une vidéo peut
-  servir de secours. Si la principale disparaît (câble débranché, caméra coupée), la sortie bascule
+- **Capture d'écran ou de fenêtre** : « Écran… » et « Fenêtre… » (source principale ou de secours)
+  listent les écrans ou les fenêtres ouvertes. Sur macOS, il faut autoriser LinTO Live dans
+  Réglages Système › Confidentialité et sécurité › **Enregistrement de l'écran**, puis relancer
+  l'app ; la fenêtre de choix y mène. Sous Linux, la capture passe par X11 : dans une session
+  Wayland, seules les applications X11 (XWayland) sont capturées. Une fenêtre fermée ou réduite
+  compte comme une source absente : le secours prend le relais.
+- **Source de secours** : en plus de la source principale, une caméra, une image ou une vidéo (ou
+  un écran, une fenêtre) peut servir de secours. Si la principale disparaît (câble débranché, caméra coupée), la sortie bascule
   sur le secours en 2 s environ, puis revient à la principale de même quand elle réapparaît. Le
   panneau indique laquelle est à l'antenne. Avec « Écran noir = source absente » (activé par
   défaut), un écran noir fixe, comme celui qu'envoie un ATEM quand son entrée est perdue, est

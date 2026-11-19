@@ -1,6 +1,6 @@
 import { MIC_GAIN_MAX, MIC_GAIN_MIN } from './types'
 import type {
-  AuthMethod, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
+  AuthMethod, CaptureKind, CaptureTargets, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
   MediaAccess, MediaPermission, PermissionsStatus, QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
 } from './types'
 
@@ -79,6 +79,10 @@ export interface LintoLiveApi {
     save(s: Partial<Settings>): Promise<void>
     /** Lets the user pick an image or a video file (open dialog); its path, or null if they cancelled. */
     pickMedia(kind: 'image' | 'video'): Promise<string | null>
+    /** Screens or windows to capture; on macOS, none without the screen recording access (`ok: false`). */
+    listCaptureTargets(kind: CaptureKind): Promise<CaptureTargets>
+    /** macOS: shows the screen recording prompt when the app never asked; the access now. */
+    requestScreenAccess(): Promise<MediaAccess>
     /** Lets the user pick (or create) a folder; its path, or null if they cancelled. */
     pickFolder(): Promise<string | null>
     /**
@@ -127,7 +131,7 @@ export interface LintoLiveApi {
     /** Shows the system prompt when the user was never asked; the access now. */
     request(kind: MediaPermission): Promise<MediaAccess>
     /** Opens the system settings pane of this permission (to grant one that was refused). */
-    openSettings(kind: MediaPermission | 'notifications'): Promise<void>
+    openSettings(kind: MediaPermission | 'notifications' | 'screen'): Promise<void>
     /** Shows a notification (macOS asks for the notification permission at the first one). */
     testNotification(): Promise<void>
     /** The page is done: never shown again, OBS starts if it was waiting for it. */
@@ -164,6 +168,8 @@ export const IPC = {
   setupSave: 'setup:save',
   setupPickMedia: 'setup:pick-media',
   setupPickFolder: 'setup:pick-folder',
+  setupListCapture: 'setup:list-capture',
+  setupRequestScreenAccess: 'setup:request-screen-access',
   setupSetBroadcast: 'setup:set-broadcast',
   sessionsList: 'sessions:list',
   sessionsLookup: 'sessions:lookup',
@@ -237,6 +243,7 @@ function isVideoSource(v: unknown): v is VideoSource {
   if (!isObj(v)) return false
   if (v.kind === 'none') return true
   if (v.kind === 'device') return nonEmpty(v.id)
+  if (v.kind === 'screen' || v.kind === 'window') return nonEmpty(v.id) && typeof v.name === 'string' && v.name.length <= 500
   return (v.kind === 'image' || v.kind === 'video') && absolute(v.path)
 }
 
@@ -295,6 +302,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       save: (s) => call(IPC.setupSave, s),
       pickMedia: (kind) => call(IPC.setupPickMedia, kind),
       pickFolder: () => call(IPC.setupPickFolder),
+      listCaptureTargets: (kind) => call(IPC.setupListCapture, kind),
+      requestScreenAccess: () => call(IPC.setupRequestScreenAccess),
       setBroadcast: (server, key) => (key === undefined ? call(IPC.setupSetBroadcast, server) : call(IPC.setupSetBroadcast, server, key))
     },
     sessions: {

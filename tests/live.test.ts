@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'node:events'
 import {
   LiveController, MSG_BOOT_FAILED, MSG_CAPTIONS_FORBIDDEN, MSG_CAPTIONS_REFUSED, MSG_NO_ORG, MSG_START_CANCELLED, MSG_OBS_HUNG, WATCHDOG_MS, WATCHDOG_MISSES, MSG_NO_STREAM, MSG_RTMP_ONLY, MSG_OBS_DOWN, MSG_OBS_NOT_READY, MSG_OBS_RESTARTED, MSG_OBS_SETUP_FAILED,
-  MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_PRIMARY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, MSG_BROADCAST_FAILED, MSG_BROADCAST_NOT_STARTED,
+  MSG_NO_SCREEN_ACCESS, MSG_OUTPUT_FAILED, MSG_OVERLAY_FAILED, MSG_PRIMARY_FAILED, MSG_RECORD_FAILED, MSG_STREAM_RETRY, MSG_BROADCAST_FAILED, MSG_BROADCAST_NOT_STARTED,
   MSG_BROADCAST_STOPPED, MSG_BROADCAST_NO_SERVER, PREVIEW_MS, msgDeleted, msgTerminated,
   type LiveDeps
 } from '../src/main/live'
@@ -127,6 +127,7 @@ type FakeCtl = ReturnType<typeof fakeController>
 function setup(opts: {
   sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null; broadcastKey?: string; history?: CaptionEvent[]
   vcamPreflight?: () => Promise<string | null>
+  canCaptureScreen?: () => boolean
 } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
@@ -218,7 +219,8 @@ function setup(opts: {
     obs, controllerFactory, api, captions, overlay, settings, qrSvg, decodeLuma, platform: 'darwin' as const,
     mkdirp, defaultRecordDir: REC_DIR,
     nameCorrector: (names: string[]) => createNameCorrector(names, new Set(['macro'])), openBroadcast,
-    virtualCam: { unavailableReason: 'Pas de v4l2loopback', preflight: vi.fn(opts.vcamPreflight ?? (async () => null)) }
+    virtualCam: { unavailableReason: 'Pas de v4l2loopback', preflight: vi.fn(opts.vcamPreflight ?? (async () => null)) },
+    ...(opts.canCaptureScreen ? { canCaptureScreen: opts.canCaptureScreen } : {})
   } satisfies LiveDeps
   const live = new LiveController(deps)
   const states: LiveState[] = []
@@ -1752,6 +1754,36 @@ describe('primary source unavailable on attach', () => {
     t.obs.emit('ready', { port: 4100, password: 'pw2' })
     await t.live.settled()
     expect(t.last().warning).toBe(MSG_OBS_RESTARTED)
+  })
+})
+
+describe('screen and window capture', () => {
+  const screenSrc = { kind: 'screen', id: 'UUID-1', name: 'Écran intégré' } as const
+
+  it('without the screen recording access, a saved capture is not handed to OBS and says why', async () => {
+    const t = setup({ settings: { primarySource: screenSrc, backupSource: { kind: 'window', id: '42', name: 'Slides' } }, canCaptureScreen: () => false })
+    await t.live.boot()
+    expect(t.ctl().setSource.mock.calls).toEqual([['primary', { kind: 'none' }]])
+    expect(t.last()).toMatchObject({ obs: 'running', warning: MSG_PRIMARY_FAILED + MSG_NO_SCREEN_ACCESS })
+  })
+
+  it('with the access, a capture is set like any source, and a new window id is a change', async () => {
+    const t = setup({ canCaptureScreen: () => true })
+    await t.live.boot()
+    t.ctl().setSource.mockClear()
+    await t.live.saveSettings({ primarySource: screenSrc })
+    await t.live.saveSettings({ primarySource: screenSrc })
+    await t.live.saveSettings({ primarySource: { kind: 'window', id: '42', name: 'Slides' } })
+    await t.live.saveSettings({ primarySource: { kind: 'window', id: '43', name: 'Slides' } })
+    expect(t.ctl().setSource.mock.calls.map((c) => (c[1] as { id: string }).id)).toEqual(['UUID-1', '42', '43'])
+  })
+
+  it('choosing a capture without the access fails (nothing is asked of OBS)', async () => {
+    const t = setup({ canCaptureScreen: () => false })
+    await t.live.boot()
+    t.ctl().setSource.mockClear()
+    await expect(t.live.saveSettings({ primarySource: screenSrc })).rejects.toThrow(MSG_NO_SCREEN_ACCESS)
+    expect(t.ctl().setSource).not.toHaveBeenCalled()
   })
 })
 

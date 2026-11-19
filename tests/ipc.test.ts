@@ -12,7 +12,7 @@ describe('IPC constants', () => {
     expect(keys).toEqual(
       [
         'authMethods', 'authLoginLocal', 'authLoginSso', 'authLogout', 'authStatus', 'authSavedLogin',
-        'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
+        'setupLoad', 'setupSave', 'setupPickMedia', 'setupPickFolder', 'setupListCapture', 'setupRequestScreenAccess', 'sessionsList', 'sessionsLookup', 'sessionsSetWatermark', 'liveStart', 'liveStop', 'liveTerminate', 'liveShowOutput', 'liveGetState', 'liveClearTranscript',
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveViewTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe',
         'liveSetAudioMonitor', 'liveSetVirtualCam', 'setupSetBroadcast',
@@ -61,6 +61,8 @@ describe('createLintoLiveApi', () => {
     await api.setup.save({ instance: 'i' })
     await api.setup.pickMedia('image')
     await api.setup.pickFolder()
+    await api.setup.listCaptureTargets('window')
+    await api.setup.requestScreenAccess()
     await api.sessions.list()
     await api.sessions.lookup('S')
     await api.live.start('S')
@@ -95,6 +97,8 @@ describe('createLintoLiveApi', () => {
       [IPC.setupSave, { instance: 'i' }],
       ['setup:pick-media', 'image'],
       ['setup:pick-folder'],
+      ['setup:list-capture', 'window'],
+      ['setup:request-screen-access'],
       [IPC.sessionsList],
       ['sessions:lookup', 'S'],
       [IPC.liveStart, 'S'],
@@ -174,6 +178,8 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { primarySource: { kind: 'device', id: 'cam' } },
       { backupSource: { kind: 'image', path: '/Users/x/secours.png' } },
       { backupSource: { kind: 'video', path: '/home/x/boucle.mp4' } },
+      { primarySource: { kind: 'screen', id: '37D8832A-2D66-02CA-B9F7-8F30A301B230', name: 'Écran intégré: 1512x982 @ 0,0' } },
+      { primarySource: { kind: 'window', id: '42', name: '[Keynote] Slides' } },
       { recordDir: '/Users/x/Movies/LinTO Live' },
       { qr: { display: true, pinned: false, frequency: 60, duration: 15 } },
       { blackIsAbsent: false, recordEnabled: true },
@@ -191,6 +197,9 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { primarySource: { kind: 'camera', id: 'cam' } },
       { primarySource: { kind: 'device', id: '' } },
       { primarySource: { kind: 'device' } },
+      { primarySource: { kind: 'screen', id: '', name: 'x' } },
+      { primarySource: { kind: 'window', id: '42' } },
+      { primarySource: { kind: 'window', id: '42', name: 'x'.repeat(501) } },
       { primarySource: null },
       { backupSource: { kind: 'image', path: 'relatif.png' } },
       { backupSource: { kind: 'video', path: '' } },

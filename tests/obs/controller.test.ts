@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FFMPEG_OUTPUT, FILTER_GAIN, FILTER_LIMITER, fileStamp, LIMITER_THRESHOLD_DB,
-  ObsController, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_VIDEO, type ObsClient
+  ObsController, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_SCREENS, SRC_VIDEO, SRC_WINDOWS, type ObsClient
 } from '../../src/main/obs/controller'
 
 type Call = { req: string; data?: Record<string, unknown> }
@@ -518,6 +518,89 @@ describe('ObsController sources', () => {
     await c.setSource('primary', { kind: 'device', id: 'cam1' })
     expect(f.inputs.get(SRC_VIDEO)).toEqual({ inputKind: 'macos-avcapture', inputSettings: { device: 'cam1' } })
     expect(f.order(SCENE)[0]).toBe(SRC_VIDEO)
+  })
+
+  it('setSource screen and window (macOS): one ScreenCaptureKit input, display by UUID, window by number', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await c.setSource('primary', { kind: 'screen', id: 'UUID-1', name: 'Écran intégré' })
+    expect(f.inputs.get(SRC_VIDEO)).toEqual({
+      inputKind: 'screen_capture', inputSettings: { type: 0, display_uuid: 'UUID-1', show_cursor: true, hide_obs: true }
+    })
+    const n = f.calls.length
+    await c.setSource('primary', { kind: 'window', id: '42', name: '[Keynote] Slides' })
+    const after = f.calls.slice(n)
+    // Same OBS kind: the input is kept, only its settings change.
+    expect(after.filter((x) => x.req === 'RemoveInput' || x.req === 'CreateInput')).toEqual([])
+    expect(of(after, 'SetInputSettings')[0].data).toEqual({
+      inputName: SRC_VIDEO, inputSettings: { type: 1, window: 42, show_cursor: true }
+    })
+    expect(f.order(SCENE)[0]).toBe(SRC_VIDEO)
+  })
+
+  it('setSource screen and window (Linux): XSHM screen by index, XComposite window by its id string', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('linux')
+    await c.setSource('primary', { kind: 'screen', id: '1', name: 'HDMI-1' })
+    expect(f.inputs.get(SRC_VIDEO)).toEqual({ inputKind: 'xshm_input_v2', inputSettings: { screen: 1, show_cursor: true } })
+    await c.setSource('backup', { kind: 'window', id: '0x1\r\nSlides\r\nlibreoffice', name: 'Slides' })
+    expect(f.inputs.get(SRC_BACKUP)).toEqual({
+      inputKind: 'xcomposite_input', inputSettings: { capture_window: '0x1\r\nSlides\r\nlibreoffice', show_cursor: true }
+    })
+  })
+
+  it('listCaptureTargets lists from a hidden input made for it, then removes it', async () => {
+    const f = fakeClient({
+      items: [
+        { itemName: ' ', itemValue: 0 },
+        { itemName: '[Keynote] Slides', itemValue: 42 },
+        { itemName: 'Display 2 (not found)', itemValue: 2, itemEnabled: false }
+      ]
+    })
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    const n = f.calls.length
+    expect(await c.listCaptureTargets('window')).toEqual([{ name: '[Keynote] Slides', id: '42' }])
+    const after = f.calls.slice(n)
+    expect(of(after, 'CreateInput')[0].data).toEqual({
+      sceneName: SCENE_PAUSE, inputName: SRC_WINDOWS, inputKind: 'screen_capture', inputSettings: { type: 1, window: 0 }, sceneItemEnabled: false
+    })
+    expect(of(after, 'GetInputPropertiesListPropertyItems')[0].data).toEqual({ inputName: SRC_WINDOWS, propertyName: 'window' })
+    expect(of(after, 'RemoveInput').map((x) => x.data)).toEqual([{ inputName: SRC_WINDOWS }])
+    expect(f.inputs.has(SRC_WINDOWS)).toBe(false)
+  })
+
+  it('listCaptureTargets on Linux: XSHM screens with no screen chosen; macOS screens by display_uuid', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client)
+    await c.ensureScene('linux')
+    await c.listCaptureTargets('screen')
+    await c.listCaptureTargets('window')
+    expect(of(f.calls, 'CreateInput').slice(-2).map((x) => [x.data!.inputName, x.data!.inputKind, x.data!.inputSettings])).toEqual([
+      [SRC_SCREENS, 'xshm_input_v2', { screen: -1 }],
+      [SRC_WINDOWS, 'xcomposite_input', { capture_window: '' }]
+    ])
+    expect(of(f.calls, 'GetInputPropertiesListPropertyItems').map((x) => x.data!.propertyName)).toEqual(['screen', 'capture_window'])
+    const m = fakeClient()
+    const d = new ObsController(m.client)
+    await d.ensureScene('darwin')
+    await d.listCaptureTargets('screen')
+    expect(of(m.calls, 'GetInputPropertiesListPropertyItems')[0].data).toEqual({ inputName: SRC_SCREENS, propertyName: 'display_uuid' })
+  })
+
+  it('listCaptureTargets removes its input even when listing fails', async () => {
+    const f = fakeClient()
+    const inner = f.client.call.bind(f.client)
+    f.client.call = async (req, data) => {
+      if (req === 'GetInputPropertiesListPropertyItems') throw new Error('OBS ne répond pas.')
+      return inner(req, data)
+    }
+    const c = new ObsController(f.client)
+    await c.ensureScene('darwin')
+    await expect(c.listCaptureTargets('screen')).rejects.toThrow('OBS ne répond pas.')
+    expect(f.inputs.has(SRC_SCREENS)).toBe(false)
   })
 
   it('backup is created hidden and above the primary', async () => {

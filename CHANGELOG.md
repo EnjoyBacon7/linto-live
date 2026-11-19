@@ -8,6 +8,10 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ### Ajouté
 
+- **Capture d'écran et de fenêtre** : la source vidéo (principale ou de secours) peut être un écran
+  ou la fenêtre d'une application (« Écran… », « Fenêtre… »), choisis dans une liste. Sur macOS, la
+  fenêtre de choix aide à accorder l'autorisation d'enregistrement de l'écran ; sous Linux, la
+  capture passe par X11 (XSHM, XComposite).
 - **Caméra virtuelle** : la sortie de LinTO Live (image et sous-titres, sans le son) est proposée
   comme webcam aux autres applications. Grisée, avec une infobulle explicative, quand le système
   n'en dispose pas (Linux sans `v4l2loopback`, notamment le Flatpak sans le module chargé sur le
