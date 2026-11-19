@@ -67,6 +67,7 @@ describe('privacySettingsUrl', () => {
     expect(privacySettingsUrl('camera')).toContain('Privacy_Camera')
     expect(privacySettingsUrl('microphone')).toContain('Privacy_Microphone')
     expect(privacySettingsUrl('notifications')).toContain('preference.notifications')
+    expect(privacySettingsUrl('screen')).toContain('Privacy_ScreenCapture')
     expect(privacySettingsUrl('https://evil.example')).toBeNull()
     expect(privacySettingsUrl(undefined)).toBeNull()
   })

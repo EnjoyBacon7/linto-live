@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js'
 import type { ObsConnection } from './process'
 import type { ObsStreamService } from './streamTarget'
-import type { DeviceItem, VideoSource } from '../../shared/types'
+import type { CaptureKind, DeviceItem, VideoSource } from '../../shared/types'
 import { guardClient, OBS_CALL_TIMEOUT_MS } from './guardedClient'
 
 export type StreamState = 'starting' | 'active' | 'stopped' | 'error'
@@ -17,6 +17,12 @@ export const SRC_OVERLAY = 'Sous-titres'
 export const SRC_BACKUP = 'Secours'
 /** Hidden device input (pause scene) that only serves to list the cameras, whatever the sources are. */
 export const SRC_DEVICES = 'Détection caméras'
+/**
+ * Hidden inputs (pause scene) that list the screens and the windows. Created only while listing, then removed:
+ * on macOS, merely creating one asks for the screen recording access, which OBS must not do on its own at start.
+ */
+export const SRC_SCREENS = 'Détection écrans'
+export const SRC_WINDOWS = 'Détection fenêtres'
 /** Filters of SRC_AUDIO, in this order: the user's gain, then a limiter that catches what it pushes over. */
 export const FILTER_GAIN = 'Gain'
 export const FILTER_LIMITER = 'Limiteur'
@@ -45,6 +51,31 @@ const videoKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'macos-avcap
 const audioKind = (p: NodeJS.Platform): string => (p === 'darwin' ? 'coreaudio_input_capture' : 'pulse_input_capture')
 const videoProp = (p: NodeJS.Platform): string => (p === 'darwin' ? 'device' : 'device_id')
 
+/**
+ * Screen and window capture inputs. macOS: ScreenCaptureKit (one kind, `type` 0 = display by UUID, 1 = window by
+ * CGWindowID). Linux: X11 only (OBS runs through XWayland, see paths.ts), XSHM for a screen (by index) and
+ * XComposite for a window (by its « id\r\nname\r\nclass » string, which OBS also matches by name once the id is gone).
+ */
+const captureKind = (kind: CaptureKind, p: NodeJS.Platform): string =>
+  p === 'darwin' ? 'screen_capture' : kind === 'screen' ? 'xshm_input_v2' : 'xcomposite_input'
+const captureProp = (kind: CaptureKind, p: NodeJS.Platform): string =>
+  p === 'darwin' ? (kind === 'screen' ? 'display_uuid' : 'window') : kind === 'screen' ? 'screen' : 'capture_window'
+
+function captureSettings(kind: CaptureKind, id: string, p: NodeJS.Platform): Record<string, unknown> {
+  if (p === 'darwin') {
+    return kind === 'screen'
+      ? { type: 0, display_uuid: id, show_cursor: true, hide_obs: true }
+      : { type: 1, window: Number(id), show_cursor: true }
+  }
+  return kind === 'screen' ? { screen: Number(id), show_cursor: true } : { capture_window: id, show_cursor: true }
+}
+
+/** Settings of a listing input: it captures nothing (no window / no screen chosen). */
+function captureProbeSettings(kind: CaptureKind, p: NodeJS.Platform): Record<string, unknown> {
+  if (p === 'darwin') return { type: 1, window: 0 }
+  return kind === 'screen' ? { screen: -1 } : { capture_window: '' }
+}
+
 /** OBS input kind and settings for a video source ('none' = a device input without device). */
 function sourceInput(src: VideoSource, p: NodeJS.Platform): { inputKind: string; inputSettings: Record<string, unknown> } {
   switch (src.kind) {
@@ -57,6 +88,9 @@ function sourceInput(src: VideoSource, p: NodeJS.Platform): { inputKind: string;
       }
     case 'device':
       return { inputKind: videoKind(p), inputSettings: { [videoProp(p)]: src.id } }
+    case 'screen':
+    case 'window':
+      return { inputKind: captureKind(src.kind, p), inputSettings: captureSettings(src.kind, src.id, p) }
     default:
       return { inputKind: videoKind(p), inputSettings: { [videoProp(p)]: '' } }
   }
@@ -224,6 +258,31 @@ export class ObsController {
 
   listAudioDevices(): Promise<DeviceItem[]> {
     return this.devices(SRC_AUDIO, 'device_id')
+  }
+
+  /**
+   * The screens or the windows OBS can capture, from a hidden input created for the occasion and removed after
+   * (macOS: the caller makes sure the screen recording access is granted, else OBS waits on it).
+   */
+  async listCaptureTargets(kind: CaptureKind): Promise<DeviceItem[]> {
+    const inputName = kind === 'screen' ? SRC_SCREENS : SRC_WINDOWS
+    try {
+      await this.createInput({
+        sceneName: SCENE_PAUSE,
+        inputName,
+        inputKind: captureKind(kind, this.platform),
+        inputSettings: captureProbeSettings(kind, this.platform),
+        sceneItemEnabled: false
+      })
+    } catch (e) {
+      // Left over by an earlier listing that could not remove it: used as is.
+      if (codeOf(e) !== RESOURCE_ALREADY_EXISTS) throw e
+    }
+    try {
+      return await this.devices(inputName, captureProp(kind, this.platform))
+    } finally {
+      await this.client.call('RemoveInput', { inputName }).catch(() => {})
+    }
   }
 
   /** Mutes an input and takes it off every audio track (an input without audio, e.g. a Linux v4l2 camera, is already silent). */

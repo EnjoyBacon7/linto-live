@@ -1027,6 +1027,40 @@ describe('Inspector: sources vidéo', () => {
     expect(noBackup().value).toBe('none')
   })
 
+  it('choosing Fenêtre… lists the windows in a sheet and stores the one chosen, with its name', async () => {
+    const listCaptureTargets = vi.fn().mockResolvedValue({
+      ok: true, items: [{ id: '7', name: '[Finder] Bureau' }, { id: '42', name: '[Keynote] Slides' }]
+    })
+    setup({ setup: { listCaptureTargets } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Fenêtre…')
+    expect(listCaptureTargets).toHaveBeenCalledWith('window')
+    const sheet = await screen.findByRole('dialog', { name: 'Capturer une fenêtre' })
+    await userEvent.selectOptions(within(sheet).getByLabelText('Fenêtre'), '[Keynote] Slides')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Choisir' }))
+    expect(api.setup.save).toHaveBeenCalledWith({ backupSource: { kind: 'window', id: '42', name: '[Keynote] Slides' } })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(noBackup().selectedOptions[0]?.textContent).toBe('Fenêtre : [Keynote] Slides'))
+  })
+
+  it('without the screen recording access (macOS), Écran… asks for it, then sends to System Settings', async () => {
+    const listCaptureTargets = vi.fn().mockResolvedValue({ ok: false, access: 'denied' })
+    const requestScreenAccess = vi.fn().mockResolvedValue('denied')
+    setup({ setup: { listCaptureTargets, requestScreenAccess } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Écran…')
+    const sheet = await screen.findByRole('dialog', { name: 'Capturer un écran' })
+    expect(within(sheet).getByText(/Enregistrement de l’écran/)).toBeTruthy()
+    expect(within(sheet).getByRole('button', { name: 'Choisir' })).toHaveProperty('disabled', true)
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Autoriser…' }))
+    expect(requestScreenAccess).toHaveBeenCalledTimes(1)
+    await userEvent.click(await within(sheet).findByRole('button', { name: 'Ouvrir les Réglages Système' }))
+    expect(api.permissions.openSettings).toHaveBeenCalledWith('screen')
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Annuler' }))
+    expect(api.setup.save).not.toHaveBeenCalled()
+    expect(noBackup().value).toBe('none')
+  })
+
   it('on-air status shows secours', async () => {
     setup({ live: { getState: vi.fn().mockResolvedValue(live({ videoOnAir: 'backup' })) } as never })
     await renderMain()

@@ -1,5 +1,5 @@
 import {
-  app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
+  app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
   shell, systemPreferences, Tray
 } from 'electron'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -12,7 +12,7 @@ import { shutdownWithCap } from './shutdown'
 import { uninstallTargets, uninstallConfirmDetail, runUninstall, UninstallError } from './uninstall'
 import { IPC, checkNewSessionOptions, checkSettingsPatch, type AppCommand, type LiveState, type SetupData, type ShellReport } from '../shared/ipc'
 import {
-  TRANSCRIPT_EXPORT_FORMATS, UnauthorizedError, type Settings, type SessionLookup, type SessionSummary, type TranscriptExportFormat,
+  TRANSCRIPT_EXPORT_FORMATS, UnauthorizedError, type CaptureTargets, type MediaAccess, type Settings, type SessionLookup, type SessionSummary, type TranscriptExportFormat,
   type TranscriptUpdate, type WatermarkConfig
 } from '../shared/types'
 import { appPaths } from './paths'
@@ -49,7 +49,7 @@ import { LiveController } from './live'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
-  TEST_NOTIFICATION, deferObsBoot, isMediaPermission, linuxPermissionsStatus, permissionsStatus, privacySettingsUrl, requestMediaAccess,
+  TEST_NOTIFICATION, asMediaAccess, deferObsBoot, isMediaPermission, linuxPermissionsStatus, permissionsStatus, privacySettingsUrl, requestMediaAccess,
   type MediaAccessApi
 } from './permissions'
 import {
@@ -253,7 +253,8 @@ function main(): void {
     virtualCam: {
       unavailableReason: virtualCamUnavailableReason(platform, flatpak),
       preflight: () => virtualCamPreflight(platform, flatpak, undefined, obsExe)
-    }
+    },
+    canCaptureScreen: () => platform !== 'darwin' || systemPreferences.getMediaAccessStatus('screen') === 'granted'
   })
 
   // ---- Native shell: app menu, menu-bar icon, notifications ----
@@ -455,6 +456,23 @@ function main(): void {
     }
     const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
     return r.canceled ? null : (r.filePaths[0] ?? null)
+  })
+
+  // macOS: listing screens or windows (and capturing them) needs the screen recording access, asked in LinTO
+  // Live's name like the camera (OBS is its child). Without it OBS would wait on it: nothing is asked of OBS then.
+  const screenAccess = (): MediaAccess => (platform === 'darwin' ? asMediaAccess(systemPreferences.getMediaAccessStatus('screen')) : 'granted')
+  ipcMain.handle(IPC.setupListCapture, async (_e, kind: unknown): Promise<CaptureTargets> => {
+    if (kind !== 'screen' && kind !== 'window') throw new Error('Type de capture inconnu.')
+    const access = screenAccess()
+    if (access !== 'granted') return { ok: false, access }
+    return { ok: true, items: await live.listCaptureTargets(kind) }
+  })
+  ipcMain.handle(IPC.setupRequestScreenAccess, async (): Promise<MediaAccess> => {
+    // macOS has no API to ask for it: a first capture attempt shows the prompt (only once, ever).
+    if (screenAccess() !== 'granted') {
+      await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }).catch(() => [])
+    }
+    return screenAccess()
   })
 
   ipcMain.handle(IPC.setupSetBroadcast, (_e, server: unknown, key: unknown) => {

@@ -52,7 +52,8 @@ export async function requestMediaAccess(sys: MediaAccessApi, kind: MediaPermiss
   return asMediaAccess(sys.getMediaAccessStatus(kind))
 }
 
-const PANES: Record<MediaPermission | 'notifications', string> = {
+const PANES: Record<MediaPermission | 'notifications' | 'screen', string> = {
+  screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
   camera: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Camera',
   microphone: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
   notifications: 'x-apple.systempreferences:com.apple.preference.notifications'
@@ -60,7 +61,7 @@ const PANES: Record<MediaPermission | 'notifications', string> = {
 
 /** System Settings pane of a permission (fixed URLs: the renderer never chooses what is opened). */
 export function privacySettingsUrl(kind: unknown): string | null {
-  return kind === 'notifications' || isMediaPermission(kind) ? PANES[kind] : null
+  return kind === 'notifications' || kind === 'screen' || isMediaPermission(kind) ? PANES[kind] : null
 }
 
 export const TEST_NOTIFICATION = {
