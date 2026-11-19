@@ -82,6 +82,10 @@ linux:
     # Window icon (BrowserWindow `icon`): X11 taskbars and Alt-Tab read it from the window.
     - from: build/icon.png
       to: icon.png
+# AppImage runtime: the static one (no libfuse2, which Ubuntu 24.04+ no longer installs; it mounts with
+# fusermount3, or extracts itself to a temporary folder without FUSE). The legacy runtime needed libfuse.so.2.
+toolsets:
+  appimage: '1.0.3'
 appImage:
   artifactName: LinTO-Live-${version}-x86_64.${ext}
 # Single-file bundle (flatpak install --user ./LinTO-Live-<version>-x86_64.flatpak), any distribution
@@ -159,6 +163,8 @@ deb:
     - libjack-jackd2-0 | libjack0
     - libnspr4
     - libpipewire-0.3-0t64 | libpipewire-0.3-0
+    # PipeWire's client modules (protocol-native...): without them OBS crashes as a screen capture starts.
+    - libpipewire-0.3-modules
     - libpulse0
     - libudev1
     - libusb-1.0-0

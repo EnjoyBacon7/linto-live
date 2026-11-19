@@ -6,6 +6,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Modifié
+
+- **AppImage sans libfuse2** : l'AppImage utilise le runtime statique d'AppImage et démarre sur
+  Ubuntu 24.04 et suivantes sans rien installer (`libfuse2t64` n'est plus nécessaire). Les trois
+  paquets Linux (`.deb`, Flatpak, AppImage) sont pris en charge sur Ubuntu 24.04 et suivantes.
+
 ### Corrigé
 
 - **Capture d'écran et de fenêtre en session Wayland (Linux), suite** : choisir « Écran… » ou

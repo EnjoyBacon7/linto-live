@@ -34,11 +34,12 @@ Les Mac Intel ne sont pas pris en charge.
 
 ### Linux (x86_64)
 
-L'application embarque son propre OBS Studio 32.1. Le `.deb` et l'AppImage demandent
-**glibc 2.39 ou plus récente** (Ubuntu 24.04+, Debian 13+). Sur les distributions plus anciennes,
-dont **Ubuntu 22.04**, utiliser le **Flatpak**, qui apporte ses propres bibliothèques. Seule
-Ubuntu 24.04 a été testée sur une vraie machine ; le Flatpak est installé et vérifié sur Ubuntu
-22.04 par la CI ; les autres distributions sont « au mieux ».
+L'application embarque son propre OBS Studio 32.1. Les trois paquets fonctionnent sur
+**Ubuntu 24.04 et suivantes** sans rien installer à côté : le `.deb` (recommandé), le Flatpak et
+l'AppImage. Le `.deb` et l'AppImage demandent **glibc 2.39 ou plus récente** (Ubuntu 24.04+,
+Debian 13+) ; sur les distributions plus anciennes, dont **Ubuntu 22.04**, utiliser le **Flatpak**,
+qui apporte ses propres bibliothèques. Testés : Ubuntu 24.04 et 26.04 ; le Flatpak est aussi
+installé et vérifié sur Ubuntu 22.04 par la CI ; les autres distributions sont « au mieux ».
 
 **Ubuntu 24.04+ / Debian 13+ : paquet `.deb` (recommandé)**
 
@@ -55,9 +56,9 @@ sudo apt install ./LinTO-Live-<version>-amd64.deb
 `apt` installe en même temps tout ce dont l'application a besoin : rien d'autre à faire.
 LinTO Live apparaît ensuite dans le menu des applications.
 
-**Ubuntu 22.04 et toute distribution avec Flatpak**
+**Flatpak : Ubuntu 22.04+ et toute distribution avec Flatpak**
 
-Sur Ubuntu 22.04, installer d'abord Flatpak : `sudo apt install flatpak`. Le runtime Freedesktop
+Sur Ubuntu, installer d'abord Flatpak s'il n'y est pas : `sudo apt install flatpak`. Le runtime Freedesktop
 est téléchargé depuis Flathub à l'installation :
 
 ```bash
@@ -70,9 +71,11 @@ Le Flatpak a le droit de lancer des commandes sur le système (`org.freedesktop.
 uniquement pour vérifier et charger le module `v4l2loopback` de la caméra virtuelle : il n'est donc
 pas isolé du système comme un Flatpak ordinaire.
 
-**Autres distributions (Arch…) : AppImage**
+**AppImage : Ubuntu 24.04+ et autres distributions (Arch…)**
 
-Un seul fichier, rien n'est installé sur le système :
+Un seul fichier, rien n'est installé sur le système. Il n'a pas besoin de `libfuse2` (absente
+d'Ubuntu depuis la 24.04) : il se monte avec `fusermount3` (paquet `fuse3`, présent sur Ubuntu),
+ou à défaut s'extrait dans un dossier temporaire.
 
 ```bash
 chmod +x LinTO-Live-<version>-x86_64.AppImage
@@ -83,9 +86,9 @@ Paquets nécessaires selon la distribution :
 
 | Distribution | Paquets à installer |
 |---|---|
-| Ubuntu 24.04+ | `sudo apt install libfuse2t64` |
-| Debian 13 (trixie) | `sudo apt install libfuse2t64 libnss3 libxcb-cursor0 libpulse0` |
-| Arch Linux | `sudo pacman -S fuse2 nss xcb-util-cursor libpulse` (+ `pipewire-pulse` avec PipeWire) |
+| Ubuntu 24.04+ (bureau) | aucun |
+| Debian 13 (trixie) | `sudo apt install libnss3 libxcb-cursor0 libpulse0` |
+| Arch Linux | `sudo pacman -S nss xcb-util-cursor libpulse` (+ `pipewire-pulse` avec PipeWire) |
 
 Conseils :
 
@@ -101,8 +104,9 @@ Conseils :
   garanti.
 - Les sous-titres sont dessinés par un navigateur intégré à OBS, qui a besoin d'une
   **accélération graphique** fonctionnelle (pas de VM sans 3D).
-- Si l'application ne démarre pas à cause du bac à sable (sandbox) d'Electron, la lancer avec
-  `--no-sandbox`.
+- AppImage : quand le système interdit les espaces de noms utilisateur (Ubuntu 24.04+, AppArmor),
+  l'AppImage démarre Electron sans son bac à sable (sandbox) ; le `.deb` et le Flatpak gardent le
+  leur.
 - S'il manque une bibliothèque (AppImage), la liste s'obtient avec :
   ```bash
   ./LinTO-Live-*.AppImage --appimage-extract

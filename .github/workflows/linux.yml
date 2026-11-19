@@ -147,6 +147,9 @@ jobs:
           set -euo pipefail
           appimage="$(ls dist/*.AppImage)"
           echo "AppImage: $appimage ($(du -h "$appimage" | cut -f1))"
+          # Static type2 runtime (toolsets.appimage): Ubuntu 24.04+ has no libfuse2.
+          if ldd "$appimage" 2>&1 | grep libfuse; then echo "AppImage runtime links libfuse" >&2; exit 1; fi
+          "$appimage" --appimage-version
           rm -rf /tmp/appimage && mkdir -p /tmp/appimage && cd /tmp/appimage
           "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
           obs=/tmp/appimage/squashfs-root/resources/obs/bin/obs

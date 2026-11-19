@@ -115,14 +115,14 @@ a webcam or capture card and a microphone attached if available. Use the AppImag
 
 - [ ] `ls ~/.config/obs-studio` reports "No such file or directory" (if it exists because OBS
       was installed before, note `stat -c %Y ~/.config/obs-studio` and compare at the end).
-- [ ] `sudo apt install libfuse2t64` if the AppImage complains about FUSE (Ubuntu 24.04 ships
-      without libfuse2).
+- [ ] Do not install `libfuse2t64`: the AppImage uses the static type2 runtime
+      (`toolsets.appimage` in `electron-builder.yml`) and must start without it.
 
 ### 1. The AppImage runs
 
 - [ ] `chmod +x LinTO-Live-*.AppImage && ./LinTO-Live-*.AppImage` opens the LinTO Live window
-      (if Electron aborts with a sandbox / user-namespace error from Ubuntu's AppArmor policy,
-      retry with `--no-sandbox` and report it: see "Known risks").
+      (electron-builder's AppRun adds `--no-sandbox` itself when `unshare -Ur true` fails, as under
+      Ubuntu 24.04+'s AppArmor user-namespace restriction).
 - [ ] Log in, pick a session, start: no OBS window, no OBS tray icon or dialog, no first-run
       wizard ever appears; `ps aux | grep resources/obs/bin/obs` shows OBS running from
       `/tmp/.mount_*/resources/obs/bin/obs`.

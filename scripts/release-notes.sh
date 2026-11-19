@@ -36,8 +36,8 @@ $changes
 |---|---|
 | macOS, Apple Silicon (M1 et suivants) | \`LinTO-Live-$VERSION-arm64.dmg\` |
 | Linux : Ubuntu 24.04+, Debian 13+ (recommandé) | \`LinTO-Live-$VERSION-amd64.deb\` |
-| Linux : Ubuntu 22.04 et toute distribution avec Flatpak | \`LinTO-Live-$VERSION-x86_64.flatpak\` |
-| Linux : autres distributions x86_64 (glibc ≥ 2.39, ex. Arch) | \`LinTO-Live-$VERSION-x86_64.AppImage\` |
+| Linux : Ubuntu 22.04+ et toute distribution avec Flatpak | \`LinTO-Live-$VERSION-x86_64.flatpak\` |
+| Linux : Ubuntu 24.04+ et autres distributions x86_64 (glibc ≥ 2.39, ex. Arch), sans installation | \`LinTO-Live-$VERSION-x86_64.AppImage\` |
 
 Les sommes de contrôle sont dans \`SHA256SUMS.txt\`.
 
@@ -61,7 +61,7 @@ flatpak install --user ./LinTO-Live-$VERSION-x86_64.flatpak
 flatpak run ai.linto.live
 \`\`\`
 
-**Linux (AppImage)** :
+**Linux (AppImage, sans installation ni libfuse2)** :
 \`\`\`bash
 chmod +x LinTO-Live-$VERSION-x86_64.AppImage && ./LinTO-Live-$VERSION-x86_64.AppImage
 \`\`\`
@@ -71,5 +71,5 @@ Les détails (paquets, utilisation, désinstallation) sont dans le [README](http
 ## Limites connues
 
 - macOS : pas de signature Apple ni de notarisation, pas de version pour Mac Intel.
-- Linux : seule Ubuntu 24.04 (X11) a été testée sur une vraie machine ; le Flatpak est installé et vérifié sur Ubuntu 22.04 par la CI ; les autres distributions sont « au mieux ». L'incrustation des sous-titres demande une accélération graphique qui fonctionne.
+- Linux : les trois paquets sont testés sur Ubuntu 24.04 et 26.04 ; le Flatpak est aussi installé et vérifié sur Ubuntu 22.04 par la CI ; les autres distributions sont « au mieux ». L'incrustation des sous-titres demande une accélération graphique qui fonctionne.
 EOF
