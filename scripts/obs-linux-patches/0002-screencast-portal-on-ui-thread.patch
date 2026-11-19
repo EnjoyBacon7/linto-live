@@ -1,0 +1,42 @@
+LinTO Live: the ScreenCast portal is always started on OBS's UI thread.
+
+The portal's replies are D-Bus signals dispatched by the GLib main context, which only the UI thread
+iterates. A PipeWire screen capture created or reloaded from another thread (obs-websocket's
+CreateInput, PressInputPropertiesButton) never got them: session created, picker never shown, black
+source until OBS reloaded it from the scene collection at its next start.
+
+--- a/plugins/linux-pipewire/screencast-portal.c
++++ b/plugins/linux-pipewire/screencast-portal.c
+@@ -450,7 +450,7 @@ static void create_session(struct screencast_portal_capture *capture)
+ 
+ /* ------------------------------------------------- */
+ 
+-static gboolean init_screencast_capture(struct screencast_portal_capture *capture)
++static gboolean init_screencast_capture_on_ui_thread(struct screencast_portal_capture *capture)
+ {
+ 	GDBusConnection *connection;
+ 	GDBusProxy *proxy;
+@@ -470,6 +470,23 @@ static gboolean init_screencast_capture(struct screencast_portal_capture *captur
+ 	return TRUE;
+ }
+ 
++/* LinTO Live: the portal's replies are D-Bus signals dispatched by the GLib main context, which only OBS's UI
++ * thread iterates. A source created (or reloaded) from another thread, such as obs-websocket's CreateInput,
++ * subscribed to them there and never got them: the session was created, the picker never shown, the source
++ * stayed black. The portal is therefore always started on the UI thread. */
++static void init_screencast_capture_task(void *data)
++{
++	init_screencast_capture_on_ui_thread(data);
++}
++
++static gboolean init_screencast_capture(struct screencast_portal_capture *capture)
++{
++	if (obs_in_task_thread(OBS_TASK_UI))
++		return init_screencast_capture_on_ui_thread(capture);
++	obs_queue_task(OBS_TASK_UI, init_screencast_capture_task, capture, true);
++	return TRUE;
++}
++
+ static bool reload_session_cb(obs_properties_t *properties, obs_property_t *property, void *data)
+ {
+ 	UNUSED_PARAMETER(properties);
