@@ -6,6 +6,8 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.6.1] - 2026-11-19
+
 ### Corrigé
 
 - **Capture d'écran et de fenêtre en session Wayland (Linux)** : choisir une fenêtre faisait planter
@@ -233,6 +235,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.6.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.1...v0.4.0
