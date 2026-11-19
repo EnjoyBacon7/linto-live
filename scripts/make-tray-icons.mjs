@@ -6,6 +6,8 @@
 //   trayLinux.png (22 px), trayLinux@2x.png (44 px), trayLinuxLive*  — Linux variants: Linux panels
 // do not tint icons and are dark on most desktops (Ubuntu's top bar always is), so the screen is
 // light grey and the on-air dot red.
+//   trayLinuxDark*, trayLinuxDarkLive*  — the same in dark grey, for light panels (KDE, Xfce… with a
+// light theme; see nativeShell.ts linuxPanelIsDark).
 // Usage: node scripts/make-tray-icons.mjs
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -106,8 +108,12 @@ for (const [name, live] of [['trayTemplate', false], ['trayLiveTemplate', true]]
 }
 // Linux: StatusNotifierItem / AppIndicator icons are 22 px.
 const LINUX = [[0xf2, 0xf2, 0xf2], [0xe5, 0x48, 0x4d]]
-for (const [name, live] of [['trayLinux', false], ['trayLinuxLive', true]]) {
-  writeFileSync(join(OUT, `${name}.png`), png(22, render(22, live, LINUX)))
-  writeFileSync(join(OUT, `${name}@2x.png`), png(44, render(44, live, LINUX)))
+const LINUX_DARK = [[0x2e, 0x2e, 0x2e], [0xd7, 0x00, 0x15]]
+for (const [name, live, colors] of [
+  ['trayLinux', false, LINUX], ['trayLinuxLive', true, LINUX],
+  ['trayLinuxDark', false, LINUX_DARK], ['trayLinuxDarkLive', true, LINUX_DARK]
+]) {
+  writeFileSync(join(OUT, `${name}.png`), png(22, render(22, live, colors)))
+  writeFileSync(join(OUT, `${name}@2x.png`), png(44, render(44, live, colors)))
 }
 console.log(`Tray icons written to ${OUT}`)

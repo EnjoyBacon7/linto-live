@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import type { MediaAccess, MediaPermission, SystemCheck, SystemCheckId } from '../../shared/types'
 import { ipcErrorMessage } from '../ipcError'
 import { Button } from '../ui/Button'
-import { BellIcon, CameraIcon, CheckIcon, DisplayIcon, LockIcon, MicIcon, WarningIcon } from '../ui/icons'
+import { BellIcon, CameraIcon, CaptionsIcon, CheckIcon, DisplayIcon, LayersIcon, LockIcon, MicIcon, WarningIcon } from '../ui/icons'
 import logo from '../assets/linto.svg'
 import './permissions.css'
 
@@ -30,6 +30,21 @@ const MEDIA: MediaRow[] = [
 
 /** Linux: what each system check is for (the fix comes from main, which knows the install type). */
 const SYSTEM: Record<SystemCheckId, { title: string; why: string; icon: ReactNode }> = {
+  display: {
+    title: 'Affichage',
+    why: 'Pour la vidéo, que LinTO Live fait passer par OBS, et la fenêtre de sortie sur le second écran.',
+    icon: <DisplayIcon size={20} />
+  },
+  audio: {
+    title: 'Son',
+    why: 'Pour capter le micro choisi et l’envoyer à LinTO, qui le transcrit en direct.',
+    icon: <MicIcon size={20} />
+  },
+  gpu: {
+    title: 'Accélération graphique',
+    why: 'Pour dessiner les sous-titres sur la vidéo.',
+    icon: <CaptionsIcon size={20} />
+  },
   keyring: {
     title: 'Trousseau de clés',
     why: 'Pour retenir ta connexion à LinTO d’un lancement à l’autre.',
@@ -43,7 +58,7 @@ const SYSTEM: Record<SystemCheckId, { title: string; why: string; icon: ReactNod
   tray: {
     title: 'Zone de notification',
     why: 'Pour garder LinTO Live à portée de main pendant un direct, fenêtre fermée.',
-    icon: <DisplayIcon size={20} />
+    icon: <LayersIcon size={20} />
   }
 }
 
@@ -115,13 +130,16 @@ export function Permissions({ onDone }: PermissionsProps) {
 
   const allGranted = access.camera === 'granted' && access.microphone === 'granted'
   const systemOk = system.every((c) => c.ok)
+  const systemBlocked = system.some((c) => !c.ok && c.blocking)
   const note = mac
     ? allGranted
       ? 'Tout est prêt. Tu pourras changer ces accès à tout moment dans Réglages Système › Confidentialité et sécurité.'
       : 'Tu peux continuer sans tout autoriser et changer ces accès plus tard dans Réglages Système › Confidentialité et sécurité. Sans caméra ni micro, le direct n’aura ni image ni transcription.'
     : systemOk
       ? 'Tout est prêt.'
-      : 'Tu peux continuer : rien de tout cela n’empêche un direct. Ce qui manque pourra être installé plus tard.'
+      : systemBlocked
+        ? 'Tu peux continuer, mais un direct ne fonctionnera pas tant que ce qui est marqué « Nécessaire » manque.'
+        : 'Tu peux continuer : rien de tout cela n’empêche un direct. Ce qui manque pourra être installé plus tard.'
 
   return (
     <div className="perm-window">
@@ -156,7 +174,10 @@ export function Permissions({ onDone }: PermissionsProps) {
                 {c.ok ? (
                   <span className="perm-state perm-granted"><CheckIcon className="perm-check" />Prêt</span>
                 ) : (
-                  <span className="perm-state perm-denied"><WarningIcon className="perm-warn" />À installer</span>
+                  <span className="perm-state perm-denied">
+                    <WarningIcon className="perm-warn" />
+                    {c.blocking ? 'Nécessaire' : c.id === 'display' ? 'À savoir' : 'À installer'}
+                  </span>
                 )}
               </PermissionRow>
             ))}

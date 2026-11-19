@@ -6,7 +6,7 @@ name: Build
 #   linux-appimage-deb AppImage + .deb, installed and inspected, OBS smoke test
 #   linux-flatpak      Flatpak (its `flatpak build-bundle` is the slowest step, ~7 min)
 #   flatpak-ubuntu-2204  the Flatpak installed on Ubuntu 22.04
-#   macos              typecheck + tests; the dmg on tags and manual runs
+#   macos              typecheck + tests, official OBS smoke test; the dmg on tags and manual runs
 # Tags v*: then a GitHub release with all four packages, SHA256SUMS.txt and the notes from
 # CHANGELOG.md (scripts/release-notes.sh).
 
@@ -313,9 +313,24 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+      # The DMG (~150 MB, SHA-256 pinned in the script) is cached: every run can smoke-test OBS.
+      - name: Cache official OBS DMG
+        uses: actions/cache@v4
+        with:
+          path: vendor/cache/OBS-Studio-*-macOS-Apple.dmg
+          key: obs-macos-${{ env.OBS_VERSION }}-${{ hashFiles('scripts/fetch-obs-macos.sh') }}
+
       - name: Fetch official OBS ${{ env.OBS_VERSION }} for macOS
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         run: npm run fetch:obs:mac
+
+      # Same best-effort smoke test as on Linux: start/stop the official OBS through the real
+      # ObsProcess, isolated config (CFFIXED_USER_HOME). Informational only: no camera or audio in CI.
+      - name: Smoke test official OBS
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$PWD/vendor/obs/macos/OBS.app/Contents/MacOS/OBS" \
+            npx vitest run --config vitest.it.config.ts tests/integration/obs-process.it.test.ts
 
       - name: Build dmg
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'

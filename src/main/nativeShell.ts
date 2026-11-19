@@ -128,16 +128,29 @@ export function trayMenuTemplate(s: ShellState, run: Run): Item[] {
   ]
 }
 
-export type TrayIconName = 'trayTemplate' | 'trayLiveTemplate' | 'trayLinux' | 'trayLinuxLive'
+export type TrayIconName =
+  | 'trayTemplate' | 'trayLiveTemplate' | 'trayLinux' | 'trayLinuxLive' | 'trayLinuxDark' | 'trayLinuxDarkLive'
 
 /**
  * File name (without extension) under resources/tray. macOS: "Template" lets it tint the icon for the
- * menu bar. Linux panels never tint and are mostly dark: light icon, red on-air dot.
+ * menu bar. Linux panels never tint: light icon on a dark panel, dark icon on a light one, red on-air dot.
  */
-export function trayIconName(phase: LiveState['phase'], platform: string): TrayIconName {
+export function trayIconName(phase: LiveState['phase'], platform: string, darkPanel = true): TrayIconName {
   const live = phase === 'live'
   if (platform === 'darwin') return live ? 'trayLiveTemplate' : 'trayTemplate'
+  if (!darkPanel) return live ? 'trayLinuxDarkLive' : 'trayLinuxDark'
   return live ? 'trayLinuxLive' : 'trayLinux'
+}
+
+/** Desktops whose top bar is dark whatever the theme (GNOME Shell and its derivatives). */
+const ALWAYS_DARK_PANEL = /(^|:)(gnome|ubuntu|unity|pantheon)(:|$)/i
+
+/**
+ * Whether the Linux panel is dark, as far as an app can tell (no API reports the panel's colour):
+ * GNOME's top bar always is; other desktops (KDE, Xfce…) paint their panel with the theme.
+ */
+export function linuxPanelIsDark(currentDesktop: string | undefined, darkTheme: boolean): boolean {
+  return ALWAYS_DARK_PANEL.test(currentDesktop ?? '') || darkTheme
 }
 
 export function trayTooltip(s: ShellState): string {

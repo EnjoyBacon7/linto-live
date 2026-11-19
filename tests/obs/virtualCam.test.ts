@@ -52,11 +52,18 @@ describe('virtual camera checks', () => {
     expect(await virtualCamPreflight('linux', false, refused)).toBe(MSG_VCAM_MODPROBE_FAILED)
   })
 
-  it('Flatpak: cannot load the module from the sandbox, tells how to on the host', async () => {
+  it('Flatpak: loads the module on the host through flatpak-spawn, and reports a refusal', async () => {
     const o = ops()
-    const why = await virtualCamPreflight('linux', true, o)
-    expect(why).toBe(virtualCamUnavailableReason('linux', true))
-    expect(why).toContain('sudo modprobe v4l2loopback')
-    expect(o.run).not.toHaveBeenCalled()
+    expect(await virtualCamPreflight('linux', true, o)).toBeNull()
+    expect(o.run).toHaveBeenCalledWith('flatpak-spawn', [
+      '--host', 'pkexec', 'modprobe', 'v4l2loopback', 'exclusive_caps=1', 'card_label=OBS Virtual Camera'
+    ])
+    const refused = ops({ run: vi.fn(async () => { throw new Error('126') }) })
+    expect(await virtualCamPreflight('linux', true, refused)).toBe(MSG_VCAM_MODPROBE_FAILED)
+  })
+
+  it('unavailable: how to install the module on Linux, a generic reason elsewhere', () => {
+    expect(virtualCamUnavailableReason('linux')).toContain('v4l2loopback-dkms')
+    expect(virtualCamUnavailableReason('darwin')).not.toContain('v4l2loopback')
   })
 })

@@ -355,6 +355,18 @@ h3 {
   opacity: 0.45;
 }
 
+/* The open list: macOS draws a native menu, but on Linux Chromium draws it with the <option>s'
+   colours, which inherit --text (white in dark mode) over a default white background. Solid colours
+   from the same scheme keep it readable. */
+.popup-select option {
+  background-color: var(--bg-content);
+  color: var(--text);
+}
+
+.popup-select option:disabled {
+  color: var(--text-2);
+}
+
 .popup-select.is-placeholder {
   color: var(--text-2);
 }

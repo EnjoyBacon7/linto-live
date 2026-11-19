@@ -1,9 +1,12 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { defaultRecordEncoder, type RecordEncoder } from './hwEncoder'
 
 export interface SeedOptions {
   canvas: { width: 1920; height: 1080; fps: 30 }
   platform: NodeJS.Platform
+  /** Recording / broadcast video encoder (hwEncoder.ts); defaults to the platform's (VideoToolbox, x264). */
+  recordEncoder?: RecordEncoder
 }
 
 /**
@@ -29,9 +32,8 @@ const AV_CODEC_ID_AAC = 86018
  */
 const videoEncoder = (p: NodeJS.Platform): string => (p === 'darwin' ? 'com.apple.videotoolbox.videoencoder.ave.avc' : 'obs_x264')
 
-/** FFmpeg (libavcodec) H.264 encoder of the recording output: hardware on macOS, x264 on Linux. */
-const ffVideoEncoder = (p: NodeJS.Platform): { name: string; options: string } =>
-  p === 'darwin' ? { name: 'h264_videotoolbox', options: '' } : { name: 'libx264', options: 'preset=veryfast' }
+/** FFmpeg (libavcodec) H.264 encoder of the recording output: hardware on macOS, NVENC or x264 on Linux. */
+const ffVideoEncoder = (o: SeedOptions): RecordEncoder => o.recordEncoder ?? defaultRecordEncoder(o.platform)
 
 /** Encoder settings, read by OBS from streamEncoder.json in the profile directory. */
 function encoderSettings(p: NodeJS.Platform, kbps: number, x264Preset: string): Record<string, unknown> {
@@ -61,7 +63,7 @@ const obsTrayIcon = (p: NodeJS.Platform): string => String(p === 'darwin')
 
 function iniSpecs(o: SeedOptions): Record<string, IniSpec> {
   const { width, height, fps } = o.canvas
-  const ff = ffVideoEncoder(o.platform)
+  const ff = ffVideoEncoder(o)
   const tray = obsTrayIcon(o.platform)
   return {
     'global.ini': [['General', GENERAL]],

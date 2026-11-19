@@ -2,12 +2,16 @@ import { execFile, spawn as nodeSpawn, type ChildProcess } from 'node:child_proc
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { OBSWebSocket } from 'obs-websocket-js'
 import { obsEnv, type AppPaths } from '../paths'
 import { writeSeed } from './seed'
+import {
+  defaultRecordEncoder, detectRecordEncoder, disableHardwareRecordEncoder, isHardwareRecordEncoder, X264_RECORD_ENCODER,
+  type RecordEncoder
+} from './hwEncoder'
 
 export interface ObsConnection {
   port: number
@@ -25,6 +29,11 @@ export interface ObsProcessOptions {
   readyTimeoutMs?: number
   /** Process inspection used to clean up an OBS orphaned by a crash of the app (fakes in tests). */
   orphan?: OrphanOps
+  /**
+   * Picks the recording / broadcast video encoder before the first launch (hwEncoder.ts). Defaults to
+   * OBS's NVENC probe on Linux; tests inject a fake.
+   */
+  detectRecordEncoder?: (env: NodeJS.ProcessEnv) => Promise<RecordEncoder>
 }
 
 export interface OrphanOps {
@@ -131,6 +140,12 @@ export class ObsProcess extends EventEmitter {
   private readonly pidFile: string
   /** On OBS's command line so a leftover process can be recognised as ours (env vars are not visible in ps). */
   private readonly homeMarker: string
+  /** OBS's stdout/stderr of the latest launch (the only trace of why it died before its websocket came up). */
+  readonly launchLog: string
+  /** Marker of a hardware encoder that failed on this machine (x264 from then on, see hwEncoder.ts). */
+  private readonly hwDisabledMarker: string
+  /** Chosen once per app run (the probe takes a moment), reused by every restart. */
+  private encoder: RecordEncoder | null = null
 
   constructor(private readonly o: ObsProcessOptions) {
     super()
@@ -140,6 +155,41 @@ export class ObsProcess extends EventEmitter {
     this.orphan = o.orphan ?? systemOrphanOps
     this.pidFile = join(o.paths.obsHome, 'obs.pid')
     this.homeMarker = `--linto-live-home=${o.paths.obsHome}`
+    this.launchLog = join(o.paths.obsHome, 'obs-launch.log')
+    this.hwDisabledMarker = join(o.paths.obsHome, 'hw-encoder-disabled')
+  }
+
+  /** Video encoder of the recording / broadcast output of the running (or next) OBS. */
+  get recordEncoder(): RecordEncoder {
+    return this.encoder ?? defaultRecordEncoder(this.o.platform)
+  }
+
+  /**
+   * The hardware encoder failed to start an output: x264 for the rest of this run and on later launches.
+   * Returns the encoder to switch the running OBS to, or null when there is nothing to fall back from
+   * (x264 already, or macOS, whose VideoToolbox is always there).
+   */
+  fallBackToSoftwareEncoder(): RecordEncoder | null {
+    if (this.o.platform !== 'linux' || !isHardwareRecordEncoder(this.recordEncoder)) return null
+    this.encoder = X264_RECORD_ENCODER
+    disableHardwareRecordEncoder(this.hwDisabledMarker)
+    return X264_RECORD_ENCODER
+  }
+
+  private async chooseRecordEncoder(env: NodeJS.ProcessEnv): Promise<RecordEncoder> {
+    if (this.encoder) return this.encoder
+    const detect =
+      this.o.detectRecordEncoder ??
+      ((e: NodeJS.ProcessEnv) =>
+        detectRecordEncoder({ platform: this.o.platform, obsExe: this.o.exe, env: e, disabledMarker: this.hwDisabledMarker }))
+    try {
+      this.encoder = await detect(env)
+    } catch (e) {
+      console.warn('Record encoder detection failed, using the default one', e)
+      this.encoder = defaultRecordEncoder(this.o.platform)
+    }
+    console.info(`Record encoder: ${this.encoder.name}`)
+    return this.encoder
   }
 
   /**
@@ -225,7 +275,12 @@ export class ObsProcess extends EventEmitter {
 
   private async doLaunch(): Promise<ObsConnection> {
     await this.killOrphan()
-    await writeSeed(this.o.paths.obsConfigDir, { canvas: { width: 1920, height: 1080, fps: 30 }, platform: this.o.platform })
+    const env = obsEnv(this.o.paths, this.o.platform, process.env)
+    delete env.ELECTRON_RUN_AS_NODE
+    const recordEncoder = await this.chooseRecordEncoder(env)
+    await writeSeed(this.o.paths.obsConfigDir, {
+      canvas: { width: 1920, height: 1080, fps: 30 }, platform: this.o.platform, recordEncoder
+    })
     const conn: ObsConnection = {
       port: await freePort(),
       password: randomBytes(32).toString('hex')
@@ -256,9 +311,19 @@ export class ObsProcess extends EventEmitter {
     )
     await chmod(wsCfg, 0o600)
     if (this.stopping) throw new Error('OBS start cancelled by stop()')
-    const env = obsEnv(this.o.paths, this.o.platform, process.env)
-    delete env.ELECTRON_RUN_AS_NODE
-    const child = this.spawnFn(this.o.exe, args, { env, stdio: 'ignore' })
+    let out: number | 'ignore' = 'ignore'
+    try {
+      mkdirSync(dirname(this.launchLog), { recursive: true })
+      out = openSync(this.launchLog, 'w')
+    } catch {
+      /* best effort: diagnostics only */
+    }
+    let child: ChildProcess
+    try {
+      child = this.spawnFn(this.o.exe, args, { env, stdio: ['ignore', out, out] })
+    } finally {
+      if (typeof out === 'number') closeSync(out) // the child holds its own copy
+    }
     this.child = child
     const pid = child.pid
     if (pid) {
@@ -275,6 +340,7 @@ export class ObsProcess extends EventEmitter {
     let abandoned = false
     let ready = false
     let exited = false
+    let spawnError: Error | null = null
     child.on('exit', (code: number | null) => {
       exited = true
       if (pid) this.removePidFile(pid)
@@ -283,12 +349,29 @@ export class ObsProcess extends EventEmitter {
       if (abandoned || !ready) return
       this.handleExit(code)
     })
-    child.on('error', () => {}) // spawn failure surfaces as exit / failed readiness wait
+    // Spawn failure (missing executable, not executable): Node may not emit 'exit' then.
+    child.on('error', (e: Error) => {
+      if (ready) return
+      spawnError = e
+      exited = true
+      if (this.child === child) this.child = null
+      try {
+        appendFileSync(this.launchLog, `LinTO Live: cannot start ${this.o.exe}: ${e.message}\n`)
+      } catch {
+        /* best effort */
+      }
+    })
+    const exitedError = (): Error =>
+      new Error(
+        spawnError
+          ? `OBS could not be started (${this.o.exe}): ${spawnError.message}`
+          : `OBS exited before its websocket was ready (output: ${this.launchLog})`
+      )
 
     try {
       const deadline = Date.now() + (this.o.readyTimeoutMs ?? READY_TIMEOUT_MS)
       for (;;) {
-        if (exited) throw new Error('OBS exited before its websocket was ready')
+        if (exited) throw exitedError()
         try {
           await this.probe(conn)
           break
@@ -297,7 +380,7 @@ export class ObsProcess extends EventEmitter {
           await sleep(250)
         }
       }
-      if (exited) throw new Error('OBS exited before its websocket was ready')
+      if (exited) throw exitedError()
       if (this.stopping) throw new Error('OBS start cancelled by stop()')
     } catch (e) {
       abandoned = true

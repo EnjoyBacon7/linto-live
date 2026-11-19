@@ -61,7 +61,75 @@ describe('obsExecutable', () => {
   })
 })
 
+describe('ObsProcess record encoder', () => {
+  const NVENC = { name: 'h264_nvenc', options: 'preset=p4 rc=cbr' }
+  const basicIni = (): string => readFileSync(join(appPaths(tmp, 'linux').obsConfigDir, 'basic/profiles/LinTO Live/basic.ini'), 'utf8')
+
+  it('detects it once, before the first launch, with OBS’s environment, and seeds it', async () => {
+    const detect = vi.fn(async (_env: NodeJS.ProcessEnv) => NVENC)
+    const { p } = setup('linux', undefined, undefined, undefined, { detectRecordEncoder: detect })
+    await p.start()
+    expect(basicIni()).toContain('FFVEncoder=h264_nvenc\n')
+    expect(basicIni()).toContain('FFVCustom=preset=p4 rc=cbr\n')
+    expect(detect.mock.calls[0][0].XDG_CONFIG_HOME).toBe(join(tmp, 'obs-home', 'config'))
+    await p.stop()
+    await p.start()
+    expect(detect).toHaveBeenCalledTimes(1)
+    expect(p.recordEncoder).toEqual(NVENC)
+    await p.stop()
+  })
+
+  it('falls back to x264 once (also for the next launches), never on macOS', async () => {
+    const { p } = setup('linux', undefined, undefined, undefined, { detectRecordEncoder: async () => NVENC })
+    await p.start()
+    expect(p.fallBackToSoftwareEncoder()).toEqual({ name: 'libx264', options: 'preset=veryfast' })
+    expect(p.fallBackToSoftwareEncoder()).toBeNull()
+    expect(existsSync(join(tmp, 'obs-home', 'hw-encoder-disabled'))).toBe(true)
+    await p.stop()
+    await p.start()
+    expect(basicIni()).toContain('FFVEncoder=libx264\n')
+    await p.stop()
+    const mac = setup('darwin').p
+    await mac.start()
+    expect(mac.fallBackToSoftwareEncoder()).toBeNull()
+    await mac.stop()
+  })
+
+  it('a detection that throws keeps the platform default', async () => {
+    const { p } = setup('linux', undefined, undefined, undefined, { detectRecordEncoder: async () => { throw new Error('boom') } })
+    await p.start()
+    expect(basicIni()).toContain('FFVEncoder=libx264\n')
+    await p.stop()
+  })
+})
+
 describe('ObsProcess', () => {
+  it('reports a spawn failure at once with its reason, and records it in the launch log', async () => {
+    const spawn = (() => {
+      const c = new FakeChild()
+      queueMicrotask(() => c.emit('error', Object.assign(new Error('spawn obs ENOENT'), { code: 'ENOENT' })))
+      return c
+    }) as never
+    const p = new ObsProcess({
+      exe: 'obs', paths: appPaths(tmp, 'linux'), platform: 'linux', spawn, maxRestarts: 0,
+      probe: () => Promise.reject(new Error('not up')), readyTimeoutMs: 60_000
+    })
+    const t0 = Date.now()
+    await expect(p.start()).rejects.toThrow('OBS could not be started (obs): spawn obs ENOENT')
+    expect(Date.now() - t0).toBeLessThan(5_000)
+    expect(readFileSync(p.launchLog, 'utf8')).toContain('spawn obs ENOENT')
+  })
+
+  it("passes a file to OBS's stdout and stderr", async () => {
+    const { p, calls } = setup('linux')
+    await p.start()
+    const stdio = (calls[0].opts as unknown as { stdio: unknown[] }).stdio
+    expect(stdio[0]).toBe('ignore')
+    expect(typeof stdio[1]).toBe('number')
+    expect(stdio[2]).toBe(stdio[1])
+    expect(existsSync(p.launchLog)).toBe(true)
+  })
+
   it('spawns with every required flag, port and a random 64-hex password', async () => {
     const { p, calls } = setup()
     const conn = await p.start()

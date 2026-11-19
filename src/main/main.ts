@@ -25,7 +25,7 @@ import { lumaOfBgra } from './obs/fallback'
 import { obsExecutable } from './obs/locate'
 import { MAC_OBS_RUNTIME_DIR, placeObsRuntime } from './obs/runtime'
 import { virtualCamPreflight, virtualCamUnavailableReason } from './obs/virtualCam'
-import { linuxSystemChecks } from './systemChecks'
+import { linuxSystemChecks, statusNotifierWatcher } from './systemChecks'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
 import { asLintoAction } from './linto/accessMessages'
@@ -53,10 +53,11 @@ import {
   type MediaAccessApi
 } from './permissions'
 import {
-  QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome
+  QUIT_DIALOG, WINDOW_SIZE, acquireSingleInstance, closeDuringShow, createQuitGuard, focusWindow, restoreBounds, windowChrome
 } from './appLifecycle'
 import {
-  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, recordingSavedNotification, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
+  AUTH_NOTIFICATION, appMenuTemplate, linuxPanelIsDark, notificationFor, recordingSavedNotification, stableStream, trayIconName,
+  trayMenuTemplate, trayTooltip,
   type NotificationText, type ShellState
 } from './nativeShell'
 
@@ -69,6 +70,8 @@ const MEDIA_FILTERS = {
 let win: BrowserWindow | null = null
 /** Module-level so the menu-bar icon is never garbage-collected. */
 let tray: Tray | null = null
+/** Linux: the desktop runs a StatusNotifierWatcher, so the tray icon is really there (systemChecks.ts). */
+let linuxTrayShown = false
 
 /** Linux window / About icon (macOS uses the bundle's icon). */
 const linuxIconPath = (): string =>
@@ -251,7 +254,7 @@ function main(): void {
     nameCorrector: (names) => createNameCorrector(names, commonWords()),
     openBroadcast,
     virtualCam: {
-      unavailableReason: virtualCamUnavailableReason(platform, flatpak),
+      unavailableReason: virtualCamUnavailableReason(platform),
       preflight: () => virtualCamPreflight(platform, flatpak, undefined, obsExe)
     },
     canCaptureScreen: () => platform !== 'darwin' || systemPreferences.getMediaAccessStatus('screen') === 'granted'
@@ -266,7 +269,8 @@ function main(): void {
   }
   const trayDir = app.isPackaged ? join(process.resourcesPath, 'tray') : join(app.getAppPath(), 'resources', 'tray')
   const trayImage = (phase: LiveState['phase']): Electron.NativeImage => {
-    const file = join(trayDir, `${trayIconName(phase, platform)}.png`)
+    const dark = linuxPanelIsDark(process.env.XDG_CURRENT_DESKTOP, nativeTheme.shouldUseDarkColors)
+    const file = join(trayDir, `${trayIconName(phase, platform, dark)}.png`)
     const img = nativeImage.createFromPath(file) // @2x picked up automatically
     if (img.isEmpty()) console.error('Tray icon missing:', file)
     if (platform === 'darwin') img.setTemplateImage(true)
@@ -575,12 +579,10 @@ function main(): void {
     ask: async () => (await show(QUIT_DIALOG)).response === 1,
     quit: () => app.quit(),
     shutdown: () => void shutdownCapped().finally(() => app.exit(0)),
-    // Closing the window during a show keeps it running. Linux: minimised, not hidden — a Tray object
-    // exists even where the desktop shows no tray (GNOME without the AppIndicator extension), and a
-    // hidden window would then be unreachable.
+    // Closing the window during a show keeps it running: hidden, or minimised where no tray brings it back.
     hide: () => {
       if (!win || win.isDestroyed()) return
-      if (platform === 'darwin') win.hide()
+      if (closeDuringShow(platform, tray !== null && !tray.isDestroyed() && linuxTrayShown)) win.hide()
       else win.minimize()
     }
   })
@@ -686,12 +688,26 @@ function main(): void {
   rebuildShell()
   try {
     tray = new Tray(trayImage(live.getState().phase))
+    // Linux: a left click on the icon brings the window back (macOS opens the menu).
+    if (platform === 'linux') tray.on('click', showWindow)
     shellKey = '' // fill the new icon's tooltip and menu
     rebuildShell()
   } catch (e) {
     // Some Linux desktops have no tray: the window stays the entry point.
     console.error('Tray icon unavailable', e)
     tray = null
+  }
+  // Linux: the icon follows the theme where the panel does (macOS tints its template image itself).
+  if (platform === 'linux') {
+    nativeTheme.on('updated', () => {
+      if (tray && !tray.isDestroyed()) tray.setImage(trayImage(live.getState().phase))
+    })
+  }
+  // Linux: whether the desktop shows the icon (closing the window then hides it, as on macOS).
+  if (platform === 'linux' && tray) {
+    void statusNotifierWatcher().then((shown) => {
+      linuxTrayShown = shown === true
+    })
   }
   // OBS + overlay start before login so device lists are ready for the setup screen — after the
   // first-launch permissions page when macOS never asked for the camera or the micro (see permissions.ts).

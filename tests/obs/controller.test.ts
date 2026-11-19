@@ -716,6 +716,16 @@ describe('ObsController recording', () => {
     expect(f.calls).toEqual(ffmpegStart('unix:/tmp/l/obs.sock', 'flv', 'video/x-flv'))
   })
 
+  it('setRecordEncoder switches the FFmpeg output’s video encoder (profile and output)', async () => {
+    const f = fakeClient()
+    await new ObsController(f.client).setRecordEncoder({ name: 'libx264', options: 'preset=veryfast' })
+    expect(f.calls).toEqual([
+      { req: 'SetProfileParameter', data: { parameterCategory: 'AdvOut', parameterName: 'FFVEncoder', parameterValue: 'libx264' } },
+      { req: 'SetProfileParameter', data: { parameterCategory: 'AdvOut', parameterName: 'FFVCustom', parameterValue: 'preset=veryfast' } },
+      { req: 'SetOutputSettings', data: { outputName: FFMPEG_OUTPUT, outputSettings: { video_encoder: 'libx264', video_settings: 'preset=veryfast' } } }
+    ])
+  })
+
   it('fileStamp: local date and time, zero-padded', () => {
     expect(fileStamp(new Date(2026, 0, 2, 3, 4, 5))).toBe('2026-01-02 03-04-05')
   })

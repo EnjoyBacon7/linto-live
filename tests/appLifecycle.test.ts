@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { QUIT_DIALOG, acquireSingleInstance, createQuitGuard, focusWindow, restoreBounds, windowChrome, WINDOW_SIZE } from '../src/main/appLifecycle'
+import { QUIT_DIALOG, acquireSingleInstance, closeDuringShow, createQuitGuard, focusWindow, restoreBounds, windowChrome, WINDOW_SIZE } from '../src/main/appLifecycle'
 import type { LiveState } from '../src/shared/ipc'
 
 const ev = () => ({ preventDefault: vi.fn() })
@@ -187,5 +187,13 @@ describe('windowChrome', () => {
   })
   it('window size constants', () => {
     expect(WINDOW_SIZE).toEqual({ width: 1100, height: 720, minWidth: 860, minHeight: 560 })
+  })
+})
+
+describe('closeDuringShow', () => {
+  it('hides where an icon brings the window back, else minimises', () => {
+    expect(closeDuringShow('darwin', false)).toBe('hide')
+    expect(closeDuringShow('linux', true)).toBe('hide')
+    expect(closeDuringShow('linux', false)).toBe('minimize')
   })
 })

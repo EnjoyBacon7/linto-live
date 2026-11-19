@@ -62,6 +62,15 @@ export interface QuitGuardDeps {
 }
 
 /**
+ * Closing the main window during a show: hidden where an icon brings it back (macOS's Dock and menu bar,
+ * a Linux tray the desktop actually shows), else minimised — a Tray object exists even where the desktop
+ * shows no tray (GNOME without the AppIndicator extension), and a hidden window would be unreachable.
+ */
+export function closeDuringShow(platform: string, trayShown: boolean): 'hide' | 'minimize' {
+  return platform === 'darwin' || trayShown ? 'hide' : 'minimize'
+}
+
+/**
  * Closing the main window while a show is live or starting only hides it (the show continues).
  * Quitting the app = Arrêter; while a show is live the user confirms first (Cmd+Q, menu, tray).
  */
