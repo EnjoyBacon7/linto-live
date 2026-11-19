@@ -391,7 +391,9 @@ jobs:
           cat SHA256SUMS.txt
           cd ..
           # Changes since the last published release (versions tagged but never released included).
-          previous="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
+          # This tag's own release is skipped: it may already exist (uploaded by hand, or a rerun).
+          previous="$(gh release list --exclude-drafts --exclude-pre-releases --json tagName \
+            -q "[.[] | select(.tagName != \"$TAG\")][0].tagName" 2>/dev/null || true)"
           bash scripts/release-notes.sh "$VERSION" "${previous#v}" > release-notes.md
           cat release-notes.md
 
