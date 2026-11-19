@@ -21,10 +21,22 @@ describe('electron-builder.yml', () => {
     const shared = yml.slice(yml.indexOf('\nextraResources:'), yml.indexOf('\nmac:'))
     expect(shared).toContain('- from: resources/tray\n    to: tray')
   })
-  it('the four tray icons are committed', () => {
-    for (const f of ['trayTemplate.png', 'trayTemplate@2x.png', 'trayLiveTemplate.png', 'trayLiveTemplate@2x.png']) {
+  it('every tray icon is committed (macOS templates, Linux light and dark)', () => {
+    const names = ['trayTemplate', 'trayLiveTemplate', 'trayLinux', 'trayLinuxLive', 'trayLinuxDark', 'trayLinuxDarkLive']
+    for (const f of names.flatMap((n) => [`${n}.png`, `${n}@2x.png`])) {
       expect(existsSync(join(__dirname, '..', 'resources', 'tray', f))).toBe(true)
     }
+  })
+  it('Linux: launcher icon in the hicolor sizes (a lone 1024 px icon is never found by GNOME, nor exported by Flatpak)', () => {
+    const linux = yml.slice(yml.indexOf('\nlinux:'), yml.indexOf('\nappImage:'))
+    expect(linux).toContain('\n  icon: build/icons\n')
+    for (const s of [16, 24, 32, 48, 64, 128, 256, 512]) {
+      expect(existsSync(join(__dirname, '..', 'build', 'icons', `${s}x${s}.png`))).toBe(true)
+    }
+  })
+  it('Flatpak: may ask the host through flatpak-spawn (v4l2loopback for the virtual camera)', () => {
+    const block = yml.slice(yml.indexOf('\nflatpak:'), yml.indexOf('\ndeb:'))
+    expect(block).toContain('- --talk-name=org.freedesktop.Flatpak\n')
   })
   it('flips the Electron fuses that harden the packaged app', () => {
     const block = yml.slice(yml.indexOf('\nelectronFuses:'))

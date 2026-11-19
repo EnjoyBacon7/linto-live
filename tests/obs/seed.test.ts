@@ -62,6 +62,14 @@ describe('seedFiles', () => {
     expect(linux).toContain('FFVCustom=preset=veryfast\n')
     expect(linux).not.toContain('videotoolbox')
   })
+  it('basic.ini: the recording encoder chosen at launch (NVENC) replaces x264, the stream keeps x264', () => {
+    const b = seedFiles({ ...o, platform: 'linux', recordEncoder: { name: 'h264_nvenc', options: 'preset=p4 rc=cbr' } })[
+      'basic/profiles/LinTO Live/basic.ini'
+    ]
+    expect(b).toContain('FFVEncoder=h264_nvenc\n')
+    expect(b).toContain('FFVCustom=preset=p4 rc=cbr\n')
+    expect(b).toMatch(/^Encoder=obs_x264$/m)
+  })
   it('encoder settings: cheap stream (200 kbps); x264 preset on Linux', () => {
     const dir = 'basic/profiles/LinTO Live/'
     expect(JSON.parse(f[dir + 'streamEncoder.json'])).toMatchObject({ rate_control: 'CBR', bitrate: 200, keyint_sec: 2 })

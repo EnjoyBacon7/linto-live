@@ -11,7 +11,6 @@ import { inApplicationsFolder } from './runtime'
 export const MAC_CAMERA_EXTENSION = 'com.obsproject.obs-studio.mac-camera-extension'
 /** Same module options as OBS uses when it loads the module itself. */
 const V4L2LOOPBACK_ARGS = ['modprobe', 'v4l2loopback', 'exclusive_caps=1', 'card_label=OBS Virtual Camera']
-const HOST_MODPROBE = 'sudo modprobe v4l2loopback exclusive_caps=1 card_label="OBS Virtual Camera"'
 
 export const MSG_VCAM_MAC_NOT_ALLOWED =
   'Caméra virtuelle pas encore autorisée : dans Réglages Système → Général → Ouverture et extensions → ' +
@@ -22,13 +21,12 @@ export const MSG_VCAM_MAC_LOCATION =
   'LinTO Live depuis un compte administrateur.'
 export const MSG_VCAM_MODPROBE_FAILED = 'Impossible de charger le module v4l2loopback (autorisation refusée ?).'
 
-/** Why OBS has no virtual camera at all (GetVirtualCamStatus « not available »): only Linux lacks it. */
-export function virtualCamUnavailableReason(platform: NodeJS.Platform, flatpak: boolean): string {
+/**
+ * Why OBS has no virtual camera at all (GetVirtualCamStatus « not available »): only Linux lacks it, when
+ * v4l2loopback is neither loaded nor installed (OBS asks the host through flatpak-spawn in the Flatpak).
+ */
+export function virtualCamUnavailableReason(platform: NodeJS.Platform): string {
   if (platform !== 'linux') return 'Caméra virtuelle non disponible sur ce système.'
-  if (flatpak) {
-    return 'Caméra virtuelle indisponible en Flatpak tant que le module v4l2loopback n’est pas chargé sur le système : ' +
-      `installez-le, lancez « ${HOST_MODPROBE} » puis relancez LinTO Live.`
-  }
   return 'Caméra virtuelle indisponible : installez le module v4l2loopback (paquet v4l2loopback-dkms) puis relancez LinTO Live.'
 }
 
@@ -62,7 +60,8 @@ const systemOps: PreflightOps = {
  * macOS: OBS must run from /Applications (else macOS refuses to activate its camera extension and OBS fails
  * with « OBS cannot activate the virtual camera unless it is placed in the Applications folder »), and the
  * camera extension must be approved (a check that cannot run is no reason to refuse).
- * Linux: loads v4l2loopback as OBS would (pkexec), so a refusal is reported here instead of in OBS.
+ * Linux: loads v4l2loopback as OBS would (pkexec; on the host through flatpak-spawn in the Flatpak, which
+ * may talk to org.freedesktop.Flatpak for that), so a refusal is reported here instead of in OBS.
  */
 export async function virtualCamPreflight(
   platform: NodeJS.Platform, flatpak: boolean, ops: PreflightOps = systemOps, obsExe?: string
@@ -80,9 +79,9 @@ export async function virtualCamPreflight(
   if (platform !== 'linux') return null
   const loaded = await ops.readFile('/proc/modules').then(v4l2loopbackLoaded, () => true)
   if (loaded) return null
-  if (flatpak) return virtualCamUnavailableReason('linux', true)
   try {
-    await ops.run('pkexec', V4L2LOOPBACK_ARGS)
+    if (flatpak) await ops.run('flatpak-spawn', ['--host', 'pkexec', ...V4L2LOOPBACK_ARGS])
+    else await ops.run('pkexec', V4L2LOOPBACK_ARGS)
     // As OBS does after its own modprobe: the device node shows up shortly after.
     await new Promise((r) => setTimeout(r, ops.settleMs ?? 500))
     return null

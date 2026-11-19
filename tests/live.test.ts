@@ -84,6 +84,9 @@ function fakeController(log: string[]) {
     showPause: vi.fn(async () => {
       log.push('showPause')
     }),
+    setRecordEncoder: vi.fn(async (e: { name: string; options: string }) => {
+      log.push(`setRecordEncoder:${e.name}`)
+    }),
     startRecord: vi.fn(async (_dir: string, base: string) => {
       log.push(`startRecord:${base}`)
       if (c.recordStarts) queueMicrotask(() => recordCb?.({ active: true }))
@@ -128,10 +131,13 @@ function setup(opts: {
   sessions?: Session[]; settings?: Partial<Settings>; luma?: () => Luma | null; broadcastKey?: string; history?: CaptionEvent[]
   vcamPreflight?: () => Promise<string | null>
   canCaptureScreen?: () => boolean
+  /** OBS records with a hardware encoder it can give up once for x264 (Linux NVENC). */
+  hwEncoder?: boolean
 } = {}) {
   const log: string[] = []
   const ctls: FakeCtl[] = []
   let port = 4000
+  let hw = opts.hwEncoder === true
   const obs = Object.assign(new EventEmitter(), {
     start: vi.fn(async () => {
       const conn = { port: port++, password: 'pw' }
@@ -140,6 +146,12 @@ function setup(opts: {
     }),
     killHung: vi.fn(() => {
       log.push('obs.killHung')
+    }),
+    fallBackToSoftwareEncoder: vi.fn(() => {
+      if (!hw) return null
+      hw = false
+      log.push('obs.fallBackToSoftwareEncoder')
+      return { name: 'libx264', options: 'preset=veryfast' }
     }),
     stop: vi.fn(async () => {
       log.push('obs.stop')
@@ -2259,6 +2271,56 @@ describe('LiveController recording', () => {
     t.ctl().emitRecord({ active: true })
     expect(t.last().recording).toBe('on')
     expect(t.last().warning).toBeUndefined()
+  })
+
+  describe('hardware record encoder', () => {
+    it('an output that never starts falls back to x264 and starts again', async () => {
+      const t = setup({ settings: { recordEnabled: true }, hwEncoder: true })
+      await t.live.boot()
+      t.ctl().recordStarts = false
+      await t.live.start('Conf')
+      t.ctl().recordStarts = true
+      await vi.advanceTimersByTimeAsync(RECORD_WAIT_MS)
+      await flush()
+      expect(t.log.filter((l) => /Record|fallBack/.test(l))).toEqual([
+        'startRecord:Conf', 'obs.fallBackToSoftwareEncoder', 'setRecordEncoder:libx264', 'startRecord:Conf'
+      ])
+      expect(t.last()).toMatchObject({ phase: 'live', recording: 'on' })
+      expect(t.last().warning).toBeUndefined()
+    })
+
+    it('StartRecord refused falls back to x264 at once', async () => {
+      const t = setup({ settings: { recordEnabled: true }, hwEncoder: true })
+      await t.live.boot()
+      t.ctl().startRecord.mockRejectedValueOnce(new Error('encoder'))
+      await t.live.start('Conf')
+      await flush()
+      expect(t.ctl().setRecordEncoder).toHaveBeenCalledWith({ name: 'libx264', options: 'preset=veryfast' })
+      expect(t.ctl().startRecord).toHaveBeenCalledTimes(2)
+      expect(t.last().recording).toBe('on')
+    })
+
+    it('falls back once only: a second failure is reported', async () => {
+      const t = setup({ settings: { recordEnabled: true }, hwEncoder: true })
+      await t.live.boot()
+      t.ctl().recordStarts = false
+      await t.live.start('Conf')
+      await vi.advanceTimersByTimeAsync(2 * RECORD_WAIT_MS)
+      await flush()
+      expect(t.obs.fallBackToSoftwareEncoder).toHaveBeenCalledTimes(2) // the second one has nothing left
+      expect(t.ctl().startRecord).toHaveBeenCalledTimes(2)
+      expect(t.last()).toMatchObject({ phase: 'live', recording: 'error' })
+      expect(t.last().warning?.startsWith(MSG_RECORD_FAILED)).toBe(true)
+    })
+
+    it('a folder that cannot be created is not blamed on the encoder', async () => {
+      const t = setup({ settings: { recordEnabled: true }, hwEncoder: true })
+      await t.live.boot()
+      t.mkdirp.mockRejectedValueOnce(new Error('EACCES'))
+      await t.live.start('Conf')
+      expect(t.obs.fallBackToSoftwareEncoder).not.toHaveBeenCalled()
+      expect(t.last().recording).toBe('error')
+    })
   })
 
   it('no failure after a start that is reported in time', async () => {

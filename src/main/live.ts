@@ -119,6 +119,8 @@ export interface LiveObsProcess {
   stop: ObsProcess['stop']
   /** Kills an OBS that no longer answers so it restarts (absent in fakes that never hang). */
   killHung?: ObsProcess['killHung']
+  /** A hardware record encoder failed: the software one to switch to, or null (absent in fakes: no fallback). */
+  fallBackToSoftwareEncoder?: ObsProcess['fallBackToSoftwareEncoder']
   on(event: 'ready' | 'restarting' | 'exit', listener: Listener): unknown
 }
 export type LiveObsController = Pick<
@@ -129,7 +131,7 @@ export type LiveObsController = Pick<
   | 'startRecord' | 'startBroadcast' | 'stopRecord' | 'recordState$'
   | 'virtualCamAvailable' | 'setVirtualCam' | 'virtualCamState$'
   | 'openOutputWindow' | 'showLive' | 'resetProjectorState' | 'disconnect' | 'ping'
-> & Partial<Pick<ObsController, 'listCaptureTargets'>>
+> & Partial<Pick<ObsController, 'listCaptureTargets' | 'setRecordEncoder'>>
 export type LiveApi = Pick<LintoApi, 'searchSessions' | 'createSession' | 'getSession' | 'terminateSession' | 'clearSession'>
   & Partial<Pick<LintoApi, 'channelCaptions'>>
 export interface LiveCaptions {
@@ -977,7 +979,8 @@ export class LiveController extends EventEmitter {
       if (this.shuttingDown || gen !== this.restartGen || cancelled()) return null
       try {
         return await this.d.obs.start()
-      } catch {
+      } catch (e) {
+        console.error(`OBS start attempt ${attempt + 1} failed:`, errMsg(e))
         if (attempt >= OBS_START_DELAYS_MS.length || cancelled()) return null
         // stop()/shutdown() ends the backoff at once (an obs.start already in flight still runs to its end).
         if (cancelGen === undefined) await sleep(OBS_START_DELAYS_MS[attempt])
@@ -1282,6 +1285,8 @@ export class LiveController extends EventEmitter {
       return
     }
     this.recordAwaiting = true
+    /** The error comes from OBS's StartRecord (not from the folder or the platform). */
+    let obsRefused = false
     try {
       let start: () => Promise<void>
       if (target.kind === 'broadcast') {
@@ -1300,6 +1305,7 @@ export class LiveController extends EventEmitter {
         await this.d.mkdirp(dir)
         start = () => c.startRecord(dir, recordBaseName(cur.session.name))
       }
+      obsRefused = true
       for (let attempt = 0; ; attempt++) {
         try {
           await start()
@@ -1315,6 +1321,7 @@ export class LiveController extends EventEmitter {
       if (c !== this.ctl || cur !== this.current || !this.recordAwaiting) return
       this.recordAwaiting = false
       this.closeBroadcast()
+      if (obsRefused && (await this.retryOnSoftwareEncoder(c, cur))) return
       this.recordFailed(errMsg(e))
       return
     }
@@ -1324,8 +1331,29 @@ export class LiveController extends EventEmitter {
       if (!this.recordAwaiting || c !== this.ctl || cur !== this.current) return
       this.recordAwaiting = false
       this.closeBroadcast()
-      this.recordFailed(target.kind === 'broadcast' ? MSG_BROADCAST_NOT_STARTED : MSG_RECORD_NOT_STARTED)
+      void this.retryOnSoftwareEncoder(c, cur).then((retried) => {
+        if (!retried) this.recordFailed(target.kind === 'broadcast' ? MSG_BROADCAST_NOT_STARTED : MSG_RECORD_NOT_STARTED)
+      })
     }, RECORD_START_WAIT_MS)
+  }
+
+  /**
+   * The output did not start with a hardware encoder (NVENC on Linux, see hwEncoder.ts): switches OBS to
+   * x264 (also for later launches) and starts again, once — afterwards there is nothing to fall back from.
+   * False when there was no hardware encoder to give up, or OBS refused the switch.
+   */
+  private async retryOnSoftwareEncoder(c: LiveObsController, cur: Current): Promise<boolean> {
+    if (!c.setRecordEncoder) return false
+    const enc = this.d.obs.fallBackToSoftwareEncoder?.()
+    if (!enc) return false
+    console.warn(`Recording output did not start with the hardware encoder: retrying with ${enc.name}`)
+    try {
+      await c.setRecordEncoder(enc)
+    } catch {
+      return false
+    }
+    if (c === this.ctl && cur === this.current && this.recordTarget) await this.startRecordSafe(c, cur)
+    return true
   }
 
   /**

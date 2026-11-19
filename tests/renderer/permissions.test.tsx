@@ -71,6 +71,19 @@ describe('Permissions on Linux', () => {
     expect(screen.getByText(/rien de tout cela n’empêche un direct/)).toBeTruthy()
   })
 
+  it('a missing piece a show needs is marked « Nécessaire », and the note says so', async () => {
+    window.lintoLive = { ...linux([
+      { id: 'display', ok: false, fix: 'Session Wayland.' },
+      { id: 'audio', ok: false, fix: 'Installe pipewire-pulse.', blocking: true },
+      { id: 'gpu', ok: true }
+    ]), platform: 'linux' }
+    render(<Permissions onDone={() => {}} />)
+    expect(await screen.findByText('Installe pipewire-pulse.')).toBeTruthy()
+    expect(screen.getByText('Nécessaire')).toBeTruthy()
+    expect(screen.getByText('À savoir')).toBeTruthy()
+    expect(screen.getByText(/un direct ne fonctionnera pas/)).toBeTruthy()
+  })
+
   it('tests notifications without offering a settings pane', async () => {
     window.lintoLive = { ...linux([{ id: 'tray', ok: false, fix: 'x' }]), platform: 'linux' }
     render(<Permissions onDone={() => {}} />)

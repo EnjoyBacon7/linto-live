@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 import {
-  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, recordingSavedNotification, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
+  AUTH_NOTIFICATION, appMenuTemplate, notificationFor, recordingSavedNotification, linuxPanelIsDark, stableStream, trayIconName, trayMenuTemplate, trayTooltip,
   type AppCommand, type ShellState
 } from '../src/main/nativeShell'
 import type { LiveState } from '../src/shared/ipc'
@@ -126,6 +126,23 @@ describe('tray', () => {
     for (const p of ['idle', 'starting', 'stopping', 'error'] as const) expect(trayIconName(p, 'darwin')).toBe('trayTemplate')
     expect(trayIconName('live', 'linux')).toBe('trayLinuxLive')
     for (const p of ['idle', 'starting', 'stopping', 'error'] as const) expect(trayIconName(p, 'linux')).toBe('trayLinux')
+  })
+
+  it('icon: dark on a light Linux panel; macOS tints its own', () => {
+    expect(trayIconName('idle', 'linux', false)).toBe('trayLinuxDark')
+    expect(trayIconName('live', 'linux', false)).toBe('trayLinuxDarkLive')
+    expect(trayIconName('idle', 'darwin', false)).toBe('trayTemplate')
+  })
+
+  it('Linux panel: GNOME’s top bar is always dark, others follow the theme', () => {
+    expect(linuxPanelIsDark('ubuntu:GNOME', false)).toBe(true)
+    expect(linuxPanelIsDark('GNOME', false)).toBe(true)
+    expect(linuxPanelIsDark('Pantheon', false)).toBe(true)
+    expect(linuxPanelIsDark('KDE', false)).toBe(false)
+    expect(linuxPanelIsDark('KDE', true)).toBe(true)
+    expect(linuxPanelIsDark('XFCE', false)).toBe(false)
+    expect(linuxPanelIsDark('GNOME-Flashback:GNOME', false)).toBe(true)
+    expect(linuxPanelIsDark(undefined, false)).toBe(false)
   })
 
   it('tooltip names the session on air', () => {

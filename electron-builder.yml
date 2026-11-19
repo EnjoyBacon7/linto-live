@@ -71,6 +71,10 @@ linux:
   # desktopName as the Wayland app_id and X11 WM_CLASS, so docks/taskbars attach the running window to
   # the launcher entry and its icon. Must equal appId: the Flatpak always names its entry <appId>.desktop.
   syncDesktopName: true
+  # Launcher / dock icon in standard sizes (16-512 px, from build/icon.png): from the single 1024 px
+  # icon, the .deb installed hicolor/1024x1024, a size the hicolor theme does not list (GNOME's dock
+  # then shows a generic icon), and Flatpak, which only exports icons up to 512 px, exported none.
+  icon: build/icons
   # OBS 32.1 built from source by scripts/build-obs-linux.sh: bin/obs, lib/, share/obs/, COPYING.
   extraResources:
     - from: vendor/obs/linux/obs
@@ -108,6 +112,10 @@ flatpak:
     - --talk-name=org.kde.StatusNotifierWatcher
     # safeStorage (LinTO token) through the desktop keyring.
     - --talk-name=org.freedesktop.secrets
+    # Virtual camera: v4l2loopback is a host kernel module. OBS (linux-v4l2) and the app's preflight
+    # ask the host through `flatpak-spawn --host` (modinfo, then pkexec modprobe, with the user's
+    # password), as outside the Flatpak; without this, it had to be loaded by hand before each launch.
+    - --talk-name=org.freedesktop.Flatpak
 # Installed in /opt/LinTO Live by apt (Ubuntu 24.04+, Debian 13+), which also installs the host
 # libraries below: no manual step, unlike the AppImage (libfuse2). Replaces electron-builder's
 # default list, so Electron's own needs come first; then what the bundled OBS (and its CEF) links

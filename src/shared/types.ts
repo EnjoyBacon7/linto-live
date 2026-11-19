@@ -235,12 +235,14 @@ export type MediaPermission = 'camera' | 'microphone'
 export type MediaAccess = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'
 
 /** What the first-launch page checks on Linux (no privacy prompts there, but features the system may lack). */
-export type SystemCheckId = 'keyring' | 'virtual-camera' | 'tray'
+export type SystemCheckId = 'display' | 'audio' | 'gpu' | 'keyring' | 'virtual-camera' | 'tray'
 export interface SystemCheck {
   id: SystemCheckId
   ok: boolean
   /** When not ok: what is missing and how to get it. */
   fix?: string
+  /** When not ok: a show cannot work without it (no OBS, no micro), unlike the optional features. */
+  blocking?: boolean
 }
 
 export interface PermissionsStatus {

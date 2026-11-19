@@ -512,6 +512,21 @@ export class ObsController {
     await this.client.call('StartRecord')
   }
 
+  /**
+   * Switches the FFmpeg output's video encoder (a hardware encoder that failed, see hwEncoder.ts). Set
+   * in the profile and on the output, like startFfmpegOutput's URL; used from the next StartRecord.
+   */
+  async setRecordEncoder(e: { name: string; options: string }): Promise<void> {
+    const param = (parameterName: string, parameterValue: string): Promise<unknown> =>
+      this.client.call('SetProfileParameter', { parameterCategory: 'AdvOut', parameterName, parameterValue })
+    await param('FFVEncoder', e.name)
+    await param('FFVCustom', e.options)
+    await this.client.call('SetOutputSettings', {
+      outputName: FFMPEG_OUTPUT,
+      outputSettings: { video_encoder: e.name, video_settings: e.options }
+    })
+  }
+
   /** Records the output to `<dir>/<baseName> <date time>.mkv` (local time). */
   async startRecord(dir: string, baseName: string, now: Date = new Date()): Promise<void> {
     await this.startFfmpegOutput(join(dir, `${baseName} ${fileStamp(now)}.mkv`), MKV)

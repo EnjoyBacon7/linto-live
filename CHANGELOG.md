@@ -14,17 +14,28 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   capture passe par X11 (XSHM, XComposite).
 - **Caméra virtuelle** : la sortie de LinTO Live (image et sous-titres, sans le son) est proposée
   comme webcam aux autres applications. Grisée, avec une infobulle explicative, quand le système
-  n'en dispose pas (Linux sans `v4l2loopback`, notamment le Flatpak sans le module chargé sur le
-  système). Sur macOS, qui n'autorise l'extension caméra d'OBS que depuis le dossier Applications,
+  n'en dispose pas (Linux sans le module `v4l2loopback`). Le module est chargé à la demande (mot de
+  passe administrateur), y compris depuis le Flatpak. Sur macOS, qui n'autorise l'extension caméra d'OBS que depuis le dossier Applications,
   la copie d'OBS utilisée par LinTO Live est désormais placée dans `/Applications/.LinTO Live`
   (dossier masqué, supprimé à la désinstallation).
 - **Page de premier lancement sous Linux** : comme la page d'autorisations de macOS, elle s'affiche
-  une fois si le système n'a pas ce dont certaines fonctions ont besoin, et dit comment l'obtenir :
-  trousseau de clés (connexion retenue), module `v4l2loopback` (caméra virtuelle), zone de
-  notification (GNOME sans l'extension AppIndicator). Elle permet aussi d'essayer les notifications.
+  une fois si le système n'a pas ce dont le direct ou certaines fonctions ont besoin, et dit comment
+  l'obtenir : serveur X / XWayland (nécessaire à OBS), serveur de son PulseAudio ou `pipewire-pulse`
+  (micro), accélération graphique (sous-titres), trousseau de clés (connexion retenue), module
+  `v4l2loopback` (caméra virtuelle), zone de notification (GNOME sans l'extension AppIndicator). Elle
+  signale aussi une session Wayland (placement de la fenêtre de sortie non garanti) et permet
+  d'essayer les notifications.
+- **Encodage matériel sous Linux** : avec une carte NVIDIA (NVENC), l'enregistrement et la diffusion
+  en ligne sont encodés par la carte graphique au lieu du processeur, comme avec VideoToolbox sur
+  macOS. Si l'encodeur matériel refuse de démarrer, LinTO Live repasse aussitôt sur x264, et s'y
+  tient aux lancements suivants.
+- **Zone de notification (Linux)** : fermer la fenêtre pendant un direct la masque, comme sur macOS,
+  quand le bureau affiche l'icône (sinon elle est réduite) ; un clic sur l'icône la rouvre. L'icône
+  devient foncée sur un panneau clair (KDE, Xfce… en thème clair).
 
 ### Corrigé
 
+- CI : OBS officiel démarré et arrêté à chaque build macOS, comme l'OBS embarqué sous Linux.
 - **À propos (Linux)** : la fenêtre « À propos de LinTO Live » affiche le nom, la version, l'icône
   et le site du projet.
 

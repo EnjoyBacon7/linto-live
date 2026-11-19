@@ -85,9 +85,13 @@ Paquets nécessaires selon la distribution :
 
 Conseils :
 
-- Au premier lancement, si le système n'a pas tout ce que certaines fonctions demandent
-  (trousseau de clés pour retenir la connexion, `v4l2loopback` pour la caméra virtuelle, zone de
-  notification), une page le signale et indique quoi installer. Rien de cela n'empêche un direct.
+- Au premier lancement, si le système n'a pas tout ce que le direct ou certaines fonctions
+  demandent (serveur X / XWayland pour OBS, serveur de son PulseAudio ou `pipewire-pulse` pour le
+  micro, accélération graphique pour les sous-titres, trousseau de clés pour retenir la connexion,
+  `v4l2loopback` pour la caméra virtuelle, zone de notification), une page le signale et indique
+  quoi installer.
+- Avec une carte **NVIDIA** (pilote propriétaire), l'enregistrement et la diffusion en ligne sont
+  encodés par la carte graphique (NVENC) ; sinon par le processeur (x264).
 - Préférer une **session X11** (« Ubuntu on Xorg » à l'écran de connexion). Sous Wayland, ça
   fonctionne via XWayland, mais le placement de la fenêtre de sortie sur le bon écran n'est pas
   garanti.
@@ -189,10 +193,8 @@ l'application pendant un direct revient à cliquer sur Arrêter.
     `/Applications/.LinTO Live` (droits d'administrateur nécessaires ; supprimé à la
     désinstallation).
   - Linux : nécessite le module `v4l2loopback` (paquet `v4l2loopback-dkms`), chargé à la demande
-    (mot de passe administrateur). Avec le Flatpak, le module doit être chargé sur le système avant
-    de lancer LinTO Live :
-    `sudo modprobe v4l2loopback exclusive_caps=1 card_label="OBS Virtual Camera"`. Sans lui,
-    l'option est grisée et son infobulle indique quoi faire.
+    (mot de passe administrateur), aussi depuis le Flatpak. Sans lui, l'option est grisée et son
+    infobulle indique quoi faire.
 
 ### Droits LinTO nécessaires
 
