@@ -6,6 +6,13 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Corrigé
+
+- **Capture d'écran et de fenêtre en session Wayland (Linux), suite** : choisir « Écran… » ou
+  « Fenêtre… » n'ouvrait pas la fenêtre de choix du système et la source restait noire jusqu'au
+  redémarrage d'OBS (l'OBS embarqué ne traitait les réponses du portail que pour les sources qu'il
+  crée lui-même). Corrigé dans l'OBS embarqué : la fenêtre de choix s'ouvre aussitôt.
+
 ## [0.6.1] - 2026-11-19
 
 ### Corrigé
