@@ -6,6 +6,13 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Corrigé
+
+- **Capture d'écran et de fenêtre en session Wayland (Linux)** : choisir une fenêtre faisait planter
+  OBS, et un écran restait noir (X11 ne voit rien des fenêtres Wayland). La capture passe désormais
+  par le portail du bureau (PipeWire) : le système demande quel écran ou quelle fenêtre partager, et
+  retient ce choix aux démarrages suivants.
+
 ## [0.6.0] - 2026-11-19
 
 ### Ajouté

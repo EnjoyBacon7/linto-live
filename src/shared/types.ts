@@ -133,8 +133,11 @@ export type VideoSource =
   | { kind: 'screen'; id: string; name: string }
   | { kind: 'window'; id: string; name: string }
 
-/** The screens or windows OBS can capture, or why they cannot be listed (macOS: no screen recording access). */
-export type CaptureTargets = { ok: true; items: DeviceItem[] } | { ok: false; access: MediaAccess }
+/**
+ * The screens or windows OBS can capture, or why they cannot be listed (macOS: no screen recording access).
+ * 'portal' (Linux Wayland session): no list, the system's own picker asks which one once the source is chosen.
+ */
+export type CaptureTargets = { ok: true; items: DeviceItem[] } | { ok: false; access: MediaAccess } | { ok: 'portal' }
 
 export interface Settings {
   instance: string

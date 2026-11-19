@@ -156,8 +156,9 @@ l'application pendant un direct revient à cliquer sur Arrêter.
 - **Capture d'écran ou de fenêtre** : « Écran… » et « Fenêtre… » (source principale ou de secours)
   listent les écrans ou les fenêtres ouvertes. Sur macOS, il faut autoriser LinTO Live dans
   Réglages Système › Confidentialité et sécurité › **Enregistrement de l'écran**, puis relancer
-  l'app ; la fenêtre de choix y mène. Sous Linux, la capture passe par X11 : dans une session
-  Wayland, seules les applications X11 (XWayland) sont capturées. Une fenêtre fermée ou réduite
+  l'app ; la fenêtre de choix y mène. Sous Linux, en session X11, la capture passe par X11 (XSHM,
+  XComposite) ; en session Wayland, par le portail du bureau : après « Choisir », le système demande
+  lui-même quel écran ou quelle fenêtre partager, et retient ce choix aux démarrages suivants. Une fenêtre fermée ou réduite
   compte comme une source absente : le secours prend le relais.
 - **Source de secours** : en plus de la source principale, une caméra, une image ou une vidéo (ou
   un écran, une fenêtre) peut servir de secours. Si la principale disparaît (câble débranché, caméra coupée), la sortie bascule

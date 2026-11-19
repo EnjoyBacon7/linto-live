@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FFMPEG_OUTPUT, FILTER_GAIN, FILTER_LIMITER, fileStamp, LIMITER_THRESHOLD_DB,
-  ObsController, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_SCREENS, SRC_VIDEO, SRC_WINDOWS, type ObsClient
+  ObsController, PORTAL_CAPTURE, recordBaseName, SCENE, SCENE_PAUSE, SRC_AUDIO, SRC_BACKUP, SRC_DEVICES, SRC_OVERLAY, SRC_SCREENS, SRC_VIDEO, SRC_WINDOWS, type ObsClient
 } from '../../src/main/obs/controller'
 
 type Call = { req: string; data?: Record<string, unknown> }
@@ -588,6 +588,56 @@ describe('ObsController sources', () => {
     await d.ensureScene('darwin')
     await d.listCaptureTargets('screen')
     expect(of(m.calls, 'GetInputPropertiesListPropertyItems')[0].data).toEqual({ inputName: SRC_SCREENS, propertyName: 'display_uuid' })
+  })
+
+  it('setSource screen or window (Linux Wayland): one ScreenCast portal input, recreated for each new pick only', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client, { portalCapture: true })
+    await c.ensureScene('linux')
+    await c.setSource('primary', { kind: 'screen', id: 'portal:1', name: 'Écran' })
+    expect(f.inputs.get(SRC_VIDEO)).toEqual({ inputKind: PORTAL_CAPTURE, inputSettings: { ShowCursor: true, RestoreToken: '' } })
+    // OBS keeps the token the portal gave once the user picked.
+    f.inputs.get(SRC_VIDEO)!.inputSettings.RestoreToken = 'tok'
+    let n = f.calls.length
+    await c.setSource('primary', { kind: 'screen', id: 'portal:1', name: 'Écran' })
+    expect(of(f.calls.slice(n), 'CreateInput')).toEqual([])
+    // A new pick (window this time): a fresh input without token, so the system picker shows again.
+    n = f.calls.length
+    await c.setSource('primary', { kind: 'window', id: 'portal:2', name: 'Fenêtre' })
+    expect(of(f.calls.slice(n), 'RemoveInput').map((x) => x.data!.inputName)).toEqual([SRC_VIDEO])
+    expect(of(f.calls.slice(n), 'CreateInput')[0].data).toMatchObject({ inputKind: PORTAL_CAPTURE, inputSettings: { RestoreToken: '' } })
+    // Next OBS run: the saved choice is re-applied without dropping the token OBS saved with the input.
+    f.inputs.get(SRC_VIDEO)!.inputSettings.RestoreToken = 'tok2'
+    const d = new ObsController(f.client, { portalCapture: true })
+    await d.ensureScene('linux')
+    n = f.calls.length
+    await d.setSource('primary', { kind: 'window', id: 'portal:2', name: 'Fenêtre' })
+    expect(of(f.calls.slice(n), 'CreateInput')).toEqual([])
+    expect(of(f.calls.slice(n), 'SetInputSettings')[0].data).toEqual({ inputName: SRC_VIDEO, inputSettings: { ShowCursor: true } })
+  })
+
+  it('a saved X11 screen is captured through the portal in a Wayland session', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client, { portalCapture: true })
+    await c.ensureScene('linux')
+    await c.setSource('primary', { kind: 'screen', id: '0', name: 'Écran 0' })
+    expect(f.inputs.get(SRC_VIDEO)!.inputKind).toBe(PORTAL_CAPTURE)
+  })
+
+  it('listCaptureTargets (portal) creates no X11 listing input', async () => {
+    const f = fakeClient()
+    const c = new ObsController(f.client, { portalCapture: true })
+    await c.ensureScene('linux')
+    const n = f.calls.length
+    expect(await c.listCaptureTargets('window')).toEqual([])
+    expect(f.calls.slice(n)).toEqual([])
+  })
+
+  it('ensureScene removes a listing input left over by an OBS that died while listing', async () => {
+    const f = fakeClient()
+    f.inputs.set(SRC_WINDOWS, { inputKind: 'xcomposite_input', inputSettings: { capture_window: '' } })
+    await new ObsController(f.client).ensureScene('linux')
+    expect(f.inputs.has(SRC_WINDOWS)).toBe(false)
   })
 
   it('listCaptureTargets removes its input even when listing fails', async () => {
