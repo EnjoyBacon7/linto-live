@@ -66,6 +66,10 @@ flatpak install --user ./LinTO-Live-<version>-x86_64.flatpak
 flatpak run ai.linto.live
 ```
 
+Le Flatpak a le droit de lancer des commandes sur le système (`org.freedesktop.Flatpak`), utilisé
+uniquement pour vérifier et charger le module `v4l2loopback` de la caméra virtuelle : il n'est donc
+pas isolé du système comme un Flatpak ordinaire.
+
 **Autres distributions (Arch…) : AppImage**
 
 Un seul fichier, rien n'est installé sur le système :

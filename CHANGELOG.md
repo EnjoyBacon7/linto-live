@@ -6,6 +6,8 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.6.0] - 2026-11-19
+
 ### Ajouté
 
 - **Capture d'écran et de fenêtre** : la source vidéo (principale ou de secours) peut être un écran
@@ -14,17 +16,24 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   capture passe par X11 (XSHM, XComposite).
 - **Caméra virtuelle** : la sortie de LinTO Live (image et sous-titres, sans le son) est proposée
   comme webcam aux autres applications. Grisée, avec une infobulle explicative, quand le système
-  n'en dispose pas (Linux sans le module `v4l2loopback`). Le module est chargé à la demande (mot de
-  passe administrateur), y compris depuis le Flatpak. Sur macOS, qui n'autorise l'extension caméra d'OBS que depuis le dossier Applications,
-  la copie d'OBS utilisée par LinTO Live est désormais placée dans `/Applications/.LinTO Live`
-  (dossier masqué, supprimé à la désinstallation).
-- **Page de premier lancement sous Linux** : comme la page d'autorisations de macOS, elle s'affiche
-  une fois si le système n'a pas ce dont le direct ou certaines fonctions ont besoin, et dit comment
-  l'obtenir : serveur X / XWayland (nécessaire à OBS), serveur de son PulseAudio ou `pipewire-pulse`
-  (micro), accélération graphique (sous-titres), trousseau de clés (connexion retenue), module
-  `v4l2loopback` (caméra virtuelle), zone de notification (GNOME sans l'extension AppIndicator). Elle
-  signale aussi une session Wayland (placement de la fenêtre de sortie non garanti) et permet
-  d'essayer les notifications.
+  n'en dispose pas (Linux sans le module `v4l2loopback`). Sous Linux, le module est chargé à la
+  demande (mot de passe administrateur), y compris depuis le Flatpak. Sur macOS, qui n'autorise
+  l'extension caméra d'OBS que depuis le dossier Applications, la copie d'OBS utilisée par LinTO
+  Live est placée dans `/Applications/.LinTO Live` (dossier masqué, supprimé à la désinstallation).
+- **Gain du micro** : un curseur (-30 à +20 dB) sous le vumètre amplifie ou atténue le micro, suivi
+  d'un limiteur (-1 dBFS) pour que l'amplification ne sature pas le son. Le réglage est retenu.
+- **Page de premier lancement** : avant la connexion, elle explique et demande ce dont LinTO Live a
+  besoin.
+  - macOS : accès à la caméra, au micro et aux notifications. OBS ne démarre qu'une fois la page
+    validée si macOS n'a encore jamais posé la question ; un accès refusé propose d'ouvrir le bon
+    panneau des Réglages Système.
+  - Linux : elle s'affiche si le système n'a pas ce dont le direct ou certaines fonctions ont besoin,
+    et dit comment l'obtenir : serveur X / XWayland (nécessaire à OBS), serveur de son PulseAudio ou
+    `pipewire-pulse` (micro), accélération graphique (sous-titres), trousseau de clés (connexion
+    retenue), module `v4l2loopback` (caméra virtuelle), zone de notification (GNOME sans l'extension
+    AppIndicator). Elle signale aussi une session Wayland (placement de la fenêtre de sortie non
+    garanti).
+  - Les deux permettent d'essayer les notifications.
 - **Encodage matériel sous Linux** : avec une carte NVIDIA (NVENC), l'enregistrement et la diffusion
   en ligne sont encodés par la carte graphique au lieu du processeur, comme avec VideoToolbox sur
   macOS. Si l'encodeur matériel refuse de démarrer, LinTO Live repasse aussitôt sur x264, et s'y
@@ -32,18 +41,38 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - **Zone de notification (Linux)** : fermer la fenêtre pendant un direct la masque, comme sur macOS,
   quand le bureau affiche l'icône (sinon elle est réduite) ; un clic sur l'icône la rouvre. L'icône
   devient foncée sur un panneau clair (KDE, Xfce… en thème clair).
+- Diagnostic : la sortie d'OBS à son lancement est gardée dans `obs-home/obs-launch.log` (données de
+  l'application), pour comprendre un OBS qui ne démarre pas.
 
-### Corrigé
+### Modifié
 
+- **Panneau de réglages en sections repliables** (Vidéo, Micro, Transcription, Incrustations,
+  Enregistrement et diffusion), avec un résumé des valeurs une fois fermées ; l'état est retenu. Micro
+  fermé : vumètre compact dans l'en-tête. Enregistrement et diffusion se choisissent par un choix
+  unique (boutons radio) au lieu de deux cases qui s'excluaient.
+- Notes retirées sous « Écouter le retour audio », « Paramètres de diffusion… » et le gain du micro.
+- **Flatpak** : l'application peut désormais lancer des commandes sur le système hôte
+  (`--talk-name=org.freedesktop.Flatpak`, une sortie du bac à sable), utilisé uniquement pour
+  vérifier et charger le module `v4l2loopback` de la caméra virtuelle. La mise à jour du Flatpak
+  affiche cette nouvelle autorisation.
 - CI : OBS officiel démarré et arrêté à chaque build macOS, comme l'OBS embarqué sous Linux.
-- **À propos (Linux)** : la fenêtre « À propos de LinTO Live » affiche le nom, la version, l'icône
-  et le site du projet.
 
 ### Corrigé
 
+- **Transcription synchronisée avec LinTO** : au démarrage ou à la reprise d'une session, l'historique
+  stocké sur LinTO s'affiche avant les mots en direct (sans doublon) ; hors direct, choisir une
+  session affiche sa transcription depuis LinTO, et l'export enregistre celle-ci.
+- **Statut des sessions** : la liste est relue quand l'envoi du son change d'état, pour que le statut
+  affiché suive celui de LinTO.
+- La fenêtre principale ne défile plus en entier.
 - **Icône sur Linux** : la fenêtre de LinTO Live s'affichait sans icône dans le dock, la barre des
   tâches et Alt-Tab (Flatpak notamment, sous Wayland). Son identifiant (`app_id` / `WM_CLASS`) est
-  désormais `ai.linto.live`, le même que celui de son entrée de menu.
+  désormais `ai.linto.live`, le même que celui de son entrée de menu, et l'icône est installée dans
+  les tailles standard (16 à 512 px) : la seule icône de 1024 px n'était ni trouvée par GNOME
+  (paquet `.deb`) ni exportée par Flatpak.
+- Listes déroulantes lisibles sous Linux en thème sombre (texte blanc sur fond blanc).
+- **À propos (Linux)** : la fenêtre « À propos de LinTO Live » affiche le nom, la version, l'icône
+  et le site du projet.
 
 ## [0.5.0] - 2026-11-17
 
@@ -197,6 +226,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.6.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.3.0...v0.3.1
