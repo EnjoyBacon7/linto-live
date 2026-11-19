@@ -25,7 +25,7 @@ import { lumaOfBgra } from './obs/fallback'
 import { obsExecutable } from './obs/locate'
 import { MAC_OBS_RUNTIME_DIR, placeObsRuntime } from './obs/runtime'
 import { virtualCamPreflight, virtualCamUnavailableReason } from './obs/virtualCam'
-import { linuxSystemChecks, statusNotifierWatcher } from './systemChecks'
+import { isWaylandSession, linuxSystemChecks, statusNotifierWatcher } from './systemChecks'
 import { LintoApi } from './linto/api'
 import { lookupSession } from './linto/sessionResolver'
 import { asLintoAction } from './linto/accessMessages'
@@ -236,9 +236,11 @@ function main(): void {
     }
     return common
   }
+  // Wayland session: screens and windows are captured through the ScreenCast portal (see PORTAL_CAPTURE).
+  const portalCapture = platform === 'linux' && isWaylandSession(process.env)
   const live = new LiveController({
     obs,
-    controllerFactory: (c) => ObsController.connect(c),
+    controllerFactory: (c) => ObsController.connect(c, { portalCapture }),
     api,
     captions,
     overlay,
@@ -469,6 +471,7 @@ function main(): void {
     if (kind !== 'screen' && kind !== 'window') throw new Error('Type de capture inconnu.')
     const access = screenAccess()
     if (access !== 'granted') return { ok: false, access }
+    if (portalCapture) return { ok: 'portal' }
     return { ok: true, items: await live.listCaptureTargets(kind) }
   })
   ipcMain.handle(IPC.setupRequestScreenAccess, async (): Promise<MediaAccess> => {

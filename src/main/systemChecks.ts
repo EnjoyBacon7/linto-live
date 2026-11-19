@@ -110,10 +110,11 @@ async function tray(ops: SystemCheckOps): Promise<SystemCheck> {
  * Display: the bundled OBS only has Qt's xcb plugin (paths.ts: QT_QPA_PLATFORM=xcb), so it needs an X
  * server, XWayland in a Wayland session; there, the output window's placement is up to XWayland.
  */
+export const isWaylandSession = (env: NodeJS.ProcessEnv): boolean => env.XDG_SESSION_TYPE === 'wayland' || !!env.WAYLAND_DISPLAY
+
 function display(env: NodeJS.ProcessEnv): SystemCheck {
   if (!env.DISPLAY) return { id: 'display', ok: false, fix: FIX_NO_X11, blocking: true }
-  const wayland = env.XDG_SESSION_TYPE === 'wayland' || !!env.WAYLAND_DISPLAY
-  return wayland ? { id: 'display', ok: false, fix: FIX_WAYLAND } : { id: 'display', ok: true }
+  return isWaylandSession(env) ? { id: 'display', ok: false, fix: FIX_WAYLAND } : { id: 'display', ok: true }
 }
 
 /**

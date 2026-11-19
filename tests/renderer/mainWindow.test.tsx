@@ -1043,6 +1043,20 @@ describe('Inspector: sources vidéo', () => {
     await waitFor(() => expect(noBackup().selectedOptions[0]?.textContent).toBe('Fenêtre : [Keynote] Slides'))
   })
 
+  it('Wayland (portal): Écran… lists nothing and stores a fresh portal target, the system picker chooses', async () => {
+    const listCaptureTargets = vi.fn().mockResolvedValue({ ok: 'portal' })
+    setup({ setup: { listCaptureTargets } as never })
+    await renderMain()
+    await userEvent.selectOptions(noBackup(), 'Écran…')
+    const sheet = await screen.findByRole('dialog', { name: 'Capturer un écran' })
+    expect(within(sheet).getByText(/le système demande quel écran partager/)).toBeTruthy()
+    expect(within(sheet).queryByRole('button', { name: 'Actualiser' })).toBeNull()
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Choisir' }))
+    expect(api.setup.save).toHaveBeenCalledWith({
+      backupSource: { kind: 'screen', id: expect.stringMatching(/^portal:\d+$/), name: 'Écran (choisi dans le système)' }
+    })
+  })
+
   it('without the screen recording access (macOS), Écran… asks for it, then sends to System Settings', async () => {
     const listCaptureTargets = vi.fn().mockResolvedValue({ ok: false, access: 'denied' })
     const requestScreenAccess = vi.fn().mockResolvedValue('denied')

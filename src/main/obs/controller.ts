@@ -53,7 +53,7 @@ const videoProp = (p: NodeJS.Platform): string => (p === 'darwin' ? 'device' : '
 
 /**
  * Screen and window capture inputs. macOS: ScreenCaptureKit (one kind, `type` 0 = display by UUID, 1 = window by
- * CGWindowID). Linux: X11 only (OBS runs through XWayland, see paths.ts), XSHM for a screen (by index) and
+ * CGWindowID). Linux, X11 session: XSHM for a screen (by index) and
  * XComposite for a window (by its « id\r\nname\r\nclass » string, which OBS also matches by name once the id is gone).
  */
 const captureKind = (kind: CaptureKind, p: NodeJS.Platform): string =>
@@ -76,8 +76,16 @@ function captureProbeSettings(kind: CaptureKind, p: NodeJS.Platform): Record<str
   return kind === 'screen' ? { screen: -1 } : { capture_window: '' }
 }
 
+/**
+ * Linux Wayland session: XSHM only sees XWayland's empty root (black) and XComposite crashes OBS when it lists
+ * windows. The capture goes through the desktop's ScreenCast portal instead: one PipeWire kind (screen or window,
+ * chosen by the user in the system's own picker when the input is created). The portal's restore token, kept by
+ * OBS in the input's settings, picks the same target again at the next start without asking.
+ */
+export const PORTAL_CAPTURE = 'pipewire-screen-capture-source'
+
 /** OBS input kind and settings for a video source ('none' = a device input without device). */
-function sourceInput(src: VideoSource, p: NodeJS.Platform): { inputKind: string; inputSettings: Record<string, unknown> } {
+function sourceInput(src: VideoSource, p: NodeJS.Platform, portal = false): { inputKind: string; inputSettings: Record<string, unknown> } {
   switch (src.kind) {
     case 'image':
       return { inputKind: 'image_source', inputSettings: { file: src.path } }
@@ -90,6 +98,8 @@ function sourceInput(src: VideoSource, p: NodeJS.Platform): { inputKind: string;
       return { inputKind: videoKind(p), inputSettings: { [videoProp(p)]: src.id } }
     case 'screen':
     case 'window':
+      // RestoreToken is left alone: SetInputSettings overlays, so the one OBS saved is kept.
+      if (portal && p === 'linux') return { inputKind: PORTAL_CAPTURE, inputSettings: { ShowCursor: true } }
       return { inputKind: captureKind(src.kind, p), inputSettings: captureSettings(src.kind, src.id, p) }
     default:
       return { inputKind: videoKind(p), inputSettings: { [videoProp(p)]: '' } }
@@ -149,9 +159,13 @@ export class ObsController {
   private lastServer: string | null = null
   private stateListeners = new Set<(s: StreamState) => void>()
 
-  constructor(private readonly client: ObsClient) {}
+  /** Portal capture: the target applied to each slot by this run (a different one = a new pick, see setSource). */
+  private portalIds = new Map<SourceSlot, string>()
 
-  static async connect(c: ObsConnection): Promise<ObsController> {
+  /** `portalCapture`: screens and windows go through the ScreenCast portal (Linux Wayland session, see PORTAL_CAPTURE). */
+  constructor(private readonly client: ObsClient, private readonly opts: { portalCapture?: boolean } = {}) {}
+
+  static async connect(c: ObsConnection, opts: { portalCapture?: boolean } = {}): Promise<ObsController> {
     const ws = new OBSWebSocket()
     // Bounded too: an OBS that accepts the socket but never identifies would otherwise hold the queue.
     let timer: NodeJS.Timeout | undefined
@@ -172,7 +186,7 @@ export class ObsController {
     } finally {
       clearTimeout(timer)
     }
-    return new ObsController(guardClient(ws as unknown as ObsClient))
+    return new ObsController(guardClient(ws as unknown as ObsClient), opts)
   }
 
   /** Liveness check (the watchdog): rejects when OBS does not answer in time. */
@@ -189,6 +203,10 @@ export class ObsController {
     }
     const { inputs } = await this.client.call('GetInputList')
     const existing = new Set<string>((inputs as { inputName: string }[]).map((i) => i.inputName))
+    // A listing input left over by an OBS that died while listing (e.g. XComposite under Wayland): not kept.
+    for (const name of [SRC_SCREENS, SRC_WINDOWS]) {
+      if (existing.delete(name)) await this.client.call('RemoveInput', { inputName: name }).catch(() => {})
+    }
     const { sceneItems } = await this.client.call('GetSceneItemList', { sceneName: SCENE })
     const inScene = new Set<string>((sceneItems as { sourceName: string }[]).map((i) => i.sourceName))
 
@@ -265,6 +283,8 @@ export class ObsController {
    * (macOS: the caller makes sure the screen recording access is granted, else OBS waits on it).
    */
   async listCaptureTargets(kind: CaptureKind): Promise<DeviceItem[]> {
+    // Portal capture: nothing to list, the system picker chooses (and the X11 inputs would see nothing, or crash).
+    if (this.opts.portalCapture && this.platform === 'linux') return []
     const inputName = kind === 'screen' ? SRC_SCREENS : SRC_WINDOWS
     try {
       await this.createInput({
@@ -331,14 +351,23 @@ export class ObsController {
    */
   async setSource(slot: SourceSlot, src: VideoSource): Promise<void> {
     const inputName = slot === 'primary' ? SRC_VIDEO : SRC_BACKUP
-    const { inputKind, inputSettings } = sourceInput(src, this.platform)
+    const portal = !!this.opts.portalCapture && this.platform === 'linux'
+    const { inputKind, inputSettings } = sourceInput(src, this.platform, portal)
     let current: string | null = null
     try {
       current = (await this.client.call('GetInputSettings', { inputName })).inputKind as string
     } catch (e) {
       if (codeOf(e) !== RESOURCE_NOT_FOUND) throw e
     }
-    if (current === inputKind) {
+    // Portal: the target is only chosen in the system picker, shown when the input is created. Another pick
+    // than the one applied in this run recreates the input, without a restore token, so the picker shows again;
+    // the first one of a run (the saved choice re-applied at start) keeps the input and its token.
+    const isPortal = inputKind === PORTAL_CAPTURE && (src.kind === 'screen' || src.kind === 'window')
+    const known = this.portalIds.get(slot)
+    const repick = isPortal && known !== undefined && known !== src.id
+    if (isPortal) this.portalIds.set(slot, src.id)
+    else this.portalIds.delete(slot)
+    if (current === inputKind && !repick) {
       await this.client.call('SetInputSettings', { inputName, inputSettings })
     } else {
       if (current !== null) {
@@ -349,7 +378,7 @@ export class ObsController {
         sceneName: SCENE,
         inputName,
         inputKind,
-        inputSettings,
+        inputSettings: isPortal ? { ...inputSettings, RestoreToken: '' } : inputSettings,
         sceneItemEnabled: slot === 'primary' || this.backupVisible
       })
       this.itemIds.set(inputName, sceneItemId)

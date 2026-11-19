@@ -12,10 +12,14 @@ export interface CaptureSheetProps {
   onCancel(): void
 }
 
-type Load = { phase: 'loading' } | { phase: 'error'; message: string } | { phase: 'denied'; access: MediaAccess } | { phase: 'ready'; items: DeviceItem[] }
+type Load = { phase: 'loading' } | { phase: 'error'; message: string } | { phase: 'denied'; access: MediaAccess } | { phase: 'ready'; items: DeviceItem[] } | { phase: 'portal' }
 
 const TITLES: Record<CaptureKind, string> = { screen: 'Capturer un écran', window: 'Capturer une fenêtre' }
 const NOUN: Record<CaptureKind, string> = { screen: 'Écran', window: 'Fenêtre' }
+const PORTAL_NAME: Record<CaptureKind, string> = { screen: 'Écran (choisi dans le système)', window: 'Fenêtre (choisie dans le système)' }
+
+/** Wayland: the target is picked in the system's dialog; a new id each time makes OBS show that dialog again. */
+const portalTarget = (k: CaptureKind): DeviceItem => ({ id: `portal:${Date.now()}`, name: PORTAL_NAME[k] })
 
 /**
  * Picks the screen or the window to capture. The list is asked of OBS only here (macOS: it needs the screen
@@ -29,6 +33,7 @@ export function CaptureSheet({ kind, onPick, onCancel }: CaptureSheetProps) {
   const refresh = (k: CaptureKind): void => {
     setLoad({ phase: 'loading' })
     window.lintoLive.setup.listCaptureTargets(k).then((r: CaptureTargets) => {
+      if (r.ok === 'portal') return setLoad({ phase: 'portal' })
       if (!r.ok) return setLoad({ phase: 'denied', access: r.access })
       setLoad({ phase: 'ready', items: r.items })
       setChosen((c) => (r.items.some((i) => i.id === c) ? c : r.items[0]?.id ?? ''))
@@ -51,7 +56,7 @@ export function CaptureSheet({ kind, onPick, onCancel }: CaptureSheetProps) {
   }
 
   const items = load.phase === 'ready' ? load.items : []
-  const target = items.find((i) => i.id === chosen)
+  const target = load.phase === 'portal' && kind ? portalTarget(kind) : items.find((i) => i.id === chosen)
   return (
     <Sheet title={kind ? TITLES[kind] : ''} open={kind !== null} onClose={onCancel}
       footer={<>
@@ -74,10 +79,16 @@ export function CaptureSheet({ kind, onPick, onCancel }: CaptureSheetProps) {
           ? <p className="sheet-detail">{kind === 'window' ? 'Aucune fenêtre à capturer.' : 'Aucun écran à capturer.'}</p>
           : <PopUp label={kind ? NOUN[kind] : ''} value={chosen} options={items.map((i) => ({ value: i.id, label: i.name }))}
               onChange={setChosen} />)}
-        {kind && load.phase !== 'denied' && (
+        {load.phase === 'portal' && (
+          <p className="sheet-detail">
+            {kind === 'window' ? 'Après « Choisir », le système demande quelle fenêtre partager' : 'Après « Choisir », le système demande quel écran partager'}
+            {' '}(onglet Écran ou Fenêtre de sa propre fenêtre). Ce choix est retenu aux démarrages suivants.
+          </p>
+        )}
+        {kind && load.phase !== 'denied' && load.phase !== 'portal' && (
           <div><Button disabled={load.phase === 'loading'} onClick={() => refresh(kind)}>Actualiser</Button></div>
         )}
-        {kind === 'window' && load.phase === 'ready' && (
+        {kind === 'window' && (load.phase === 'ready' || load.phase === 'portal') && (
           <p className="sheet-detail">Une fenêtre réduite ou fermée n’est plus capturée (la source de secours, s’il y en a une, prend le relais).</p>
         )}
       </div>
