@@ -1,6 +1,6 @@
 import { Button } from '../ui/Button'
 import { StatusDot } from '../ui/StatusDot'
-import { BroadcastIcon, DisplayIcon, PlayIcon, RecordIcon, StopIcon } from '../ui/icons'
+import { BroadcastIcon, CaptionsIcon, DisplayIcon, PlayIcon, RecordIcon, StopIcon } from '../ui/icons'
 import { useElapsed } from './useLive'
 
 export type Busy = 'start' | 'stop' | 'terminate' | 'switch' | null
@@ -26,6 +26,9 @@ export interface ToolbarProps {
   /** OBS is attached: the output window (projector) can be opened, on or off air. */
   canShowOutput: boolean
   onShowOutput(): void
+  /** The borderless, always-on-top subtitle window is open (the button shows pressed). */
+  subtitlesOpen: boolean
+  onToggleSubtitles(): void
   onTerminate(): void
   /** Why Terminer is unavailable (the user may not terminate sessions here); absent = available. */
   terminateBlocked?: string
@@ -46,6 +49,11 @@ export function Toolbar(p: ToolbarProps) {
   const outputButton = (
     <Button size="large" className="btn-icon" aria-label="Afficher la fenêtre de sortie" title="Afficher la fenêtre de sortie"
       icon={<DisplayIcon />} disabled={!p.canShowOutput} onClick={p.onShowOutput} />
+  )
+  const subtitlesLabel = p.subtitlesOpen ? 'Fermer la fenêtre de sous-titres' : 'Afficher la fenêtre de sous-titres'
+  const subtitlesButton = (
+    <Button size="large" className="btn-icon" aria-label={subtitlesLabel} title={subtitlesLabel}
+      aria-pressed={p.subtitlesOpen} icon={<CaptionsIcon />} onClick={p.onToggleSubtitles} />
   )
   return (
     <div className="toolbar drag" role="toolbar" aria-label="Barre d'outils">
@@ -79,6 +87,7 @@ export function Toolbar(p: ToolbarProps) {
               {p.busy === 'stop' ? 'Arrêt…' : 'Arrêter'}
             </Button>
             {outputButton}
+            {subtitlesButton}
             <Button size="large" variant="destructive" disabled={p.busy !== null}
               blockedReason={p.terminateBlocked} onClick={p.onTerminate}>
               {p.busy === 'terminate' ? 'Fin de session…' : 'Terminer…'}
@@ -87,6 +96,7 @@ export function Toolbar(p: ToolbarProps) {
         ) : (
           <>
             {outputButton}
+            {subtitlesButton}
             <Button size="large" variant="primary" icon={<PlayIcon size={12} />}
               disabled={p.busy !== null || (!p.canStart && p.startHint === undefined)}
               blockedReason={p.canStart ? undefined : p.startHint} onClick={p.onStart}>

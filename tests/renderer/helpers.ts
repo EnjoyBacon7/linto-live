@@ -39,6 +39,7 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
       testNotification: vi.fn().mockResolvedValue(undefined), finish: vi.fn().mockResolvedValue(undefined),
       ...over.permissions
     },
+    subtitles: { toggle: vi.fn().mockResolvedValue(true), isOpen: vi.fn().mockResolvedValue(false), ...over.subtitles },
     app: { uninstall: vi.fn().mockResolvedValue(undefined), reportShellState: vi.fn().mockResolvedValue(undefined), ...over.app },
     on: vi.fn().mockReturnValue(() => {})
   }

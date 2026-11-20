@@ -137,6 +137,14 @@ Conseils :
    **Afficher la fenêtre de sortie**, ⌘1 / Ctrl+1), avant ou pendant le direct : elle ne s'ouvre
    jamais seule. La glisser sur l'écran de la salle ; clic droit › « Plein écran » pour la passer en
    plein écran sur cet écran.
+
+   Pour poser les sous-titres **par-dessus autre chose** (diapositives, visio), le bouton
+   sous-titres, juste à côté, ouvre une **fenêtre de sous-titres** : sans barre de titre, toujours au
+   premier plan, elle ne montre que la bande (sans QR code). La saisir n'importe où pour la
+   déplacer, tirer ses bords pour la redimensionner (le texte suit sa hauteur) ; la croix qui
+   apparaît au survol, la touche Échap ou le même bouton la ferment. Sa place est retenue. Sous
+   **GNOME en session Wayland**, une application ne peut pas se mettre d'elle-même au premier plan :
+   la sélectionner puis Alt+Espace › « Toujours au premier plan ».
 5. **Démarrer** (⌘↩ / Ctrl+Entrée) : les sous-titres apparaissent sur la vidéo.
 6. **Arrêter** (⌘. / Ctrl+.) coupe les sous-titres et l'envoi du son **sans terminer** la session
    LinTO, qui peut être reprise plus tard ; la fenêtre de sortie reste ouverte, sur la caméra.
