@@ -180,6 +180,8 @@ export interface Settings {
   broadcastKeySet?: boolean
   /** Main window position/size, restored at launch if still on a display. */
   windowBounds?: Bounds
+  /** Subtitle window position/size, restored when it is opened again if still on a display. */
+  subtitlesWindowBounds?: Bounds
   /** The first-launch page was gone through (macOS permissions, Linux system checks): it is not shown again. */
   permissionsOnboarded?: boolean
 }

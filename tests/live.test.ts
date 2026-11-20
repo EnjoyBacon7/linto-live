@@ -259,6 +259,13 @@ afterEach(() => {
 })
 
 describe('LiveController', () => {
+  it('overlayPageUrl is null before boot, then the overlay server URL', async () => {
+    const t = setup()
+    expect(t.live.overlayPageUrl()).toBeNull()
+    await t.live.boot()
+    expect(t.live.overlayPageUrl()).toBe('http://127.0.0.1:5555/?k=t')
+  })
+
   it('boot starts overlay and obs, ensures scene, applies saved devices and overlay url', async () => {
     const t = setup()
     await t.live.boot()

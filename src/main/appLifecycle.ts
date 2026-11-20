@@ -129,19 +129,21 @@ const finite = (b: Bounds): boolean =>
   [b.x, b.y, b.width, b.height].every((n) => typeof n === 'number' && Number.isFinite(n)) && b.width > 0 && b.height > 0
 
 /**
- * Saved window bounds are reused only if at least 100×100 px of the window lands on one display's
- * work area (a display may have been unplugged since); otherwise the default size, centred by Electron.
+ * Saved window bounds are reused only if at least `minVisible` (100×100 px by default) of the window lands
+ * on one display's work area (a display may have been unplugged since); otherwise the default size, centred
+ * by Electron.
  */
 export function restoreBounds(
   saved: Bounds | undefined,
   displays: Bounds[],
-  def: { width: number; height: number }
+  def: { width: number; height: number },
+  minVisible: { width: number; height: number } = { width: MIN_VISIBLE, height: MIN_VISIBLE }
 ): Bounds | { width: number; height: number } {
   if (!saved || !finite(saved)) return def
   const visible = displays.some((d) => {
     const w = Math.min(saved.x + saved.width, d.x + d.width) - Math.max(saved.x, d.x)
     const h = Math.min(saved.y + saved.height, d.y + d.height) - Math.max(saved.y, d.y)
-    return w >= MIN_VISIBLE && h >= MIN_VISIBLE
+    return w >= minVisible.width && h >= minVisible.height
   })
   return visible ? saved : def
 }

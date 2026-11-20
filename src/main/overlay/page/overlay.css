@@ -69,3 +69,37 @@ html, body {
 #qr[hidden] { display: none; }
 #qr.is-shown { opacity: 1; }
 #qr svg { display: block; width: 100%; height: 100%; }
+
+/* Subtitle window of the app (mode=window): the band fills the window, black even with no caption;
+   the whole window drags it, the close button appears on hover. */
+#close[hidden] { display: none; }
+html:has(body.window), body.window {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  -webkit-app-region: drag;
+  user-select: none;
+  cursor: default;
+}
+body.window #band {
+  height: 100vh;
+  padding: 0 calc(0.5 * var(--fs));
+}
+body.window #close {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font: 16px/22px Arial, sans-serif;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+body.window:hover #close, body.window #close:focus-visible { opacity: 1; }
+body.window #close:hover { background: rgba(255, 255, 255, 0.35); }

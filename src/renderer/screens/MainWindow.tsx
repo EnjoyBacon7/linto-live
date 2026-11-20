@@ -120,6 +120,15 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     return () => { alive = false; clearInterval(t) }
   }, [loadSetup, refresh])
 
+  // The subtitle window may be opened or closed from elsewhere (its own × or Esc): follow main.
+  const [subtitlesOpen, setSubtitlesOpen] = useState(false)
+  useEffect(() => {
+    let alive = true
+    const off = window.lintoLive.on('subtitles-window', setSubtitlesOpen)
+    window.lintoLive.subtitles.isOpen().then((o) => { if (alive) setSubtitlesOpen(o) }, () => {})
+    return () => { alive = false; off() }
+  }, [])
+
   // OBS is still booting at launch (no devices listed yet): reload the lists once it is running.
   const prevObs = useRef<LiveState['obs'] | null>(null)
   useEffect(() => {
@@ -243,6 +252,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   }
   const showOutput = (): void => {
     window.lintoLive.live.showOutputWindow().catch((e) => setError(ipcErrorMessage(e)))
+  }
+  const toggleSubtitles = (): void => {
+    window.lintoLive.subtitles.toggle().catch((e) => setError(ipcErrorMessage(e)))
   }
   const openNew = (): void => {
     if (busyRef.current || sheetRef.current) return
@@ -447,6 +459,8 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           onStop={() => void stop()}
           canShowOutput={state.obs === 'running'}
           onShowOutput={showOutput}
+          subtitlesOpen={subtitlesOpen}
+          onToggleSubtitles={toggleSubtitles}
           onTerminate={askTerminate}
           {...(manageBlocked ? { terminateBlocked: manageBlocked } : {})}
         />

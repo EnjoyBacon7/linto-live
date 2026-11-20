@@ -46,6 +46,7 @@ import {
 } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
+import { SubtitlesWindow, electronSubtitlesHost, subtitlesWindowBounds } from './subtitlesWindow'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
@@ -529,6 +530,23 @@ function main(): void {
   })
   ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
   ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
+  const subtitles = new SubtitlesWindow({
+    host: electronSubtitlesHost(
+      (o) => new BrowserWindow(o),
+      platform,
+      platform === 'linux' ? { icon: linuxIconPath() } : {}
+    ),
+    url: () => live.overlayPageUrl(),
+    bounds: () => subtitlesWindowBounds(
+      settings.get().subtitlesWindowBounds,
+      screen.getAllDisplays().map((d) => d.workArea),
+      screen.getPrimaryDisplay().workArea
+    ),
+    saveBounds: (b) => settings.update({ subtitlesWindowBounds: b }),
+    onChange: (open) => send(IPC.evtSubtitlesWindow, open)
+  })
+  ipcMain.handle(IPC.subtitlesToggle, () => subtitles.toggle())
+  ipcMain.handle(IPC.subtitlesIsOpen, () => subtitles.isOpen())
   ipcMain.handle(IPC.liveClearTranscript, () => live.clearTranscript())
   ipcMain.handle(IPC.liveSetAudioMonitor, (_e, on: unknown) => {
     if (typeof on !== 'boolean') throw new Error('Réglage invalide.')
@@ -569,7 +587,10 @@ function main(): void {
   })
 
   let uninstalling = false
-  const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
+  const shutdownCapped = (): Promise<void> => {
+    subtitles.close() // saves its bounds (app.exit closes windows without their 'close' event)
+    return shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
+  }
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
     // The window may be hidden (closed during a show): bring it back so the dialog is seen.
     if (win && !win.isDestroyed() && !win.isVisible()) showWindow()
@@ -677,6 +698,8 @@ function main(): void {
 
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
+  // The subtitle band closes with the app: an open one would keep it alive with no window to come back to.
+  win.on('closed', () => subtitles.close())
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
   // A reloaded (or crashed) page re-subscribes when its preview mounts.
   win.webContents.on('did-start-loading', () => live.setPreviewSubscribed(false))

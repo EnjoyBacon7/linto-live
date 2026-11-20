@@ -315,6 +315,8 @@
   width: 34px;
   padding: 0;
 }
+/* Toggle shown on (subtitle window open): accent icon. */
+.btn.btn-icon[aria-pressed='true'] { color: var(--accent); }
 
 .live-pill {
   display: inline-flex;

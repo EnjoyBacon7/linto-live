@@ -6,6 +6,14 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Ajouté
+
+- **Fenêtre de sous-titres** : un bouton à côté de la fenêtre de sortie ouvre une fenêtre sans
+  barre de titre, toujours au premier plan, qui ne montre que la bande de sous-titres (avec le
+  filigrane, sans QR code). Elle se déplace en la saisissant n'importe où, se redimensionne par ses
+  bords (le texte suit sa hauteur) et retient sa place. Sous GNOME/Wayland, le premier plan se
+  règle depuis le menu de la fenêtre.
+
 ## [0.6.2] - 2026-11-19
 
 ### Modifié

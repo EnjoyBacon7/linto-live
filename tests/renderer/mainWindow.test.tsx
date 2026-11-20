@@ -515,6 +515,47 @@ describe('Live toolbar', () => {
     await userEvent.click(btn())
     expect(api.live.showOutputWindow).toHaveBeenCalledTimes(1)
   })
+
+  it('« Afficher la fenêtre de sous-titres » sits right after the output window button, on and off air', async () => {
+    setup()
+    await renderMain()
+    for (const state of [IDLE, live()]) {
+      act(() => emit('live-state', state))
+      const buttons = screen.getAllByRole('button')
+      const output = buttons.findIndex((b) => b.getAttribute('aria-label') === 'Afficher la fenêtre de sortie')
+      const subs = buttons[output + 1]!
+      expect(subs.getAttribute('aria-label')).toBe('Afficher la fenêtre de sous-titres')
+      expect(subs.getAttribute('aria-pressed')).toBe('false')
+    }
+  })
+
+  it('the subtitle button toggles the window and follows its state', async () => {
+    setup()
+    await renderMain()
+    act(() => emit('live-state', IDLE))
+    await userEvent.click(screen.getByRole('button', { name: 'Afficher la fenêtre de sous-titres' }))
+    expect(api.subtitles.toggle).toHaveBeenCalledTimes(1)
+    act(() => emit('subtitles-window', true))
+    const btn = screen.getByRole('button', { name: 'Fermer la fenêtre de sous-titres' })
+    expect(btn.getAttribute('aria-pressed')).toBe('true')
+    act(() => emit('subtitles-window', false)) // closed by its own × or Esc
+    expect(screen.getByRole('button', { name: 'Afficher la fenêtre de sous-titres' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('the subtitle button shows the window already open at mount', async () => {
+    setup({ subtitles: { isOpen: vi.fn().mockResolvedValue(true) } })
+    await renderMain()
+    act(() => emit('live-state', IDLE))
+    expect(await screen.findByRole('button', { name: 'Fermer la fenêtre de sous-titres' })).toBeTruthy()
+  })
+
+  it('the subtitle button reports why the window cannot open yet', async () => {
+    setup({ subtitles: { toggle: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'subtitles:toggle': Error: Les sous-titres ne sont pas encore prêts.")) } })
+    await renderMain()
+    act(() => emit('live-state', IDLE))
+    await userEvent.click(screen.getByRole('button', { name: 'Afficher la fenêtre de sous-titres' }))
+    expect(await screen.findByText('Les sous-titres ne sont pas encore prêts.')).toBeTruthy()
+  })
 })
 
 describe('Terminer…', () => {

@@ -146,6 +146,12 @@ export interface LintoLiveApi {
     subscribe(): Promise<void>
     unsubscribe(): Promise<void>
   }
+  /** Borderless, always-on-top window showing only the subtitle band. */
+  subtitles: {
+    /** Opens it, or closes it when open; whether it is open now. Rejects before the subtitle server is up. */
+    toggle(): Promise<boolean>
+    isOpen(): Promise<boolean>
+  }
   on(evt: 'live-state', cb: (s: LiveState) => void): () => void
   /** Camera preview: a JPEG data URL of the OBS program output. */
   on(evt: 'preview', cb: (dataUrl: string) => void): () => void
@@ -155,6 +161,8 @@ export interface LintoLiveApi {
   on(evt: 'transcript', cb: (u: TranscriptUpdate) => void): () => void
   /** An app menu / tray command the renderer carries out (new-session, start, terminate, logout). */
   on(evt: 'command', cb: (c: AppCommand) => void): () => void
+  /** The subtitle window opened or closed (also by its own × or Esc). */
+  on(evt: 'subtitles-window', cb: (open: boolean) => void): () => void
 }
 
 export const IPC = {
@@ -195,15 +203,18 @@ export const IPC = {
   shellState: 'shell:state',
   previewSubscribe: 'preview:subscribe',
   previewUnsubscribe: 'preview:unsubscribe',
+  subtitlesToggle: 'subtitles:toggle',
+  subtitlesIsOpen: 'subtitles:is-open',
   evtLiveState: 'evt:live-state',
   evtPreview: 'evt:preview',
   evtAudioLevel: 'evt:audio-level',
   evtAuthRequired: 'evt:auth-required',
   evtCommand: 'evt:command',
-  evtTranscript: 'evt:transcript'
+  evtTranscript: 'evt:transcript',
+  evtSubtitlesWindow: 'evt:subtitles-window'
 } as const
 
-export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command' | 'transcript'
+export type EventName = 'live-state' | 'preview' | 'audio-level' | 'auth-required' | 'command' | 'transcript' | 'subtitles-window'
 
 export const EVENT_CHANNELS: Record<EventName, string> = {
   'live-state': IPC.evtLiveState,
@@ -211,7 +222,8 @@ export const EVENT_CHANNELS: Record<EventName, string> = {
   'audio-level': IPC.evtAudioLevel,
   'auth-required': IPC.evtAuthRequired,
   command: IPC.evtCommand,
-  transcript: IPC.evtTranscript
+  transcript: IPC.evtTranscript,
+  'subtitles-window': IPC.evtSubtitlesWindow
 }
 
 const VISIBILITIES: readonly unknown[] = ['private', 'organization', 'public', 'password'] satisfies NewSessionOptions['visibility'][]
@@ -334,6 +346,7 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
     },
     app: { uninstall: () => call(IPC.appUninstall), reportShellState: (s) => call(IPC.shellState, s) },
     preview: { subscribe: () => call(IPC.previewSubscribe), unsubscribe: () => call(IPC.previewUnsubscribe) },
+    subtitles: { toggle: () => call(IPC.subtitlesToggle), isOpen: () => call(IPC.subtitlesIsOpen) },
     on(evt: EventName, cb: (...a: never[]) => void): () => void {
       const channel = EVENT_CHANNELS[evt]
       const wrapper = (_e: unknown, ...args: unknown[]): void => (cb as (...a: unknown[]) => void)(...args)

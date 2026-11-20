@@ -17,3 +17,6 @@ export class SubtitleModel {
   lines(): [string, string]
   get visible(): boolean
 }
+
+/** Subtitle window: font size from the window height (2 lines × 1.2), line width minus the side margins. */
+export function windowMetrics(width: number, height: number): { fontSize: number; lineWidth: number }

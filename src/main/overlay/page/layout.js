@@ -94,3 +94,12 @@ export class SubtitleModel {
     return this._visible
   }
 }
+
+/**
+ * Subtitle window (mode=window): the band fills the window. Two lines at 1.2 × the font fill its height,
+ * with a side margin of half the font size; lineWidth is the room left for the text.
+ */
+export function windowMetrics(width, height) {
+  const fontSize = height / 2.4
+  return { fontSize, lineWidth: Math.max(1, width - fontSize) }
+}

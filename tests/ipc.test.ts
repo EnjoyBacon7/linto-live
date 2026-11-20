@@ -16,7 +16,8 @@ describe('IPC constants', () => {
         'appUninstall', 'shellState', 'evtLiveState', 'evtAudioLevel', 'evtAuthRequired', 'evtCommand', 'evtTranscript',
         'liveGetTranscript', 'liveViewTranscript', 'liveExportTranscript', 'liveSetSubtitleLanguage', 'evtPreview', 'previewSubscribe', 'previewUnsubscribe',
         'liveSetAudioMonitor', 'liveSetVirtualCam', 'setupSetBroadcast',
-        'permissionsStatus', 'permissionsRequest', 'permissionsOpenSettings', 'permissionsTestNotification', 'permissionsFinish'
+        'permissionsStatus', 'permissionsRequest', 'permissionsOpenSettings', 'permissionsTestNotification', 'permissionsFinish',
+        'subtitlesToggle', 'subtitlesIsOpen', 'evtSubtitlesWindow'
       ].sort()
     )
   })
@@ -42,6 +43,14 @@ function fake() {
 }
 
 it('sessions channel', () => { expect(IPC.sessionsList).toBe('sessions:list') })
+it('subtitle window channels', async () => {
+  const { api, invoke } = fake()
+  await api.subtitles.toggle()
+  await api.subtitles.isOpen()
+  expect(invoke).toHaveBeenCalledWith('subtitles:toggle')
+  expect(invoke).toHaveBeenCalledWith('subtitles:is-open')
+  expect(EVENT_CHANNELS['subtitles-window']).toBe('evt:subtitles-window')
+})
 it('command event channel', () => {
   expect(IPC.evtCommand).toBe('evt:command')
   expect(EVENT_CHANNELS.command).toBe('evt:command')

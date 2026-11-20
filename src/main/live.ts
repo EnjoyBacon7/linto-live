@@ -460,6 +460,11 @@ export class LiveController extends EventEmitter {
   }
 
   /** The user asked for the output window (e.g. closed it by mistake): always open one if OBS is attached. */
+  /** The overlay page (subtitle band) URL with its key; null until the overlay server is up. */
+  overlayPageUrl(): string | null {
+    return this.overlayUrl
+  }
+
   showOutputWindow(): Promise<void> {
     return this.enqueue(async () => {
       this.clearRestartedNotice()

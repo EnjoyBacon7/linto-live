@@ -1,4 +1,4 @@
-import { SubtitleModel } from './layout.js'
+import { SubtitleModel, windowMetrics } from './layout.js'
 import { WatermarkCycle, parseWatermark } from './watermark.js'
 
 const WIDTH = 1920 - 200 // canvas width minus the band's horizontal padding (overlay.css)
@@ -7,7 +7,10 @@ const TOKENS = {
   linagora: { src: '/img/linagora.png', alt: 'Linagora' }
 }
 
-const key = new URLSearchParams(location.search).get('k') || ''
+const params = new URLSearchParams(location.search)
+const key = params.get('k') || ''
+/** Subtitle window of the app (not the OBS source): the band fills the window, no QR code. */
+const windowMode = params.get('mode') === 'window'
 const band = document.getElementById('band')
 const l1 = document.getElementById('l1')
 const l2 = document.getElementById('l2')
@@ -15,11 +18,11 @@ const wm = document.getElementById('wm')
 const qr = document.getElementById('qr')
 
 const ctx = document.createElement('canvas').getContext('2d')
-const fitsAt = (size) => {
+const fitsAt = (size, width = WIDTH) => {
   const font = size + 'px Arial, sans-serif' // same stack as #band in overlay.css
   return (line) => {
     ctx.font = font
-    return ctx.measureText(line).width <= WIDTH
+    return ctx.measureText(line).width <= width
   }
 }
 let fontSize = 48
@@ -78,7 +81,7 @@ function applyQr(q) {
 }
 
 function applyStyle(m) {
-  if (typeof m.fontSize === 'number' && m.fontSize > 0 && m.fontSize !== fontSize) {
+  if (!windowMode && typeof m.fontSize === 'number' && m.fontSize > 0 && m.fontSize !== fontSize) {
     fontSize = m.fontSize
     band.style.setProperty('--fs', fontSize + 'px')
     model.setFits(fitsAt(fontSize))
@@ -88,7 +91,26 @@ function applyStyle(m) {
     renderWatermark(String(m.watermark.content ?? ''))
     cycle.update(m.watermark)
   }
-  applyQr(m.qr)
+  if (!windowMode) applyQr(m.qr)
+}
+
+/** Window mode: font and line width follow the window; the shown text is laid out again. */
+function fitWindow() {
+  const m = windowMetrics(window.innerWidth, window.innerHeight)
+  fontSize = m.fontSize
+  band.style.setProperty('--fs', fontSize + 'px')
+  model.setFits(fitsAt(fontSize, m.lineWidth))
+  render()
+}
+
+if (windowMode) {
+  document.body.classList.add('window')
+  const close = document.getElementById('close')
+  close.hidden = false
+  close.addEventListener('click', () => window.close())
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.close() })
+  window.addEventListener('resize', fitWindow)
+  fitWindow()
 }
 
 function connect() {

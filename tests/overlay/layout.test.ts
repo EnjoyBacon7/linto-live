@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { layoutText, SubtitleModel, type Layout } from '../../src/main/overlay/page/layout.js'
+import { layoutText, SubtitleModel, windowMetrics, type Layout } from '../../src/main/overlay/page/layout.js'
 
 const fits = (l: string): boolean => l.length <= 20
 const empty: Layout = { words: [], cuts: [] }
@@ -123,5 +123,17 @@ describe('caption measurement', () => {
     const cssSize = /--fs:\s*(\d+)px;/.exec(band)![1]
     expect(/let fontSize = (\d+)/.exec(js)![1]).toBe(cssSize)
     expect(/const font = size \+ 'px ([^']+)'/.exec(js)![1]).toBe(family)
+  })
+})
+
+describe('windowMetrics', () => {
+  it('police = hauteur / 2,4, largeur utile = largeur − 2 × marge (0,5 × police)', () => {
+    expect(windowMetrics(960, 120)).toEqual({ fontSize: 50, lineWidth: 910 })
+  })
+  it('suit le redimensionnement', () => {
+    expect(windowMetrics(1200, 240)).toEqual({ fontSize: 100, lineWidth: 1100 })
+  })
+  it('ne descend jamais sous 1 px de largeur utile', () => {
+    expect(windowMetrics(10, 240).lineWidth).toBe(1)
   })
 })
