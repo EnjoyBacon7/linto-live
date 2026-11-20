@@ -7,6 +7,8 @@ name: Build
 #   linux-flatpak      Flatpak (its `flatpak build-bundle` is the slowest step, ~7 min)
 #   flatpak-ubuntu-2204  the Flatpak installed on Ubuntu 22.04
 #   macos              typecheck + tests, official OBS smoke test; the dmg on tags and manual runs
+# apt downloads (.github/actions/apt-cache), the OBS compiler cache (ccache) and electron-builder's
+# downloads are cached: the runners' Ubuntu mirror is sometimes very slow.
 # Tags v*: then a GitHub release with all four packages, SHA256SUMS.txt and the notes from
 # CHANGELOG.md (scripts/release-notes.sh).
 
@@ -51,12 +53,13 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  # The OBS build (~30-45 min) only reruns when the OBS tag or the build script changes. On a cache
-  # hit this job only looks the key up (a few seconds); the packaging jobs then restore it.
+  # The OBS build only reruns when the OBS tag, the build script or the patches change. On a cache
+  # hit this job only looks the key up (a few seconds); the packaging jobs then restore it. On a miss,
+  # ccache recompiles only what the change touched (~3.5 min for a full compile).
   obs-linux:
     name: OBS build cache (ubuntu-24.04)
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 60
     outputs:
       key: ${{ steps.obs-cache.outputs.cache-primary-key }}
     steps:
@@ -70,16 +73,38 @@ jobs:
           key: obs-linux-${{ env.OBS_VERSION }}-ubuntu-24.04-x64-${{ hashFiles('scripts/build-obs-linux.sh', 'scripts/obs-linux-patches/**') }}
           lookup-only: true
 
-      - name: Free disk space
+      # The runner has ~70 GB free, far more than the build needs: no disk clean-up (it took ~2 min).
+      - name: Cache apt downloads
         if: steps.obs-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+        uses: ./.github/actions/apt-cache
+        with:
+          key: obs-build
 
+      # Keyed by run: a miss always saves the updated cache; the newest one is restored.
+      - name: Cache compiler output (ccache)
+        if: steps.obs-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-obs-linux-${{ env.OBS_VERSION }}-${{ github.run_id }}
+          restore-keys: ccache-obs-linux-${{ env.OBS_VERSION }}-
+
+      # ccache goes in through CMake's launcher variables, so the script (and the OBS cache key)
+      # stay unchanged. OBS's CMake uses precompiled headers: ccache needs the pch sloppiness.
       - name: Build OBS ${{ env.OBS_VERSION }} from source
         if: steps.obs-cache.outputs.cache-hit != 'true'
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CCACHE_MAXSIZE: 2G
+          CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
         run: |
+          # ccache itself comes with the script's build dependencies; the restored counters are
+          # dropped by hand so the stats below are this build's.
+          export CCACHE_DIR="$HOME/.ccache" CCACHE_BASEDIR="$GITHUB_WORKSPACE"
+          find "$CCACHE_DIR" -name stats -type f -delete 2>/dev/null || true
           bash scripts/build-obs-linux.sh
+          ccache --show-stats
           rm -rf vendor/cache
 
       - name: Save OBS build cache
@@ -121,8 +146,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Electron zip + electron-builder's tools (AppImage runtime, fpm, 7-Zip, ...): ~30-60 s to fetch.
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-builder-appimage-deb-${{ hashFiles('package-lock.json', 'electron-builder.yml') }}
+          restore-keys: electron-builder-appimage-deb-
+
       - name: Build AppImage + .deb
         run: npm run dist:linux:nopak
+
+      - name: Cache apt downloads
+        uses: ./.github/actions/apt-cache
+        with:
+          key: deb-install
 
       # The bundled OBS leaves host libraries (libva, PulseAudio, EGL/GL, ...) to the system; the
       # .deb declares them. Installing it with apt pulls them in, so `ldd` checks both the OBS tree
@@ -194,6 +234,11 @@ jobs:
           key: ${{ needs.obs-linux.outputs.key }}
           fail-on-cache-miss: true
 
+      - name: Cache apt downloads
+        uses: ./.github/actions/apt-cache
+        with:
+          key: flatpak-build
+
       - name: Install Flatpak tooling and runtimes
         run: |
           sudo apt-get update -qq
@@ -211,6 +256,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Electron zip + electron-builder's tools (AppImage runtime, fpm, 7-Zip, ...): ~30-60 s to fetch.
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-builder-flatpak-${{ hashFiles('package-lock.json', 'electron-builder.yml') }}
+          restore-keys: electron-builder-flatpak-
 
       - name: Build Flatpak
         run: DEBUG=@malept/flatpak-bundler npm run dist:linux:flatpak
@@ -253,6 +308,16 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
+      # Only for the local apt-cache action.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
+      - name: Cache apt downloads
+        uses: ./.github/actions/apt-cache
+        with:
+          key: flatpak-2204
+
       - uses: actions/download-artifact@v4
         with:
           name: LinTO-Live-linux-x86_64-flatpak
