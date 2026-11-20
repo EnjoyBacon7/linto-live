@@ -46,7 +46,7 @@ import {
 } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
-import { SUBTITLES_WINDOW_SIZE, SubtitlesWindow, subtitlesWindowBounds, type SubtitlesWindowHost } from './subtitlesWindow'
+import { SubtitlesWindow, electronSubtitlesHost, subtitlesWindowBounds } from './subtitlesWindow'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
@@ -129,40 +129,6 @@ function createWindow(settings: SettingsStore): BrowserWindow {
 
 function send(channel: string, payload?: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
-}
-
-/** Borderless, always-on-top window of the subtitle band (the overlay page in window mode). */
-const subtitlesWindowHost: SubtitlesWindowHost = {
-  open(url, bounds) {
-    const w = new BrowserWindow({
-      ...bounds,
-      minWidth: SUBTITLES_WINDOW_SIZE.minWidth,
-      minHeight: SUBTITLES_WINDOW_SIZE.minHeight,
-      title: 'LinTO Live — sous-titres',
-      frame: false,
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      resizable: true,
-      fullscreenable: false,
-      maximizable: false,
-      minimizable: false,
-      backgroundColor: '#000000',
-      ...(process.platform === 'linux' ? { icon: linuxIconPath() } : {}),
-      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
-    })
-    // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME on Wayland
-    // ignores it: the user picks « Toujours au premier plan » in the window's menu (README).
-    w.setAlwaysOnTop(true, 'floating')
-    if (process.platform === 'darwin') w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-    w.on('page-title-updated', (e) => e.preventDefault())
-    lockNavigation(w.webContents, url)
-    void w.loadURL(url)
-    return {
-      close: () => { if (!w.isDestroyed()) w.close() },
-      onClose: (cb) => { w.on('close', cb) },
-      bounds: () => w.getBounds()
-    }
-  }
 }
 
 /** Serves out/renderer over app://linto-live/ (see security.ts). */
@@ -565,7 +531,11 @@ function main(): void {
   ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
   ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
   const subtitles = new SubtitlesWindow({
-    host: subtitlesWindowHost,
+    host: electronSubtitlesHost(
+      (o) => new BrowserWindow(o),
+      platform,
+      platform === 'linux' ? { icon: linuxIconPath() } : {}
+    ),
     url: () => live.overlayPageUrl(),
     bounds: () => subtitlesWindowBounds(
       settings.get().subtitlesWindowBounds,
@@ -728,6 +698,8 @@ function main(): void {
 
   win = createWindow(settings)
   win.on('close', (e) => quitGuard.onWindowClose(e))
+  // The subtitle band closes with the app: an open one would keep it alive with no window to come back to.
+  win.on('closed', () => subtitles.close())
   win.webContents.on('did-finish-load', () => send(IPC.evtLiveState, live.getState()))
   // A reloaded (or crashed) page re-subscribes when its preview mounts.
   win.webContents.on('did-start-loading', () => live.setPreviewSubscribed(false))

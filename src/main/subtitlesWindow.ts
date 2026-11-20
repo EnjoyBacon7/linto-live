@@ -1,4 +1,5 @@
 import { restoreBounds } from './appLifecycle'
+import { lockNavigation } from './security'
 import type { Bounds } from '../shared/types'
 
 /** Subtitle window: a borderless, always-on-top band of the live captions (the overlay page, mode=window). */
@@ -30,10 +31,68 @@ export function subtitlesWindowBounds(saved: Bounds | undefined, displays: Bound
   }
 }
 
-/** The real window (an Electron BrowserWindow in main.ts; a fake in tests). */
+/** The real window (electronSubtitlesHost in the app; a fake in tests). */
 export interface SubtitlesWindowHost {
-  /** onClose: the window is closing (bounds still readable), whoever closed it. */
-  open(url: string, bounds: Bounds): { close(): void; onClose(cb: () => void): void; bounds(): Bounds }
+  /** onClosed: the window is gone, whoever closed it; bounds() then gives its last known bounds. */
+  open(url: string, bounds: Bounds): { close(): void; onClosed(cb: () => void): void; bounds(): Bounds }
+}
+
+/** The slice of Electron's BrowserWindow the subtitle window uses (tests inject a fake). */
+export interface SubtitlesBrowserWindow {
+  on(event: 'closed' | 'move' | 'resize', listener: () => void): unknown
+  getBounds(): Bounds
+  isDestroyed(): boolean
+  close(): void
+  setAlwaysOnTop(flag: boolean, level: 'floating'): void
+  setVisibleOnAllWorkspaces(visible: boolean, options: { visibleOnFullScreen: boolean }): void
+  loadURL(url: string): Promise<void>
+  webContents: Parameters<typeof lockNavigation>[0]
+}
+
+/**
+ * Borderless, always-on-top window of the subtitle band. A page's own window.close() (× or Esc) only emits
+ * 'closed', once the window is destroyed: the bounds are tracked on every move/resize instead of read then.
+ */
+export function electronSubtitlesHost(
+  create: (options: Record<string, unknown>) => SubtitlesBrowserWindow,
+  platform: string,
+  extra: Record<string, unknown> = {}
+): SubtitlesWindowHost {
+  return {
+    open(url, bounds) {
+      const w = create({
+        ...bounds,
+        minWidth: SUBTITLES_WINDOW_SIZE.minWidth,
+        minHeight: SUBTITLES_WINDOW_SIZE.minHeight,
+        title: 'LinTO Live — sous-titres',
+        frame: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        resizable: true,
+        fullscreenable: false,
+        maximizable: false,
+        minimizable: false,
+        backgroundColor: '#000000',
+        ...extra,
+        webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
+      })
+      // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME on Wayland
+      // ignores it: the user sets « Toujours au premier plan » from the window menu (README).
+      w.setAlwaysOnTop(true, 'floating')
+      if (platform === 'darwin') w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      let last = w.getBounds()
+      const track = (): void => { if (!w.isDestroyed()) last = w.getBounds() }
+      w.on('move', track)
+      w.on('resize', track)
+      lockNavigation(w.webContents, url)
+      void w.loadURL(url)
+      return {
+        close: () => { if (!w.isDestroyed()) w.close() },
+        onClosed: (cb) => { w.on('closed', cb) },
+        bounds: () => (w.isDestroyed() ? last : w.getBounds())
+      }
+    }
+  }
 }
 
 export const MSG_SUBTITLES_NOT_READY = 'Les sous-titres ne sont pas encore prêts.'
@@ -65,7 +124,7 @@ export class SubtitlesWindow {
     const win = this.o.host.open(subtitlesWindowUrl(url), this.o.bounds())
     this.win = win
     // Fires for every close: the toggle, quitting, or the page's own × / Esc.
-    win.onClose(() => {
+    win.onClosed(() => {
       if (this.win !== win) return
       this.win = null
       try {
