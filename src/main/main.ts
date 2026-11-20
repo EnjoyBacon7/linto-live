@@ -46,6 +46,7 @@ import {
 } from './linto/auth'
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
+import { SUBTITLES_WINDOW_SIZE, SubtitlesWindow, subtitlesWindowBounds, type SubtitlesWindowHost } from './subtitlesWindow'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
@@ -128,6 +129,40 @@ function createWindow(settings: SettingsStore): BrowserWindow {
 
 function send(channel: string, payload?: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+}
+
+/** Borderless, always-on-top window of the subtitle band (the overlay page in window mode). */
+const subtitlesWindowHost: SubtitlesWindowHost = {
+  open(url, bounds) {
+    const w = new BrowserWindow({
+      ...bounds,
+      minWidth: SUBTITLES_WINDOW_SIZE.minWidth,
+      minHeight: SUBTITLES_WINDOW_SIZE.minHeight,
+      title: 'LinTO Live — sous-titres',
+      frame: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: true,
+      fullscreenable: false,
+      maximizable: false,
+      minimizable: false,
+      backgroundColor: '#000000',
+      ...(process.platform === 'linux' ? { icon: linuxIconPath() } : {}),
+      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
+    })
+    // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME on Wayland
+    // ignores it: the user picks « Toujours au premier plan » in the window's menu (README).
+    w.setAlwaysOnTop(true, 'floating')
+    if (process.platform === 'darwin') w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    w.on('page-title-updated', (e) => e.preventDefault())
+    lockNavigation(w.webContents, url)
+    void w.loadURL(url)
+    return {
+      close: () => { if (!w.isDestroyed()) w.close() },
+      onClose: (cb) => { w.on('close', cb) },
+      bounds: () => w.getBounds()
+    }
+  }
 }
 
 /** Serves out/renderer over app://linto-live/ (see security.ts). */
@@ -529,6 +564,19 @@ function main(): void {
   })
   ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
   ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
+  const subtitles = new SubtitlesWindow({
+    host: subtitlesWindowHost,
+    url: () => live.overlayPageUrl(),
+    bounds: () => subtitlesWindowBounds(
+      settings.get().subtitlesWindowBounds,
+      screen.getAllDisplays().map((d) => d.workArea),
+      screen.getPrimaryDisplay().workArea
+    ),
+    saveBounds: (b) => settings.update({ subtitlesWindowBounds: b }),
+    onChange: (open) => send(IPC.evtSubtitlesWindow, open)
+  })
+  ipcMain.handle(IPC.subtitlesToggle, () => subtitles.toggle())
+  ipcMain.handle(IPC.subtitlesIsOpen, () => subtitles.isOpen())
   ipcMain.handle(IPC.liveClearTranscript, () => live.clearTranscript())
   ipcMain.handle(IPC.liveSetAudioMonitor, (_e, on: unknown) => {
     if (typeof on !== 'boolean') throw new Error('Réglage invalide.')
@@ -569,7 +617,10 @@ function main(): void {
   })
 
   let uninstalling = false
-  const shutdownCapped = (): Promise<void> => shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
+  const shutdownCapped = (): Promise<void> => {
+    subtitles.close() // saves its bounds (app.exit closes windows without their 'close' event)
+    return shutdownWithCap(() => live.shutdown(), () => obs.killNow(), SHUTDOWN_CAP_MS)
+  }
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> => {
     // The window may be hidden (closed during a show): bring it back so the dialog is seen.
     if (win && !win.isDestroyed() && !win.isVisible()) showWindow()
