@@ -1,0 +1,30 @@
+name: apt download cache
+description: >
+  Keeps the .deb files apt downloads in the Actions cache. The runners' Ubuntu mirror sometimes
+  crawls at 50-250 kB/s: 134 MB of OBS build dependencies once took ~10 min. Call it before any
+  apt-get install; every later apt-get in the job reads and fills the cached directory.
+inputs:
+  key:
+    description: Name of the cache (one per job, so each one only holds what that job installs)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Point apt at the cached directory
+      shell: bash
+      run: |
+        dir="$HOME/apt-archives"
+        mkdir -p "$dir/partial"
+        printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\nBinary::apt::APT::Keep-Downloaded-Packages "true";\nAcquire::Retries "3";\n' "$dir" |
+          sudo tee /etc/apt/apt.conf.d/99-ci-archive-cache >/dev/null
+        # Runner image (e.g. ubuntu24-20261110.1): a new image comes with new package versions.
+        echo "APT_CACHE_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+
+    # Only the .deb files: apt's root-owned lock file and partial/ directory cannot be archived.
+    - uses: actions/cache@v4
+      with:
+        path: ~/apt-archives/*.deb
+        key: apt-${{ inputs.key }}-${{ env.APT_CACHE_IMAGE }}-${{ hashFiles('.github/workflows/*.yml', 'scripts/build-obs-linux.sh') }}
+        restore-keys: |
+          apt-${{ inputs.key }}-${{ env.APT_CACHE_IMAGE }}-
+          apt-${{ inputs.key }}-
