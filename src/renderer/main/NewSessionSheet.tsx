@@ -71,15 +71,6 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
             options={p.profiles.map((x) => ({ value: String(x.id), label: x.name }))} onChange={(v) => setProfile(Number(v))}
             disabled={p.profiles.length === 0} />
         </label>
-        {current?.translations && current.translations.length > 0 && (
-          <fieldset className="field sheet-checks">
-            <legend className="field-label">Traductions</legend>
-            {current.translations.map((code) => (
-              <Check key={code} label={languageLabel(code)} checked={translations.includes(code)}
-                onChange={(v) => setTranslations((t) => v ? [...t, code] : t.filter((c) => c !== code))} />
-            ))}
-          </fieldset>
-        )}
         <label className="field">
           <span className="field-label">Visibilité</span>
           <PopUp label="Visibilité" value={visibility}
@@ -92,6 +83,15 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
         {visibility === 'password' && (
           <TextField label="Mot de passe" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(e) }} />
+        )}
+        {current?.translations && current.translations.length > 0 && (
+          <fieldset className="field sheet-checks">
+            <legend className="field-label">Traductions</legend>
+            {current.translations.map((code) => (
+              <Check key={code} label={languageLabel(code)} checked={translations.includes(code)}
+                onChange={(v) => setTranslations((t) => v ? [...t, code] : t.filter((c) => c !== code))} />
+            ))}
+          </fieldset>
         )}
         {p.profiles.length === 0 && (
           <p className="sheet-detail" role="note">
