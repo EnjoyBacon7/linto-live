@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeSync, renameSync, mkdirSync, openSync, fsyncSync, closeSync, existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { AppPaths } from './paths'
 import type { SavedLogin, Settings } from '../shared/types'
@@ -44,7 +44,19 @@ export class SettingsStore {
     }
   }
 
+  /** Keeps an unreadable settings file next to the original, so the next save() does not destroy it. */
+  private setAsideCorrupt(reason: unknown): void {
+    const aside = `${this.p.settingsFile}.corrupt-${Date.now()}`
+    try {
+      renameSync(this.p.settingsFile, aside)
+      console.warn(`settings.json is unreadable (${String(reason)}); kept as ${aside}, using defaults`)
+    } catch (e) {
+      console.warn('settings.json is unreadable and could not be set aside', e)
+    }
+  }
+
   private load(): Stored {
+    if (!existsSync(this.p.settingsFile)) return { instance: DEFAULT_INSTANCE }
     try {
       const j = JSON.parse(readFileSync(this.p.settingsFile, 'utf8')) as Stored & { output?: unknown; videoDeviceId?: string }
       if (j && typeof j === 'object') {
@@ -56,14 +68,24 @@ export class SettingsStore {
         }
         return { ...j, instance: j.instance || DEFAULT_INSTANCE }
       }
-    } catch { /* missing or corrupt: defaults */ }
+      this.setAsideCorrupt('not an object')
+    } catch (e) {
+      this.setAsideCorrupt(e)
+    }
     return { instance: DEFAULT_INSTANCE }
   }
 
   private save(): void {
     mkdirSync(dirname(this.p.settingsFile), { recursive: true })
     const tmp = `${this.p.settingsFile}.tmp`
-    writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600 })
+    // fsync before the rename: after a power cut the renamed file must not be empty or truncated.
+    const fd = openSync(tmp, 'w', 0o600)
+    try {
+      writeSync(fd, JSON.stringify(this.data, null, 2))
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
     renameSync(tmp, this.p.settingsFile)
   }
 
