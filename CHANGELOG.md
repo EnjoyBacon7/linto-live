@@ -6,6 +6,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Corrigé
+
+- **Plein écran de la fenêtre de sortie (Linux)** : en plein écran, la fenêtre de sortie n'a plus
+  de barre de titre (GNOME la gardait). F11 la passe en plein écran sur l'écran où elle se trouve
+  et l'en sort ; Échap quitte d'abord le plein écran au lieu de fermer la fenêtre.
+
 ## [0.7.0] - 2026-11-23
 
 ### Ajouté

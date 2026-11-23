@@ -136,7 +136,8 @@ Conseils :
 4. Ouvrir la **fenêtre de sortie** (bouton écran de la barre d'outils, ou menu Fenêtre ›
    **Afficher la fenêtre de sortie**, ⌘1 / Ctrl+1), avant ou pendant le direct : elle ne s'ouvre
    jamais seule. La glisser sur l'écran de la salle ; clic droit › « Plein écran » pour la passer en
-   plein écran sur cet écran.
+   plein écran sur cet écran. Sous Linux, F11 la passe aussi en plein écran sur l'écran où elle se
+   trouve (sans barre de titre) et l'en sort ; Échap quitte le plein écran, puis ferme la fenêtre.
 
    Pour poser les sous-titres **par-dessus autre chose** (diapositives, visio), le bouton
    sous-titres, juste à côté, ouvre une **fenêtre de sous-titres** : sans barre de titre, toujours au

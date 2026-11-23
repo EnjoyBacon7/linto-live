@@ -5,7 +5,7 @@ and its own OBS Studio 32.1.0, built from source with the browser source and obs
 system-wide; OBS runs hidden with its configuration under the app's `userData`.
 
 - OBS build script: `scripts/build-obs-linux.sh` (Ubuntu 24.04 x86_64 only), plus the small OBS
-  patch in `scripts/obs-linux-patches/`
+  patches in `scripts/obs-linux-patches/`
 - From macOS (or any Docker host): `npm run dist:linux:docker` (`scripts/build-linux-docker.sh`)
 - Electron packaging: `electron-builder.yml` (`linux` section), `npm run dist:linux`
 - CI: `.github/workflows/linux.yml` (ubuntu-24.04, OBS build cached on tag + script hash; AppImage/.deb and Flatpak built in parallel jobs)
@@ -136,8 +136,11 @@ a webcam or capture card and a microphone attached if available. Use the AppImag
       to the projector / capture screen. Close it, then Fenêtre › « Afficher la fenêtre de sortie »
       (Ctrl+1) reopens one. Arrêter leaves it open, black.
 - [ ] Right-click the output window: OBS's menu offers « Plein écran » (fullscreen on a chosen
-      screen). Pick the screen it is on and note in the PR whether it goes fullscreen there, and
-      whether Échap / the same menu brings it back to a window.
+      screen). Pick the screen it is on: it covers the whole screen with no title bar (patch 0003
+      drops the frame while fullscreen). Échap brings it back to a window with its title bar; a
+      second Échap closes it.
+- [ ] F11 on the output window makes it fullscreen, without title bar, on the screen it is on; F11
+      again brings it back to a window at its previous place and size.
 - [ ] `cat /proc/$(pgrep -f resources/obs/bin/obs | head -1)/maps | grep -c '/tmp/.mount_.*/resources/obs/lib/'`
       is > 0 and `... | grep -E 'libQt6Core|libavcodec|libobs'` only shows paths inside
       `/tmp/.mount_*/resources/obs/lib` (bundled libs are really used).
