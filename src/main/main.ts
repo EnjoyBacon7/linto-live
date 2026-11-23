@@ -551,7 +551,8 @@ function main(): void {
   const inProcessSubtitles = electronSubtitlesHost(
     (o) => new BrowserWindow(o),
     platform,
-    platform === 'linux' ? { icon: linuxIconPath() } : {}
+    platform === 'linux' ? { icon: linuxIconPath() } : {},
+    () => { void app.dock?.show() }
   )
   const subtitles = new SubtitlesWindow({
     // Wayland session: an X11 helper process, the only way GNOME keeps the window on top (subtitlesHelper.ts).
