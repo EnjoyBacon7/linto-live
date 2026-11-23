@@ -776,12 +776,16 @@ if (isSubtitlesHelper(process.argv)) {
   // The X11 subtitle window of a Wayland session (subtitlesHelper.ts): no OBS, no main window, no instance
   // lock; its own Chromium storage so it never contends with the app's.
   app.setPath('sessionData', join(app.getPath('userData'), 'subtitles-window'))
-  void app.whenReady().then(() => runSubtitlesHelper({
-    input: process.stdin,
-    write: (line) => { process.stdout.write(line) },
-    host: electronSubtitlesHost((o) => new BrowserWindow(o), process.platform, { icon: linuxIconPath() }),
-    quit: () => app.quit()
-  }))
+  void app.whenReady().then(() => {
+    // Same hardening as the app's own session (main()): the overlay page gets no web permissions.
+    denyAllPermissions(session.defaultSession)
+    runSubtitlesHelper({
+      input: process.stdin,
+      write: (line) => { process.stdout.write(line) },
+      host: electronSubtitlesHost((o) => new BrowserWindow(o), process.platform, { icon: linuxIconPath() }),
+      quit: () => app.quit()
+    })
+  })
   app.on('window-all-closed', () => app.quit())
 } else if (acquireSingleInstance(app, () => focusWindow(win))) {
   // A second instance would start a second OBS on the same profile: it quits before booting anything.
