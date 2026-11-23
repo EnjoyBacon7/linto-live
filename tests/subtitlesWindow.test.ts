@@ -111,9 +111,9 @@ class FakeBrowserWindow extends EventEmitter implements SubtitlesBrowserWindow {
 }
 
 describe('electronSubtitlesHost', () => {
-  function make() {
+  function make(platform = 'darwin', showDock = vi.fn()) {
     const wins: FakeBrowserWindow[] = []
-    const host = electronSubtitlesHost((o) => { const w = new FakeBrowserWindow(o); wins.push(w); return w }, 'darwin')
+    const host = electronSubtitlesHost((o) => { const w = new FakeBrowserWindow(o); wins.push(w); return w }, platform, {}, showDock)
     const saveBounds = vi.fn()
     const onChange = vi.fn()
     const sw = new SubtitlesWindow({ host, url: () => 'http://127.0.0.1:5000/?k=abc', bounds: () => DEFAULT, saveBounds, onChange })
@@ -127,6 +127,22 @@ describe('electronSubtitlesHost', () => {
     expect(w.setAlwaysOnTop).toHaveBeenCalledWith(true, 'floating')
     expect(w.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(true, { visibleOnFullScreen: true })
     expect(w.loadURL).toHaveBeenCalledWith('http://127.0.0.1:5000/?k=abc&mode=window')
+  })
+  it('macOS: the Dock icon and menu bar are restored when the window closes (not before); not called elsewhere', () => {
+    const showDock = vi.fn()
+    const t = make('darwin', showDock)
+    t.sw.toggle()
+    expect(showDock).not.toHaveBeenCalled()
+    t.sw.toggle()
+    expect(showDock).toHaveBeenCalledTimes(1)
+    t.sw.toggle()
+    t.wins[1]!.closeFromPage()
+    expect(showDock).toHaveBeenCalledTimes(2)
+    const other = vi.fn()
+    const l = make('linux', other)
+    l.sw.toggle()
+    l.sw.toggle()
+    expect(other).not.toHaveBeenCalled()
   })
   it('closed by its own × or Esc (only "closed"): state, last bounds and the change all follow, and it reopens', () => {
     const t = make()

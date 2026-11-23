@@ -26,6 +26,7 @@ const setupData = (over: Partial<SetupData['settings']> = {}, extra: Partial<Set
   videoDevices: [{ id: 'v1', name: 'Capture HDMI' }, { id: 'v2', name: 'FaceTime HD' }],
   audioDevices: [{ id: 'a1', name: 'Micro USB' }],
   watermarkEnabled: true,
+  defaultRecordDir: '/Users/x/Movies/LinTO Live',
   ...extra
 })
 
@@ -1354,7 +1355,7 @@ describe('Enregistrement', () => {
     setup({ setup: { pickFolder: vi.fn().mockResolvedValue('/Users/x/Rec') } as never })
     await renderMain()
     await openSection('Enregistrement et diffusion')
-    expect(screen.getByText('Vidéos (Films sur macOS) › LinTO Live')).toBeTruthy()
+    expect(screen.getByTitle('/Users/x/Movies/LinTO Live')).toBeTruthy()
     await userEvent.click(within(screen.getByRole('region', { name: 'Enregistrement' })).getByRole('button', { name: 'Choisir…' }))
     expect(api.setup.pickFolder).toHaveBeenCalled()
     expect(api.setup.save).toHaveBeenCalledWith({ recordDir: '/Users/x/Rec' })

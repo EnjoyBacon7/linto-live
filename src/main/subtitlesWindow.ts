@@ -56,7 +56,9 @@ export interface SubtitlesBrowserWindow {
 export function electronSubtitlesHost(
   create: (options: Record<string, unknown>) => SubtitlesBrowserWindow,
   platform: string,
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  /** macOS: brings the Dock icon and menu bar back (app.dock.show) when the window closes; see below. */
+  showDock: () => void = () => {}
 ): SubtitlesWindowHost {
   return {
     open(url, bounds) {
@@ -76,10 +78,15 @@ export function electronSubtitlesHost(
         ...extra,
         webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
       })
-      // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME on Wayland
-      // ignores it: the user sets « Toujours au premier plan » from the window menu (README).
+      // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME ignores it for
+      // a native Wayland window: in a Wayland session this window is opened by the X11 helper (subtitlesHelper.ts).
       w.setAlwaysOnTop(true, 'floating')
-      if (platform === 'darwin') w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      if (platform === 'darwin') {
+        w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+        // That call turns the app into a UIElement (no Dock icon, no menu bar): intentional while the band is
+        // open, it is what lets it float over another app's full-screen Space. Restored once the window is gone.
+        w.on('closed', showDock)
+      }
       let last = w.getBounds()
       const track = (): void => { if (!w.isDestroyed()) last = w.getBounds() }
       w.on('move', track)

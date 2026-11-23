@@ -13,6 +13,24 @@ let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ls-')) })
 
 describe('SettingsStore', () => {
+  it('a corrupt settings.json is kept aside (not overwritten) and defaults are used', () => {
+    const p = appPaths(dir, 'linux')
+    const bad = '{"instance":"https://x.example","recordDir":"/a","org":"o"'
+    writeFileSync(p.settingsFile, bad)
+    const s = new SettingsStore(p, crypto)
+    expect(s.get()).toEqual({ instance: 'https://studio.linto.ai' })
+    s.update({ theme: 'dark' } as never)
+    const aside = readdirSync(dir).filter((f) => f.startsWith('settings.json.corrupt-'))
+    expect(aside).toHaveLength(1)
+    expect(readFileSync(join(dir, aside[0]!), 'utf8')).toBe(bad)
+    expect(JSON.parse(readFileSync(p.settingsFile, 'utf8'))).toMatchObject({ theme: 'dark' })
+    expect(statSync(p.settingsFile).mode & 0o777).toBe(0o600)
+  })
+  it('a missing settings.json is not a corruption', () => {
+    const p = appPaths(dir, 'linux')
+    new SettingsStore(p, crypto).update({ theme: 'dark' } as never)
+    expect(readdirSync(dir).filter((f) => f.includes('corrupt'))).toEqual([])
+  })
   it('without a real keychain the token stays in memory only, and an old stored one is dropped', () => {
     const p = appPaths(dir, 'linux')
     new SettingsStore(p, crypto).setToken('OLD-TOKEN')

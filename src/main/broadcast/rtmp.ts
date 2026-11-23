@@ -192,9 +192,14 @@ export class RtmpPublisher {
         ? tlsConnect({ host: t.host, port: t.port, servername: t.host }, () => resolve(s))
         : netConnect({ host: t.host, port: t.port }, () => resolve(s))
       s.once('error', reject)
+      this.socket = s // known while connecting, so destroy() on a timeout can kill it
+      if (this.closed) s.destroy()
     })
+    if (this.closed) {
+      sock.destroy()
+      throw new Error('session fermée.')
+    }
     sock.setNoDelay(true)
-    this.socket = sock
     await this.handshake(sock)
     sock.on('data', (d: Buffer) => this.onData(d))
     sock.on('error', (e) => this.finish(new Error(`connexion au serveur de diffusion perdue (${e.message}).`)))

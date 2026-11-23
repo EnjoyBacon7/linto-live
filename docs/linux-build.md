@@ -5,15 +5,18 @@ and its own OBS Studio 32.1.0, built from source with the browser source and obs
 system-wide; OBS runs hidden with its configuration under the app's `userData`.
 
 - OBS build script: `scripts/build-obs-linux.sh` (Ubuntu 24.04 x86_64 only), plus the small OBS
-  patch in `scripts/obs-linux-patches/`
+  patches in `scripts/obs-linux-patches/`
 - From macOS (or any Docker host): `npm run dist:linux:docker` (`scripts/build-linux-docker.sh`)
-- Electron packaging: `electron-builder.yml` (`linux` section), `npm run dist:linux`
+- Electron packaging: `electron-builder.yml` (`linux` section), `npm run dist:linux` (AppImage, `.deb` and Flatpak; `npm run dist:linux:nopak` for AppImage and `.deb` only)
 - CI: `.github/workflows/linux.yml` (ubuntu-24.04, OBS build cached on tag + script hash; AppImage/.deb and Flatpak built in parallel jobs)
 - Provenance / license: `resources/obs/SOURCE.md`, `resources/obs/COPYING` in the package
 
 ## Building locally (Ubuntu 24.04 x86_64)
 
 Needs ~15 GB of free disk, 30-60 min for the OBS build on 4 cores, `sudo` for apt.
+`npm run dist:linux` also builds the Flatpak, which needs `flatpak` and `flatpak-builder` (`sudo apt install flatpak flatpak-builder`)
+and the Freedesktop runtime, SDK and Electron BaseApp 25.08 from Flathub (see `.github/workflows/linux.yml`, step
+"Install Flatpak tooling and runtimes"). Without them, use `npm run dist:linux:nopak`.
 
 ```bash
 git clone <this repo> linto-live && cd linto-live
@@ -23,7 +26,8 @@ bash scripts/build-obs-linux.sh          # apt deps + OBS build -> vendor/obs/li
 # Node 22 (e.g. via nvm), then:
 npm ci
 npm test
-npm run dist:linux                       # -> dist/LinTO-Live-<version>-x86_64.AppImage + -amd64.deb
+npm run dist:linux                       # -> dist/LinTO-Live-<version>-x86_64.AppImage + -amd64.deb + -x86_64.flatpak
+# or, without Flatpak tooling: npm run dist:linux:nopak   (AppImage + .deb only)
 ```
 
 `vendor/` and `dist/` are git-ignored. Delete `vendor/cache/obs-linux-build` after a successful
@@ -38,7 +42,7 @@ npm run dist:linux:docker                # -> dist/LinTO-Live-<version>-x86_64.A
 `scripts/build-linux-docker.sh` does the same as above inside an Ubuntu 24.04 x86_64 container:
 an image with the OBS build dependencies and Node (`linto-live-linux-build`, ~3 GB in Docker's
 disk), then `build-obs-linux.sh` into `vendor/obs/linux` (bind mount), then `npm ci`, typecheck,
-unit tests and `dist:linux` on a copy of the repo in `vendor/cache/linux-work` (the Mac's
+unit tests and `dist:linux:nopak` (no Flatpak: flatpak-builder needs bubblewrap, unavailable in an unprivileged container) on a copy of the repo in `vendor/cache/linux-work` (the Mac's
 `node_modules` is never touched). On Apple silicon everything runs under Rosetta: about an hour
 for the first OBS build, ~10 min for later runs (`SKIP_OBS=1` skips the OBS step).
 
@@ -63,11 +67,17 @@ What can and cannot be checked under emulation (Docker Desktop's Rosetta, Apple 
 2. Clones obs-studio at tag `32.1.0`, checks the commit is
    `5533a277e4400203b50114c993f89878d50a27b9`, fetches the `obs-browser` and `obs-websocket`
    submodules, checks the `COPYING` checksum, applies `scripts/obs-linux-patches/*.patch`
-   (idempotent) and later ships them in `patches/` next to `COPYING`. The only patch:
-   `--minimize-to-tray` keeps OBS's main window hidden even without a system tray. Upstream only
-   hides it when a tray is available, so on GNOME without the AppIndicator extension (Fedora,
-   Debian...) or under Xvfb, OBS's main window would appear. The app also seeds
-   `SysTrayEnabled=false` on Linux, so no OBS icon shows up in the panel either.
+   (idempotent) and later ships them in `patches/` next to `COPYING`. The patches:
+   - `0001-minimize-to-tray-without-tray.patch`: `--minimize-to-tray` keeps OBS's main window hidden even without a system tray. Upstream only
+     hides it when a tray is available, so on GNOME without the AppIndicator extension (Fedora,
+     Debian...) or under Xvfb, OBS's main window would appear. The app also seeds
+     `SysTrayEnabled=false` on Linux, so no OBS icon shows up in the panel either.
+   - `0002-screencast-portal-on-ui-thread.patch`: the ScreenCast portal (Wayland screen capture) is
+     always started on OBS's UI thread, the only one that iterates the GLib main context delivering
+     the portal's D-Bus replies; otherwise a capture created through obs-websocket stays black.
+   - `0003-projector-fullscreen-frameless-f11.patch`: a full-screen projector (the output window)
+     drops its title bar, which GNOME/Mutter kept through XWayland, and gets it back as a window;
+     F11 toggles full screen on the current screen, and Escape leaves full screen before closing.
 3. Downloads OBS's prebuilt CEF for Linux (`cef_binary_6533_linux_x86_64_v6.tar.xz`) and verifies
    the SHA-256 pinned in obs-studio's `CMakePresets.json` at that tag.
 4. Configures with the upstream `ubuntu` preset, overridden to: Release,
@@ -136,8 +146,11 @@ a webcam or capture card and a microphone attached if available. Use the AppImag
       to the projector / capture screen. Close it, then Fenêtre › « Afficher la fenêtre de sortie »
       (Ctrl+1) reopens one. Arrêter leaves it open, black.
 - [ ] Right-click the output window: OBS's menu offers « Plein écran » (fullscreen on a chosen
-      screen). Pick the screen it is on and note in the PR whether it goes fullscreen there, and
-      whether Échap / the same menu brings it back to a window.
+      screen). Pick the screen it is on: it covers the whole screen with no title bar (patch 0003
+      drops the frame while fullscreen). Échap brings it back to a window with its title bar; a
+      second Échap closes it.
+- [ ] F11 on the output window makes it fullscreen, without title bar, on the screen it is on; F11
+      again brings it back to a window at its previous place and size.
 - [ ] `cat /proc/$(pgrep -f resources/obs/bin/obs | head -1)/maps | grep -c '/tmp/.mount_.*/resources/obs/lib/'`
       is > 0 and `... | grep -E 'libQt6Core|libavcodec|libobs'` only shows paths inside
       `/tmp/.mount_*/resources/obs/lib` (bundled libs are really used).

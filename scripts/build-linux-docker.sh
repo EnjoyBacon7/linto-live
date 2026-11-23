@@ -25,6 +25,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMAGE=linto-live-linux-build
 WORK_HOST="$ROOT/vendor/cache/linux-work"
 NODE_VERSION=22.12.0
+# SHA-256 of node-v$NODE_VERSION-linux-x64.tar.xz, from https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt
+NODE_SHA256=22982235e1b71fa8850f82edd09cdae7e3f32df1764a9ec298c72d25ef2c164f
 
 command -v docker >/dev/null || { echo "docker not found" >&2; exit 1; }
 
@@ -35,8 +37,9 @@ FROM ubuntu:24.04
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo rsync >/dev/null
 COPY build-obs-linux.sh /tmp/build-obs-linux.sh
 RUN DEPS_ONLY=1 bash /tmp/build-obs-linux.sh && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz \
-    | tar -xJ -C /usr/local --strip-components 1 && node --version
+RUN curl -fsSL -o /tmp/node.tar.xz https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz \
+    && echo "$NODE_SHA256  /tmp/node.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components 1 && rm /tmp/node.tar.xz && node --version
 EOF
 
 if [[ -z "${SKIP_OBS:-}" ]]; then

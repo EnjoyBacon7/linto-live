@@ -68,12 +68,22 @@ export class OverlayServer {
     server.on('upgrade', (req, socket, head) => {
       const reject = (): void => { socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); socket.destroy() }
       const port = (server.address() as AddressInfo).port
-      const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
+      let url: URL
+      try {
+        url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
+      } catch {
+        socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
+        socket.destroy()
+        return
+      }
       const origin = req.headers.origin
       if (url.pathname !== '/ws') return reject()
       if (origin !== undefined && origin !== `http://127.0.0.1:${port}`) return reject()
       if (!safeEqual(url.searchParams.get('k') ?? '', this.token)) return reject()
+      socket.on('error', () => socket.destroy())
       wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+        // A malformed frame (RSV bits, bad opcode...) emits 'error': unhandled, it would crash the main process.
+        ws.on('error', () => ws.terminate())
         if (this.lastStyle !== null) ws.send(this.lastStyle)
         ws.send(JSON.stringify({ type: 'reset' }))
         if (this.lastFinal !== null) ws.send(this.lastFinal)

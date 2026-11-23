@@ -4,7 +4,7 @@ import type { WatermarkConfig } from '../../shared/types'
 export interface LintoUrls { instance: string; api: string; auth: string; wsUrl: string; wsPath: string }
 
 function findKey(js: string, key: string): string | undefined {
-  const m = new RegExp(`["']?${key}["']?\\s*:\\s*(["'])((?:\\\\.|(?!\\1).)*)\\1`).exec(js)
+  const m = new RegExp(`["']?${key}["']?\\s*:\\s*(["'])((?:\\\\.|(?!\\1)[^\\\\\\n\\r\\u2028\\u2029])*)\\1`).exec(js)
   return m?.[2]
 }
 

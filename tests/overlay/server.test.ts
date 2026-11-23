@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { resolve } from 'node:path'
+import { connect as netConnect } from 'node:net'
 import WebSocket from 'ws'
 import { OverlayServer } from '../../src/main/overlay/server'
 
@@ -127,5 +128,48 @@ describe('OverlayServer', () => {
     expect(r.headers.get('content-type')).toContain('text/javascript')
     expect(await r.text()).toContain('SubtitleModel')
     expect((await fetch(new URL('/layout.js', url))).status).toBe(200)
+  })
+
+  const upgrade = (path: string): string =>
+    `GET ${path} HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`
+
+  it('an upgrade request with an unparsable target (//) is rejected without throwing', async () => {
+    srv = new OverlayServer({ pageDir })
+    const { url } = await srv.start()
+    const errs: unknown[] = []
+    const h = (e: unknown): void => { errs.push(e) }
+    process.on('uncaughtException', h)
+    try {
+      const reply = await new Promise<string>((res) => {
+        const s = netConnect(Number(new URL(url).port), '127.0.0.1', () => s.write(upgrade('//')))
+        let got = ''
+        s.on('data', (d) => { got += d })
+        s.on('close', () => res(got))
+        s.on('error', () => undefined)
+      })
+      expect(reply).toContain('400')
+      await new Promise((r) => setTimeout(r, 50))
+    } finally { process.off('uncaughtException', h) }
+    expect(errs).toEqual([])
+  })
+
+  it('a malformed frame from an authenticated client does not raise an uncaught exception', async () => {
+    srv = new OverlayServer({ pageDir })
+    const { url } = await srv.start()
+    const u = new URL(url)
+    const errs: unknown[] = []
+    const h = (e: unknown): void => { errs.push(e) }
+    process.on('uncaughtException', h)
+    try {
+      await new Promise<void>((res) => {
+        const s = netConnect(Number(u.port), '127.0.0.1', () => s.write(upgrade(`/ws?k=${u.searchParams.get('k')}`)))
+        let sent = false
+        s.on('data', () => { if (!sent) { sent = true; s.write(Buffer.from([0xc1, 0x80, 0, 0, 0, 0])) } })
+        s.on('close', () => res())
+        s.on('error', () => undefined)
+      })
+      await new Promise((r) => setTimeout(r, 50))
+    } finally { process.off('uncaughtException', h) }
+    expect(errs).toEqual([])
   })
 })

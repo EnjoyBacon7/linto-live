@@ -307,6 +307,7 @@ export function Inspector(p: InspectorProps) {
   // The broadcast wins when both are set (OBS has one output for them): the inspector shows it that way.
   const broadcasting = settings?.broadcastEnabled === true
   const recording = settings?.recordEnabled === true && !broadcasting
+  const recordDir = settings?.recordDir || data?.defaultRecordDir
   const hasServer = isBroadcastServer(settings?.broadcastServer)
   const host = hasServer ? broadcastHost(settings!.broadcastServer!) : null
   const showWatermark = !!data?.watermarkEnabled && shown
@@ -429,9 +430,8 @@ export function Inspector(p: InspectorProps) {
             <Radio name="output" label="Enregistrer le direct" checked={recording} disabled={!settings}
               onSelect={() => onChange({ recordEnabled: true, broadcastEnabled: false })} />
             <div className="insp-detail">
-              <span className={settings?.recordDir ? 'inspector-value inspector-path' : 'inspector-value inspector-path is-empty'}
-                title={settings?.recordDir}>
-                {settings?.recordDir ? <MiddleEllipsis text={settings.recordDir} /> : 'Vidéos (Films sur macOS) › LinTO Live'}
+              <span className="inspector-value inspector-path" title={recordDir}>
+                {recordDir && <MiddleEllipsis text={recordDir} />}
               </span>
               <Button className="insp-small-btn" disabled={!settings} title="Dossier des enregistrements" onClick={() => {
                 void window.lintoLive.setup.pickFolder().then((dir) => { if (dir) onChange({ recordDir: dir }) }, () => {})

@@ -48,3 +48,13 @@ describe('electron-builder.yml', () => {
     ]) expect(block).toMatch(new RegExp(`\\n  ${l}\\n`))
   })
 })
+
+describe('scripts/build-linux-docker.sh', () => {
+  const sh = readFileSync(join(__dirname, '..', 'scripts', 'build-linux-docker.sh'), 'utf8')
+  it('verifies a pinned SHA-256 of the Node tarball before extracting it', () => {
+    expect(sh).toMatch(/^NODE_SHA256=[0-9a-f]{64}$/m)
+    expect(sh).toContain('sha256sum -c')
+    expect(sh).not.toMatch(/nodejs\.org[^\n]*\n\s*\| tar/)
+    expect(sh.indexOf('sha256sum -c')).toBeLessThan(sh.indexOf('tar -xJf'))
+  })
+})

@@ -134,7 +134,7 @@ describe('loadSetupData and rights', () => {
       profiles: vi.fn().mockResolvedValue([{ id: 7, name: 'P' }]),
       devices: vi.fn().mockResolvedValue({ videoDevices: [], audioDevices: [] }),
       saveSettings: vi.fn(async (p) => { s = { ...s, ...p } }),
-      onUnauthorized: vi.fn(), watermarkEnabled: () => false, saved: () => s, ...over
+      onUnauthorized: vi.fn(), watermarkEnabled: () => false, defaultRecordDir: '/v/LinTO Live', saved: () => s, ...over
     }
   }
   it('profiles refused (role below quick meeting): empty list, the rest still loads', async () => {

@@ -6,6 +6,34 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.7.1] - 2026-11-23
+
+### Corrigé
+
+- **Plein écran de la fenêtre de sortie (Linux)** : en plein écran, la fenêtre de sortie n'a plus
+  de barre de titre (GNOME la gardait). F11 la passe en plein écran sur l'écran où elle se trouve
+  et l'en sort ; Échap quitte d'abord le plein écran au lieu de fermer la fenêtre.
+- **Fenêtre de sous-titres toujours au premier plan sous GNOME en session Wayland** : GNOME
+  ignorait la demande, il fallait passer par Alt+Espace › « Toujours au premier plan ». La fenêtre
+  s'ouvre désormais dans un petit processus X11 (XWayland), que GNOME laisse au premier plan ; sa
+  position est aussi retenue. Sans XWayland, elle s'ouvre comme avant.
+- **Dossier d'enregistrement** : le réglage affiche le vrai chemin utilisé par défaut.
+- **macOS : icône du Dock et barre de menus** : ouvrir la fenêtre de sous-titres les faisait
+  disparaître jusqu'au redémarrage de l'application. Elles reviennent à la fermeture de la fenêtre
+  (pendant qu'elle est ouverte, elles restent masquées : c'est ce qui la laisse flotter au-dessus
+  d'une application en plein écran).
+- **Transcription longue plus fluide** : au-delà de 5 000 segments, chaque nouvelle phrase ne
+  reconstruit plus toute la liste affichée.
+- **Défilement de la transcription** : après « Effacer la transcription » ou un changement de
+  session, le texte suit de nouveau le direct sans cliquer « Revenir au direct ».
+- **Correction des noms propres** : beaucoup plus rapide avec une longue liste de noms (elle
+  pouvait bloquer l'application plusieurs centaines de millisecondes par phrase).
+- **Robustesse** : une instance LinTO dont le `config.js` est malformé ne peut plus bloquer
+  l'application ; le serveur local des sous-titres résiste aux requêtes invalides ; une connexion
+  de diffusion qui aboutit après le délai d'attente est bien fermée ; un `settings.json` illisible
+  est mis de côté (`settings.json.corrupt-…`) au lieu d'être écrasé, et les réglages sont écrits
+  de façon plus sûre.
+
 ## [0.7.0] - 2026-11-23
 
 ### Ajouté
@@ -260,6 +288,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.7.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.0...v0.6.1
