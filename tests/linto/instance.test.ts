@@ -40,3 +40,18 @@ describe('loadInstance', () => {
     await expect(loadInstance('https://x.org', f)).rejects.toThrow(/404/)
   })
 })
+
+describe('findKey ReDoS (A-001)', () => {
+  it('returns promptly on an unterminated value full of backslashes', () => {
+    const hostile = `VUE_APP_CONVO_API: "${'\\'.repeat(60)}`
+    const t = Date.now()
+    expect(() => parseConfigJs('https://x.test', hostile)).toThrow(/introuvable/)
+    expect(Date.now() - t).toBeLessThan(200)
+  })
+
+  it('still reads escaped quotes inside a value', () => {
+    const cfg = (v: string): string =>
+      `VUE_APP_CONVO_API: "${v}", VUE_APP_CONVO_AUTH: '/a', VUE_APP_SESSION_WS: '/w', VUE_APP_SESSION_WS_PATH: '/p'`
+    expect(parseConfigJs('https://x.test', cfg('/a\\"b')).api).toBe('https://x.test/a\\"b')
+  })
+})
