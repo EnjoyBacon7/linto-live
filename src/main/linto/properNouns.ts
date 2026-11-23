@@ -126,6 +126,8 @@ export function createNameCorrector(names: readonly string[], common: ReadonlySe
       start: number; end: number; len: number; words: number; name: string; replacement: string; distance: number; original: string; spelled: number
     }[] = []
     for (let i = 0; i < toks.length; i++) {
+      // The window's code depends on (i, len) only, not on the name: encode each window once per token.
+      const codes: string[] = []
       for (const e of entries) {
         const maxLen = Math.min(e.words + 2, toks.length - i)
         for (let len = 1; len <= maxLen; len++) {
@@ -134,7 +136,7 @@ export function createNameCorrector(names: readonly string[], common: ReadonlySe
           if (FUNCTION_WORDS.has(win[0].key) || FUNCTION_WORDS.has(win[len - 1].key)) continue
           // A single everyday word (« macro », « tierce ») is never a name.
           if (len === 1 && isCommon(win[0].key)) continue
-          const c = phoneticCode(win.map((t) => t.word).join(''))
+          const c = (codes[len] ??= phoneticCode(win.map((t) => t.word).join('')))
           const short = e.code.length < MIN_FUZZY_CODE
           const allowed = short ? 1 : Math.floor(e.code.length * MAX_RATIO)
           if (Math.abs(c.length - e.code.length) > allowed) continue
