@@ -2,6 +2,7 @@ import {
   app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, Notification, protocol, safeStorage, screen, session,
   shell, systemPreferences, Tray
 } from 'electron'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -47,6 +48,9 @@ import {
 import { OverlayServer } from './overlay/server'
 import { LiveController } from './live'
 import { SubtitlesWindow, electronSubtitlesHost, subtitlesWindowBounds } from './subtitlesWindow'
+import {
+  helperSubtitlesHost, isSubtitlesHelper, needsSubtitlesHelper, runSubtitlesHelper, subtitlesHelperCommand
+} from './subtitlesHelper'
 import { RENDERER_SCHEME, denyAllPermissions, lockNavigation, rendererEntry, rendererFilePath } from './security'
 import { loadSetupData, toSessionSummaries } from './setupData'
 import {
@@ -73,6 +77,18 @@ let win: BrowserWindow | null = null
 let tray: Tray | null = null
 /** Linux: the desktop runs a StatusNotifierWatcher, so the tray icon is really there (systemChecks.ts). */
 let linuxTrayShown = false
+
+/** Starts the X11 subtitle-window helper: this same app, see subtitlesHelper.ts. */
+function spawnSubtitlesHelper(): ChildProcess {
+  const { command, args } = subtitlesHelperCommand({
+    execPath: process.execPath,
+    appPath: app.isPackaged ? null : app.getAppPath(),
+    flatpak: !!process.env.FLATPAK_ID
+  })
+  const env = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
+  return spawn(command, args, { env, stdio: ['pipe', 'pipe', 'inherit'] })
+}
 
 /** Linux window / About icon (macOS uses the bundle's icon). */
 const linuxIconPath = (): string =>
@@ -532,12 +548,16 @@ function main(): void {
   })
   ipcMain.handle(IPC.previewSubscribe, () => live.setPreviewSubscribed(true))
   ipcMain.handle(IPC.previewUnsubscribe, () => live.setPreviewSubscribed(false))
+  const inProcessSubtitles = electronSubtitlesHost(
+    (o) => new BrowserWindow(o),
+    platform,
+    platform === 'linux' ? { icon: linuxIconPath() } : {}
+  )
   const subtitles = new SubtitlesWindow({
-    host: electronSubtitlesHost(
-      (o) => new BrowserWindow(o),
-      platform,
-      platform === 'linux' ? { icon: linuxIconPath() } : {}
-    ),
+    // Wayland session: an X11 helper process, the only way GNOME keeps the window on top (subtitlesHelper.ts).
+    host: needsSubtitlesHelper(platform, isWaylandSession(process.env))
+      ? helperSubtitlesHost({ spawn: spawnSubtitlesHelper, fallback: inProcessSubtitles })
+      : inProcessSubtitles,
     url: () => live.overlayPageUrl(),
     bounds: () => subtitlesWindowBounds(
       settings.get().subtitlesWindowBounds,
@@ -751,8 +771,19 @@ app.setName('LinTO Live')
 protocol.registerSchemesAsPrivileged([
   { scheme: RENDERER_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }
 ])
-// A second instance would start a second OBS on the same profile: it quits before booting anything.
-if (acquireSingleInstance(app, () => focusWindow(win))) {
+if (isSubtitlesHelper(process.argv)) {
+  // The X11 subtitle window of a Wayland session (subtitlesHelper.ts): no OBS, no main window, no instance
+  // lock; its own Chromium storage so it never contends with the app's.
+  app.setPath('sessionData', join(app.getPath('userData'), 'subtitles-window'))
+  void app.whenReady().then(() => runSubtitlesHelper({
+    input: process.stdin,
+    write: (line) => { process.stdout.write(line) },
+    host: electronSubtitlesHost((o) => new BrowserWindow(o), process.platform, { icon: linuxIconPath() }),
+    quit: () => app.quit()
+  }))
+  app.on('window-all-closed', () => app.quit())
+} else if (acquireSingleInstance(app, () => focusWindow(win))) {
+  // A second instance would start a second OBS on the same profile: it quits before booting anything.
   void app.whenReady().then(main)
   app.on('window-all-closed', () => app.quit())
 }

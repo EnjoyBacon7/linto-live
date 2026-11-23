@@ -76,8 +76,8 @@ export function electronSubtitlesHost(
         ...extra,
         webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
       })
-      // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME on Wayland
-      // ignores it: the user sets « Toujours au premier plan » from the window menu (README).
+      // Above other apps' windows, including (macOS) full-screen ones and on every Space. GNOME ignores it for
+      // a native Wayland window: in a Wayland session this window is opened by the X11 helper (subtitlesHelper.ts).
       w.setAlwaysOnTop(true, 'floating')
       if (platform === 'darwin') w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
       let last = w.getBounds()

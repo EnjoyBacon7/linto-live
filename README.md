@@ -143,9 +143,9 @@ Conseils :
    sous-titres, juste à côté, ouvre une **fenêtre de sous-titres** : sans barre de titre, toujours au
    premier plan, elle ne montre que la bande (sans QR code). La saisir n'importe où pour la
    déplacer, tirer ses bords pour la redimensionner (le texte suit sa hauteur) ; la croix qui
-   apparaît au survol, la touche Échap ou le même bouton la ferment. Sa place est retenue. Sous
-   **GNOME en session Wayland**, une application ne peut pas se mettre d'elle-même au premier plan :
-   la sélectionner puis Alt+Espace › « Toujours au premier plan ».
+   apparaît au survol, la touche Échap ou le même bouton la ferment. Sa place est retenue. En
+   **session Wayland**, elle passe par XWayland (GNOME ne laisse pas une fenêtre Wayland se mettre
+   d'elle-même au premier plan).
 5. **Démarrer** (⌘↩ / Ctrl+Entrée) : les sous-titres apparaissent sur la vidéo.
 6. **Arrêter** (⌘. / Ctrl+.) coupe les sous-titres et l'envoi du son **sans terminer** la session
    LinTO, qui peut être reprise plus tard ; la fenêtre de sortie reste ouverte, sur la caméra.

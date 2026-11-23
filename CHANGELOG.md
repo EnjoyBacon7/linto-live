@@ -12,6 +12,11 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   de barre de titre (GNOME la gardait). F11 la passe en plein écran sur l'écran où elle se trouve
   et l'en sort ; Échap quitte d'abord le plein écran au lieu de fermer la fenêtre.
 
+- **Fenêtre de sous-titres toujours au premier plan sous GNOME en session Wayland** : GNOME
+  ignorait la demande, il fallait passer par Alt+Espace › « Toujours au premier plan ». La fenêtre
+  s'ouvre désormais dans un petit processus X11 (XWayland), que GNOME laisse au premier plan ; sa
+  position est aussi retenue. Sans XWayland, elle s'ouvre comme avant.
+
 ## [0.7.0] - 2026-11-23
 
 ### Ajouté
