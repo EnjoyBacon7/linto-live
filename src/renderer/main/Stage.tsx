@@ -168,6 +168,11 @@ export function Stage({ onAir, hasCamera, sessionName, sessionId, banners }: Sta
   const followingRef = useRef(true)
   const empty = t.finals.length === 0 && !t.partial
 
+  // The scroller unmounts when the transcript empties (reset, session change): its next one starts at the bottom.
+  useLayoutEffect(() => {
+    if (empty) { followingRef.current = true; setFollowing(true) }
+  }, [empty])
+
   const toBottom = (): void => {
     const el = scroller.current
     if (el) el.scrollTop = el.scrollHeight
