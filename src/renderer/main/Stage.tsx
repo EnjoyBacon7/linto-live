@@ -81,7 +81,7 @@ function CameraPreview() {
  * One segment as on LinTO Studio: time and language in a side column, the speaker above the text where it
  * changes (LinTO only names speakers when the session diarizes).
  */
-function Segment({ s, prev, partial }: { s: TranscriptSegment; prev?: TranscriptSegment; partial?: boolean }) {
+const Segment = memo(function Segment({ s, prev, partial }: { s: TranscriptSegment; prev?: TranscriptSegment; partial?: boolean }) {
   const l = segmentLabels(s, prev)
   const time = clockTime(s.at)
   return (
@@ -96,7 +96,7 @@ function Segment({ s, prev, partial }: { s: TranscriptSegment; prev?: Transcript
       </div>
     </div>
   )
-}
+})
 
 const EXPORT_OPTIONS: PopUpOption[] = [
   { value: 'txt', label: 'Texte (.txt)' },
@@ -138,9 +138,22 @@ function ExportBar({ count }: { count: number }) {
   )
 }
 
+/**
+ * Row keys that do not depend on the array index (the oldest final drops at the cap, which shifts every
+ * index) nor on `id` (LinTO numbers segments per run: the same id comes back after a resume). One sequence
+ * number per segment object, which the transcript copy keeps across updates.
+ */
+const rowKeys = new WeakMap<TranscriptSegment, number>()
+let nextRowKey = 0
+function rowKey(s: TranscriptSegment): number {
+  let k = rowKeys.get(s)
+  if (k === undefined) { k = nextRowKey++; rowKeys.set(s, k) }
+  return k
+}
+
 /** Finalized segments only change on a final: partials (several per second) do not re-render them. */
 const Finals = memo(function Finals({ finals }: { finals: TranscriptSegment[] }) {
-  return <>{finals.map((s, i) => <Segment key={`${i}-${s.id}`} s={s} prev={finals[i - 1]} />)}</>
+  return <>{finals.map((s, i) => <Segment key={rowKey(s)} s={s} prev={finals[i - 1]} />)}</>
 })
 
 /** Centre: banners on top, the camera preview (when a camera is chosen), then the live transcript with its history. */
