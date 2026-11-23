@@ -184,6 +184,7 @@ function main(): void {
   // LintoApi / CaptionStream read their URLs at call time: share one mutable object, filled from
   // <instance>/config.js on first use and refilled when the instance setting changes.
   const urls: LintoUrls = { instance: '', api: '', auth: '', wsUrl: '', wsPath: '' }
+  const defaultRecordDir = join(app.getPath('videos'), 'LinTO Live')
   let watermarkCfg: WatermarkConfig = STUDIO_WATERMARK_DEFAULTS
   let urlsFor: string | null = null
   let urlsLoading: Promise<void> | null = null
@@ -253,7 +254,7 @@ function main(): void {
     mkdirp: async (dir) => {
       await mkdir(dir, { recursive: true })
     },
-    defaultRecordDir: join(app.getPath('videos'), 'LinTO Live'),
+    defaultRecordDir,
     nameCorrector: (names) => createNameCorrector(names, commonWords()),
     openBroadcast,
     virtualCam: {
@@ -397,7 +398,8 @@ function main(): void {
       saveSettings: (p) => live.saveSettings(p),
       // Clears a stale token (unless a show is live) and asks the UI to log in.
       onUnauthorized: () => live.reportUnauthorized(),
-      watermarkEnabled: () => watermarkCfg.enabled
+      watermarkEnabled: () => watermarkCfg.enabled,
+      defaultRecordDir
     })
   })
   ipcMain.handle(IPC.sessionsList, async (): Promise<SessionSummary[]> => {

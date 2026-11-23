@@ -19,6 +19,7 @@ export interface SetupDeps {
   onUnauthorized(): void
   /** The instance's watermark feature flag (from its config.js). */
   watermarkEnabled(): boolean
+  defaultRecordDir: string
 }
 
 /**
@@ -48,7 +49,8 @@ async function profilesOrNone(d: SetupDeps, orgId: string): Promise<TranscriberP
 export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
   const devices = await d.devices()
   const watermarkEnabled = d.watermarkEnabled()
-  const empty = (): SetupData => ({ settings: d.getSettings(), organizations: [], profiles: [], ...devices, watermarkEnabled })
+  const defaultRecordDir = d.defaultRecordDir
+  const empty = (): SetupData => ({ settings: d.getSettings(), organizations: [], profiles: [], ...devices, watermarkEnabled, defaultRecordDir })
   if (!d.hasToken()) return empty()
   try {
     const organizations = await d.organizations()
@@ -58,7 +60,7 @@ export async function loadSetupData(d: SetupDeps): Promise<SetupData> {
     const profiles = orgId && org?.rights?.readProfiles !== false ? await profilesOrNone(d, orgId) : []
     const patch = defaultSelection(s, organizations, profiles)
     if (Object.keys(patch).length > 0) await d.saveSettings(patch)
-    return { settings: d.getSettings(), organizations, profiles, ...devices, watermarkEnabled }
+    return { settings: d.getSettings(), organizations, profiles, ...devices, watermarkEnabled, defaultRecordDir }
   } catch (e) {
     if (e instanceof UnauthorizedError) {
       d.onUnauthorized()

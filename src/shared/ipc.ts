@@ -12,6 +12,8 @@ export interface SetupData {
   audioDevices: DeviceItem[]
   /** The instance offers the watermark settings (VUE_APP_ENABLE_WATERMARK, as in LinTO Studio). */
   watermarkEnabled: boolean
+  /** Where recordings go when Settings.recordDir is not set (the OS videos folder › LinTO Live). */
+  defaultRecordDir: string
 }
 
 /** `cancelled`: Arrêter came while it waited (nothing to report to the user). */

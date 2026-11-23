@@ -8,7 +8,8 @@ export function makeApi(over: Partial<{ [K in keyof LintoLiveApi]: Partial<Linto
     profiles: [{ id: 1, name: 'Français' }],
     videoDevices: [{ id: 'v1', name: 'Capture HDMI' }],
     audioDevices: [{ id: 'a1', name: 'Micro' }],
-    watermarkEnabled: false
+    watermarkEnabled: false,
+    defaultRecordDir: '/Users/x/Movies/LinTO Live'
   }
   const api = {
     platform: 'darwin',
