@@ -13,8 +13,8 @@ import { v4l2loopbackLoaded } from './obs/virtualCam'
  */
 
 export const FIX_KEYRING =
-  'Aucun trousseau de clés utilisable (GNOME Keyring, KWallet) : LinTO Live ne peut pas retenir ta connexion, ' +
-  'il faudra te reconnecter à chaque lancement. Installe ou déverrouille un trousseau, puis relance LinTO Live.'
+  'Aucun trousseau de clés utilisable (GNOME Keyring, KWallet) : LinTO Live ne peut retenir ni ta connexion ' +
+  'ni la clé de diffusion, il faudra les saisir à chaque lancement. Installe ou déverrouille un trousseau, puis relance LinTO Live.'
 export const FIX_VCAM =
   'Le module v4l2loopback n’est pas installé : la caméra virtuelle (LinTO Live comme webcam dans ' +
   'Teams, Zoom…) ne sera pas disponible. Installe le paquet v4l2loopback-dkms, puis relance LinTO Live.'
