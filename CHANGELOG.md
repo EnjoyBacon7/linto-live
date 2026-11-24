@@ -6,6 +6,16 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.8.0] - 2026-11-24
+
+### Ajouté
+
+- **Suivre une session envoyée par un autre appareil** : quand la session choisie est déjà en direct
+  depuis un autre poste, le bouton principal devient « Suivre ». La fenêtre de sortie, la fenêtre de
+  sous-titres, le QR code et la transcription fonctionnent comme pour un direct normal, mais ce poste
+  n'envoie aucun son (pas de micro requis, pas de conflit avec l'audio de l'autre appareil). « Suivre »
+  est aussi proposé dans le menu et la barre système.
+
 ### Sécurité
 
 - **Clé de diffusion sans trousseau (Linux)** : sans GNOME Keyring ni KWallet, la clé de diffusion
@@ -294,6 +304,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.8.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.1...v0.6.2
