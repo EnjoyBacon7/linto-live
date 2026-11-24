@@ -23,7 +23,8 @@ export interface LiveState {
   phase: 'idle' | 'starting' | 'live' | 'stopping' | 'error'
   /** languages: the « Langue affichée » options of the session on air (from the channel LinTO returned). */
   session?: { name: string; status: SessionStatus; languages?: SubtitleLanguageOption[] }
-  stream: 'off' | 'starting' | 'active' | 'error' | 'unavailable'
+  /** 'following': the session's audio comes from another device, this show only displays its captions. */
+  stream: 'off' | 'starting' | 'active' | 'error' | 'unavailable' | 'following'
   captions: 'connecting' | 'live' | 'offline'
   obs: 'running' | 'restarting' | 'down'
   /** 'shown': an output window was opened during the current OBS run (it stays open, on the camera, after Arrêter). */
@@ -102,7 +103,8 @@ export interface LintoLiveApi {
   }
   live: {
     /** `create`: options of the session created when none has this name (ignored when one is reused). */
-    start(sessionName: string, create?: NewSessionOptions): Promise<StartResult>
+    /** `follow`: the session is sent from another device; show its captions without sending audio. */
+    start(sessionName: string, create?: NewSessionOptions, follow?: boolean): Promise<StartResult>
     /** Saves the language shown in the subtitle band for this session; the band switches now if it is on air. */
     setSubtitleLanguage(sessionId: string, choice: string): Promise<void>
     stop(): Promise<void>
@@ -326,7 +328,8 @@ export function createLintoLiveApi(t: Transport, platform: string): LintoLiveApi
       setWatermark: (id, w) => call(IPC.sessionsSetWatermark, id, w)
     },
     live: {
-      start: (name, create) => (create === undefined ? call(IPC.liveStart, name) : call(IPC.liveStart, name, create)),
+      start: (name, create, follow) => (follow ? call(IPC.liveStart, name, create, true)
+        : create === undefined ? call(IPC.liveStart, name) : call(IPC.liveStart, name, create)),
       setSubtitleLanguage: (id, choice) => call(IPC.liveSetSubtitleLanguage, id, choice),
       stop: () => call(IPC.liveStop),
       terminate: () => call(IPC.liveTerminate),

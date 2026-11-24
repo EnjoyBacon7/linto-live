@@ -411,10 +411,13 @@ export class LiveController extends EventEmitter {
     }
   }
 
-  /** `create`: options of the session created when none has this name. */
-  start(sessionName: string, create?: NewSessionOptions): Promise<StartResult> {
+  /**
+   * `create`: options of the session created when none has this name. `follow`: the session is sent from another
+   * device; the show only follows it (captions, output, subtitle window) and never sends this machine's audio.
+   */
+  start(sessionName: string, create?: NewSessionOptions, follow = false): Promise<StartResult> {
     const gen = this.cancelGen
-    return this.enqueue(() => this.doStart(sessionName, gen, create))
+    return this.enqueue(() => this.doStart(sessionName, gen, create, follow))
   }
 
   /** Arrêter: cancels the actions queued before it (see abortable), then stops the show. */
@@ -1134,7 +1137,7 @@ export class LiveController extends EventEmitter {
     this.captionsRetryTimer = null
   }
 
-  private async doStart(rawName: string, gen: number, create?: NewSessionOptions): Promise<StartResult> {
+  private async doStart(rawName: string, gen: number, create?: NewSessionOptions, follow = false): Promise<StartResult> {
     if (gen !== this.cancelGen) return { ok: false, message: MSG_START_CANCELLED, cancelled: true }
     const s = this.d.settings.get()
     if (!s.orgId) return { ok: false, message: MSG_NO_ORG }
@@ -1181,7 +1184,7 @@ export class LiveController extends EventEmitter {
       const service = toObsStreamService(res.channel.streamEndpoints ?? {})
       const languages = subtitleLanguageOptions(res.channel)
       const cur: Current = {
-        orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream ? service : null,
+        orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream && !follow ? service : null,
         languageChoices: new Set(languages.map((o) => o.value))
       }
       this.current = cur
@@ -1196,8 +1199,8 @@ export class LiveController extends EventEmitter {
       this.setState({
         phase: 'live',
         session: { name: res.session.name, status: res.session.status, languages },
-        stream: cur.service ? 'starting' : 'unavailable',
-        warning: cur.service ? undefined : res.blocker === 'rtmp-only' ? MSG_RTMP_ONLY : MSG_NO_STREAM,
+        stream: follow ? 'following' : cur.service ? 'starting' : 'unavailable',
+        warning: cur.service || follow ? undefined : res.blocker === 'rtmp-only' ? MSG_RTMP_ONLY : MSG_NO_STREAM,
         startedAt,
         recordingTarget: this.recordTarget?.kind
       })

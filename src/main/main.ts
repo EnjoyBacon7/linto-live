@@ -510,10 +510,11 @@ function main(): void {
     settings.setBroadcast(server, key)
   })
 
-  ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown) => {
+  ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown, follow?: unknown) => {
     const create = checkNewSessionOptions(rawCreate)
     await ensureUrls()
-    return live.start(name, create)
+    // A new session cannot be live elsewhere: following only applies to an existing one.
+    return live.start(name, create, create === undefined && follow === true)
   })
   ipcMain.handle(IPC.liveSetSubtitleLanguage, async (_e, sessionId: unknown, choice: unknown) => {
     if (typeof sessionId !== 'string' || !sessionId || typeof choice !== 'string' || !choice) {
