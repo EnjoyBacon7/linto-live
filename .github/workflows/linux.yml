@@ -6,7 +6,8 @@ name: Build
 #   linux-appimage-deb AppImage + .deb, installed and inspected, OBS smoke test
 #   linux-flatpak      Flatpak (its `flatpak build-bundle` is the slowest step, ~7 min)
 #   flatpak-ubuntu-2204  the Flatpak installed on Ubuntu 22.04
-#   macos              typecheck + tests, official OBS smoke test; the dmg on tags and manual runs
+#   macos              typecheck + tests, official OBS smoke test; the dmg on tags and manual runs,
+#                      the app bundle on pull requests that touch the packaging
 # apt downloads (.github/actions/apt-cache), the OBS compiler cache (ccache) and electron-builder's
 # downloads are cached: the runners' Ubuntu mirror is sometimes very slow.
 # Tags v*: then a GitHub release with all four packages, SHA256SUMS.txt and the notes from
@@ -53,9 +54,10 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-  # The OBS build only reruns when the OBS tag, the build script or the patches change. On a cache
-  # hit this job only looks the key up (a few seconds); the packaging jobs then restore it. On a miss,
-  # ccache recompiles only what the change touched (~3.5 min for a full compile).
+  # The OBS build only reruns when the OBS tag, the build script or the patches change, and once a
+  # month: the tree bundles Ubuntu libraries (Qt, FFmpeg...) that must pick up their security updates.
+  # On a cache hit this job only looks the key up (a few seconds); the packaging jobs then restore it.
+  # On a miss, ccache recompiles only what the change touched (~3.5 min for a full compile).
   obs-linux:
     name: OBS build cache (ubuntu-24.04)
     runs-on: ubuntu-24.04
@@ -65,12 +67,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Month (OBS cache key)
+        id: month
+        run: echo "m=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
       - name: Look up OBS build cache
         id: obs-cache
         uses: actions/cache/restore@v4
         with:
           path: vendor/obs/linux
-          key: obs-linux-${{ env.OBS_VERSION }}-ubuntu-24.04-x64-${{ hashFiles('scripts/build-obs-linux.sh', 'scripts/obs-linux-patches/**') }}
+          key: obs-linux-${{ env.OBS_VERSION }}-ubuntu-24.04-x64-${{ steps.month.outputs.m }}-${{ hashFiles('scripts/build-obs-linux.sh', 'scripts/obs-linux-patches/**') }}
           lookup-only: true
 
       # The runner has ~70 GB free, far more than the build needs: no disk clean-up (it took ~2 min).
@@ -199,14 +205,16 @@ jobs:
           if ldd "$obs" | grep 'not found'; then exit 1; fi
 
       # Best-effort smoke test: start/stop the bundled OBS under Xvfb (software GL) through the
-      # real ObsProcess, isolated config. Informational only: CI has no GPU, audio or camera.
+      # real ObsProcess and drive it over obs-websocket (ObsController), isolated config.
+      # Informational only (CI has no GPU, audio or camera), but a failure shows as a warning on the run.
       - name: Smoke test bundled OBS (Xvfb)
         continue-on-error: true
         timeout-minutes: 10
         run: |
           LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$OBS_INSTALLED" \
             xvfb-run -a -s '-screen 0 1920x1080x24' \
-            npx vitest run --config vitest.it.config.ts tests/integration/obs-process.it.test.ts
+            npx vitest run --config vitest.it.config.ts tests/integration \
+            || { echo "::warning title=OBS smoke test (Linux)::failed, see the step log (informational)"; exit 1; }
 
       - name: Upload AppImage + .deb
         uses: actions/upload-artifact@v4
@@ -373,6 +381,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A pull request checks out its merge commit: HEAD^1 is the base, for the packaging check below.
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -392,13 +403,35 @@ jobs:
         run: npm run fetch:obs:mac
 
       # Same best-effort smoke test as on Linux: start/stop the official OBS through the real
-      # ObsProcess, isolated config (CFFIXED_USER_HOME). Informational only: no camera or audio in CI.
+      # ObsProcess and drive it, isolated config (CFFIXED_USER_HOME). Informational only: no camera
+      # or audio in CI, but a failure shows as a warning on the run.
       - name: Smoke test official OBS
         continue-on-error: true
         timeout-minutes: 10
         run: |
           LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$PWD/vendor/obs/macos/OBS.app/Contents/MacOS/OBS" \
-            npx vitest run --config vitest.it.config.ts tests/integration/obs-process.it.test.ts
+            npx vitest run --config vitest.it.config.ts tests/integration \
+            || { echo "::warning title=OBS smoke test (macOS)::failed, see the step log (informational)"; exit 1; }
+
+      # The dmg is only built for releases; a pull request that touches the packaging still builds the
+      # app bundle (no dmg, ~2 min) and checks the embedded OBS.app signature, so a break shows before the tag.
+      - name: Does this pull request touch the macOS packaging?
+        id: packaging
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only HEAD^1 HEAD | grep -Eq '^(electron-builder\.yml|package(-lock)?\.json|resources/|build/|scripts/fetch-obs-macos\.sh)'; then
+            echo "touched=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build app bundle (no dmg)
+        if: steps.packaging.outputs.touched == 'true'
+        run: |
+          set -euo pipefail
+          npm run build
+          npx electron-builder --mac --arm64 --dir --publish never
+          app="dist/mac-arm64/LinTO Live.app"
+          test -d "$app/Contents/Resources/obs/OBS.app"
+          codesign --verify --deep --strict "$app/Contents/Resources/obs/OBS.app"
 
       - name: Build dmg
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
