@@ -62,6 +62,8 @@ export interface ShellReport {
   sessionName?: string
   /** Démarrer is currently possible (session and micro chosen, nothing in progress). */
   canStart: boolean
+  /** The selected session is live on another device: Démarrer reads « Suivre ». */
+  follow?: boolean
 }
 
 export interface LintoLiveApi {

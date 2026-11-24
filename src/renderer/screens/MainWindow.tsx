@@ -407,9 +407,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   // The app menu and the tray enable their items from this.
   useEffect(() => {
     window.lintoLive.app
-      .reportShellState({ loggedIn: true, ...(title ? { sessionName: title } : {}), canStart })
+      .reportShellState({ loggedIn: true, ...(title ? { sessionName: title } : {}), canStart, ...(follow ? { follow } : {}) })
       .catch(() => {})
-  }, [title, canStart])
+  }, [title, canStart, follow])
 
   // ---- Layout ----
   const banners = (
