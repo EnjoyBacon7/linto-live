@@ -17,6 +17,8 @@ export interface ShellState {
   sessionName?: string
   /** Reported by the renderer: Démarrer is possible (session, camera, micro chosen, nothing in progress). */
   canStart: boolean
+  /** Reported by the renderer: the selected session is live on another device (« Suivre », no audio sent). */
+  follow?: boolean
 }
 
 type Item = MenuItemConstructorOptions
@@ -28,6 +30,7 @@ const sep: Item = { type: 'separator' }
 const isLive = (s: ShellState): boolean => s.phase === 'live'
 /** 'error' = the last start failed: retrying is allowed (same rule as the Démarrer button). */
 const canStart = (s: ShellState): boolean => s.canStart && (s.phase === 'idle' || s.phase === 'error')
+const startLabel = (s: ShellState): string => (s.follow ? 'Suivre' : 'Démarrer')
 const quitLabel = (s: ShellState): string => (s.platform === 'darwin' ? `Quitter ${APP_NAME}` : 'Quitter')
 
 const cmd = (label: string, c: AppCommand, run: Run, extra: Partial<Item> = {}): Item => ({ label, click: () => run(c), ...extra })
@@ -71,7 +74,7 @@ export function appMenuTemplate(s: ShellState, run: Run): Item[] {
     submenu: [
       cmd('Nouvelle session…', 'new-session', run, { accelerator: 'CmdOrCtrl+N', enabled: s.loggedIn }),
       sep,
-      cmd('Démarrer', 'start', run, { accelerator: 'CmdOrCtrl+Return', enabled: s.loggedIn && canStart(s) }),
+      cmd(startLabel(s), 'start', run, { accelerator: 'CmdOrCtrl+Return', enabled: s.loggedIn && canStart(s) }),
       cmd('Arrêter', 'stop', run, { accelerator: 'CmdOrCtrl+.', enabled: live }),
       sep,
       cmd('Terminer la session…', 'terminate', run, { enabled: live })
@@ -120,7 +123,7 @@ export function trayMenuTemplate(s: ShellState, run: Run): Item[] {
     sep,
     live
       ? cmd('Arrêter', 'stop', run)
-      : cmd('Démarrer', 'start', run, { enabled: s.loggedIn && canStart(s) }),
+      : cmd(startLabel(s), 'start', run, { enabled: s.loggedIn && canStart(s) }),
     cmd('Afficher la fenêtre de sortie', 'show-output', run),
     cmd(`Afficher ${APP_NAME}`, 'show-window', run),
     sep,

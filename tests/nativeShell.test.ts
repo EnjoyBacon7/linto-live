@@ -79,6 +79,14 @@ describe('appMenuTemplate', () => {
     expect(item(appMenuTemplate(shell({ canStart: true, phase: 'starting' }), vi.fn()), 'Démarrer').enabled).toBe(false)
   })
 
+  it('a session live on another device: the start item reads Suivre (menu and tray)', () => {
+    const s = shell({ canStart: true, follow: true })
+    expect(item(appMenuTemplate(s, vi.fn()), 'Suivre').enabled).toBe(true)
+    expect(item(trayMenuTemplate(s, vi.fn()), 'Suivre').enabled).toBe(true)
+    expect(JSON.stringify(appMenuTemplate(s, vi.fn()))).not.toContain('Démarrer')
+    expect(JSON.stringify(trayMenuTemplate(s, vi.fn()))).not.toContain('Démarrer')
+  })
+
   it('live: Arrêter, Terminer and Afficher la fenêtre de sortie enabled, Démarrer disabled', () => {
     const t = appMenuTemplate(shell({ phase: 'live', canStart: true, sessionName: 'Conférence' }), vi.fn())
     expect(item(t, 'Démarrer').enabled).toBe(false)

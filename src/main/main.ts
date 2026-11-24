@@ -286,7 +286,8 @@ function main(): void {
   const shellState = (): ShellState => {
     const s = live.getState()
     const name = (s.phase !== 'idle' && s.phase !== 'error' ? s.session?.name : undefined) ?? report.sessionName
-    return { platform, loggedIn: report.loggedIn, phase: s.phase, canStart: report.canStart, ...(name ? { sessionName: name } : {}) }
+    return { platform, loggedIn: report.loggedIn, phase: s.phase, canStart: report.canStart,
+      ...(report.follow ? { follow: true } : {}), ...(name ? { sessionName: name } : {}) }
   }
   const trayDir = app.isPackaged ? join(process.resourcesPath, 'tray') : join(app.getAppPath(), 'resources', 'tray')
   const trayImage = (phase: LiveState['phase']): Electron.NativeImage => {
@@ -355,6 +356,7 @@ function main(): void {
     report = {
       loggedIn: r?.loggedIn === true,
       canStart: r?.canStart === true,
+      ...(r?.follow === true ? { follow: true } : {}),
       ...(typeof r?.sessionName === 'string' && r.sessionName ? { sessionName: r.sessionName } : {})
     }
     rebuildShell()
@@ -510,10 +512,11 @@ function main(): void {
     settings.setBroadcast(server, key)
   })
 
-  ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown) => {
+  ipcMain.handle(IPC.liveStart, async (_e, name: string, rawCreate?: unknown, follow?: unknown) => {
     const create = checkNewSessionOptions(rawCreate)
     await ensureUrls()
-    return live.start(name, create)
+    // A new session cannot be live elsewhere: following only applies to an existing one.
+    return live.start(name, create, create === undefined && follow === true)
   })
   ipcMain.handle(IPC.liveSetSubtitleLanguage, async (_e, sessionId: unknown, choice: unknown) => {
     if (typeof sessionId !== 'string' || !sessionId || typeof choice !== 'string' || !choice) {

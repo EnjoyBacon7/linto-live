@@ -636,6 +636,51 @@ describe('LiveController', () => {
     expect(t.last().phase).toBe('idle')
   })
 
+  describe('following a session sent from another device', () => {
+    it('goes live without streaming, even with the right to: captions open, no warning', async () => {
+      const t = setup()
+      await t.live.boot()
+      const r = await t.live.start('Conf', undefined, true)
+      expect(r).toEqual({ ok: true, reused: true, canStream: true })
+      expect(t.ctl().startStream).not.toHaveBeenCalled()
+      expect(t.captions.open).toHaveBeenCalledWith('s1', 7, 'org1')
+      expect(t.overlay.push).toHaveBeenCalledWith({ type: 'reset' })
+      expect(t.last()).toMatchObject({ phase: 'live', stream: 'following', session: { name: 'Conf' } })
+      expect(t.last().warning).toBeUndefined()
+    })
+
+    it('a session without the right to stream is followed without the « Impossible d\'envoyer » warning', async () => {
+      const t = setup({ sessions: [session({}, null)] })
+      await t.live.boot()
+      await t.live.start('Conf', undefined, true)
+      expect(t.last()).toMatchObject({ phase: 'live', stream: 'following' })
+      expect(t.last().warning).toBeUndefined()
+    })
+
+    it('switching on air from a followed session to one started normally streams again', async () => {
+      const t = setup({ sessions: [session(), session({ id: 's2', name: 'Autre' }, SRT_B)] })
+      await t.live.boot()
+      await t.live.start('Conf', undefined, true)
+      await t.live.start('Autre')
+      expect(t.ctl().startStream).toHaveBeenCalledWith({
+        streamServiceType: 'rtmp_custom',
+        streamServiceSettings: { server: SRT_B, key: '' }
+      })
+      expect(t.last()).toMatchObject({ phase: 'live', stream: 'starting', session: { name: 'Autre' } })
+    })
+
+    it('Arrêter ends the follow idle, without a warning or terminating the session', async () => {
+      const t = setup()
+      await t.live.boot()
+      await t.live.start('Conf', undefined, true)
+      await t.live.stop()
+      expect(t.captions.close).toHaveBeenCalled()
+      expect(t.api.terminateSession).not.toHaveBeenCalled()
+      expect(t.last()).toMatchObject({ phase: 'idle', stream: 'off' })
+      expect(t.last().warning).toBeUndefined()
+    })
+  })
+
   it('stop does not call terminateSession', async () => {
     const t = setup()
     await t.live.boot()

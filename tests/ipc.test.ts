@@ -76,6 +76,7 @@ describe('createLintoLiveApi', () => {
     await api.sessions.lookup('S')
     await api.live.start('S')
     await api.live.start('S', { translations: ['en'], visibility: 'public' })
+    await api.live.start('S', undefined, true)
     await api.live.setSubtitleLanguage('s1', 'en')
     await api.live.stop()
     await api.live.terminate()
@@ -112,6 +113,7 @@ describe('createLintoLiveApi', () => {
       ['sessions:lookup', 'S'],
       [IPC.liveStart, 'S'],
       [IPC.liveStart, 'S', { translations: ['en'], visibility: 'public' }],
+      [IPC.liveStart, 'S', undefined, true],
       ['live:set-subtitle-language', 's1', 'en'],
       [IPC.liveStop],
       [IPC.liveTerminate],
