@@ -47,7 +47,7 @@ const SYSTEM: Record<SystemCheckId, { title: string; why: string; icon: ReactNod
   },
   keyring: {
     title: 'Trousseau de clés',
-    why: 'Pour retenir ta connexion à LinTO d’un lancement à l’autre.',
+    why: 'Pour retenir ta connexion à LinTO et ta clé de diffusion d’un lancement à l’autre.',
     icon: <LockIcon size={20} />
   },
   'virtual-camera': {

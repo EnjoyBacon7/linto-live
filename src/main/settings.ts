@@ -25,23 +25,32 @@ export function checkInstance(raw: string): string {
 
 export class SettingsStore {
   private data: Stored
-  /** Token held in memory only (persistToken false). */
+  /** Token and stream key held in memory only (persistSecrets false). */
   private memToken: string | null = null
+  private memBroadcastKey: string | null = null
 
   /**
-   * persistToken false (Linux without a real keyring, where safeStorage only obfuscates with a fixed
-   * key): the token is never written to disk; the user logs in again at each launch.
+   * persistSecrets false (Linux without a real keyring, where safeStorage only obfuscates with a fixed
+   * key, so anyone who can read settings.json could decrypt it): the token and the stream key are never
+   * written to disk; the user logs in again and retypes the key at each launch. A key stored by an earlier
+   * version is moved to memory, so it still works for this session.
    */
   constructor(
     private p: AppPaths,
     private crypto: TokenCrypto,
-    private o: { persistToken?: boolean } = {}
+    private o: { persistSecrets?: boolean } = {}
   ) {
     this.data = this.load()
-    if (this.o.persistToken === false && this.data.tokenEnc) {
+    if (this.o.persistSecrets === false && (this.data.tokenEnc || this.data.broadcastKeyEnc)) {
+      this.memBroadcastKey = this.decryptKey()
       delete this.data.tokenEnc
+      delete this.data.broadcastKeyEnc
       this.save()
     }
+  }
+
+  private get inMemory(): boolean {
+    return this.o.persistSecrets === false
   }
 
   /** Keeps an unreadable settings file next to the original, so the next save() does not destroy it. */
@@ -92,7 +101,8 @@ export class SettingsStore {
   get(): Settings {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { tokenEnc, savedLoginEnc, broadcastKeyEnc, broadcastKeySet, ...rest } = this.data
-    return broadcastKeyEnc ? { ...rest, broadcastKeySet: true } : { ...rest }
+    const keySet = this.inMemory ? this.memBroadcastKey !== null : !!broadcastKeyEnc
+    return keySet ? { ...rest, broadcastKeySet: true } : { ...rest }
   }
 
   /**
@@ -109,13 +119,16 @@ export class SettingsStore {
       delete next.tokenEnc
       delete next.savedLoginEnc
     }
-    if (clean.broadcastServer !== undefined && clean.broadcastServer !== this.data.broadcastServer) delete next.broadcastKeyEnc
+    if (clean.broadcastServer !== undefined && clean.broadcastServer !== this.data.broadcastServer) {
+      delete next.broadcastKeyEnc
+      this.memBroadcastKey = null
+    }
     this.data = next
     this.save()
   }
 
   getToken(): string | null {
-    if (this.o.persistToken === false) return this.memToken
+    if (this.inMemory) return this.memToken
     if (!this.data.tokenEnc) return null
     try {
       return this.crypto.decrypt(Buffer.from(this.data.tokenEnc, 'base64'))
@@ -125,7 +138,7 @@ export class SettingsStore {
   }
 
   setToken(t: string | null): void {
-    if (this.o.persistToken === false) {
+    if (this.inMemory) {
       this.memToken = t
       return
     }
@@ -151,10 +164,14 @@ export class SettingsStore {
   }
 
   /**
-   * Stream key of the online broadcast, encrypted like the saved login (with no OS keychain, safeStorage only
-   * obfuscates it: OBS itself keeps stream keys in clear text).
+   * Stream key of the online broadcast, encrypted like the saved login; in memory only without an OS
+   * keychain (see the constructor).
    */
   getBroadcastKey(): string | null {
+    return this.inMemory ? this.memBroadcastKey : this.decryptKey()
+  }
+
+  private decryptKey(): string | null {
     if (!this.data.broadcastKeyEnc) return null
     try {
       return this.crypto.decrypt(Buffer.from(this.data.broadcastKeyEnc, 'base64'))
@@ -178,8 +195,13 @@ export class SettingsStore {
       delete next.broadcastServer
       next.broadcastEnabled = false
     }
-    if (!s || k === '' || (k === undefined && s !== this.data.broadcastServer)) delete next.broadcastKeyEnc
-    else if (k) next.broadcastKeyEnc = this.crypto.encrypt(k).toString('base64')
+    if (!s || k === '' || (k === undefined && s !== this.data.broadcastServer)) {
+      delete next.broadcastKeyEnc
+      this.memBroadcastKey = null
+    } else if (k) {
+      if (this.inMemory) this.memBroadcastKey = k
+      else next.broadcastKeyEnc = this.crypto.encrypt(k).toString('base64')
+    }
     this.data = next
     this.save()
   }

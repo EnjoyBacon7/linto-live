@@ -58,3 +58,24 @@ describe('scripts/build-linux-docker.sh', () => {
     expect(sh.indexOf('sha256sum -c')).toBeLessThan(sh.indexOf('tar -xJf'))
   })
 })
+
+describe('versions kept in sync across files', () => {
+  const read = (f: string): string => readFileSync(join(__dirname, '..', f), 'utf8')
+  const one = (f: string, re: RegExp): string => {
+    const m = read(f).match(re)
+    if (!m) throw new Error(`${re} not found in ${f}`)
+    return m[1]!
+  }
+  it('OBS: the Linux build, the macOS fetch, CI (cache keys) and the notices name the same version', () => {
+    const v = one('scripts/build-obs-linux.sh', /^OBS_VERSION="([^"]+)"/m)
+    expect(one('scripts/fetch-obs-macos.sh', /^OBS_VERSION="([^"]+)"/m)).toBe(v)
+    expect(one('.github/workflows/linux.yml', /^ {2}OBS_VERSION: '([^']+)'/m)).toBe(v)
+    expect(one('resources/obs/SOURCE.md', /ships \*\*OBS Studio ([\d.]+)\*\*/)).toBe(v)
+    expect(one('README.md', /embarque \*\*OBS Studio ([\d.]+)\*\*/)).toBe(v)
+  })
+  it('Flatpak: CI installs the runtime and BaseApp versions electron-builder builds against', () => {
+    const v = one('.github/workflows/linux.yml', /^ {2}FLATPAK_RUNTIME: '([^']+)'/m)
+    expect(one('electron-builder.yml', /^ {2}runtimeVersion: '([^']+)'/m)).toBe(v)
+    expect(one('electron-builder.yml', /^ {2}baseVersion: '([^']+)'/m)).toBe(v)
+  })
+})

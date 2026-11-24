@@ -34,7 +34,7 @@ describe('SettingsStore', () => {
   it('without a real keychain the token stays in memory only, and an old stored one is dropped', () => {
     const p = appPaths(dir, 'linux')
     new SettingsStore(p, crypto).setToken('OLD-TOKEN')
-    const s = new SettingsStore(p, crypto, { persistToken: false })
+    const s = new SettingsStore(p, crypto, { persistSecrets: false })
     expect(s.getToken()).toBeNull()
     expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('tokenEnc')
     s.setToken('SECRET-TOKEN')
@@ -166,6 +166,26 @@ describe('SettingsStore broadcast key', () => {
     expect(s.getBroadcastKey()).toBeNull()
     s.setBroadcast('rtmp://live.twitch.tv/app', 'tw-key') // a new server with its own key
     expect(s.getBroadcastKey()).toBe('tw-key')
+  })
+  it('without a real keychain the key stays in memory only; an old stored one moves to memory', () => {
+    const p = appPaths(dir, 'linux')
+    new SettingsStore(p, crypto).setBroadcast(YT, 'old-key')
+    const s = new SettingsStore(p, crypto, { persistSecrets: false })
+    expect(s.getBroadcastKey()).toBe('old-key') // usable for this session, but no longer on disk
+    expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('broadcastKeyEnc')
+    s.setBroadcast(YT, 'live-abcd-1234')
+    expect(s.getBroadcastKey()).toBe('live-abcd-1234')
+    expect(s.get()).toMatchObject({ broadcastServer: YT, broadcastKeySet: true })
+    expect(readFileSync(p.settingsFile, 'utf8')).not.toContain('broadcastKeyEnc')
+    s.setBroadcast(YT) // same server, no new key: kept
+    expect(s.getBroadcastKey()).toBe('live-abcd-1234')
+    s.update({ broadcastServer: 'rtmp://evil.example/app' }) // another server: dropped
+    expect(s.getBroadcastKey()).toBeNull()
+    expect(s.get()).not.toHaveProperty('broadcastKeySet')
+    s.setBroadcast(YT, 'k')
+    s.setBroadcast('')
+    expect(s.getBroadcastKey()).toBeNull()
+    expect(new SettingsStore(p, crypto, { persistSecrets: false }).getBroadcastKey()).toBeNull()
   })
   it('no server: no key, broadcast off', () => {
     const s = new SettingsStore(appPaths(dir, 'linux'), crypto)

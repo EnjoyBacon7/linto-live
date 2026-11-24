@@ -176,7 +176,8 @@ function main(): void {
   }
   // Linux without a usable keyring (no gnome-keyring / KWallet, or none unlocked): safeStorage falls
   // back to 'basic_text' and refuses to encrypt. Allow Chromium's fixed-key obfuscation so encryptString
-  // does not throw, but nothing secret is persisted with it (token in memory, password not remembered).
+  // does not throw, but nothing secret is persisted with it (token and stream key in memory, password
+  // not remembered).
   if (platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
     console.warn(`No usable keyring (${safeStorage.getSelectedStorageBackend()}): the LinTO token is kept in memory only`)
     safeStorage.setUsePlainTextEncryption(true)
@@ -187,9 +188,9 @@ function main(): void {
       encrypt: (s) => safeStorage.encryptString(s),
       decrypt: (b) => safeStorage.decryptString(b)
     },
-    // Without a real keyring the token is only obfuscated: keep it in memory (log in at each launch).
+    // Without a real keyring secrets are only obfuscated: keep the token and the stream key in memory.
     {
-      persistToken: canRememberLogin(
+      persistSecrets: canRememberLogin(
         platform,
         safeStorage.isEncryptionAvailable(),
         platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined
