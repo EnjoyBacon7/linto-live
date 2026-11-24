@@ -148,6 +148,20 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
     wasOnAir.current = onAir
     if (!onAir) setReused(null)
   }, [onAir])
+  /**
+   * The session whose audio this machine sent last: LinTO still says `active` a few seconds after Arrêter, and it
+   * must not read as live on another device (« Suivre ») until LinTO says otherwise.
+   */
+  const [sentHere, setSentHere] = useState<string | null>(null)
+  const sending = onAir && (state.stream === 'starting' || state.stream === 'active' || state.stream === 'error')
+  useEffect(() => { if (sending && liveName) setSentHere(liveName) }, [sending, liveName])
+  useEffect(() => {
+    if (!sentHere || (sending && liveName === sentHere)) return
+    if (sessions && !sessions.some((x) => x.name === sentHere && x.status === 'active')) setSentHere(null)
+  }, [sessions, sentHere, sending, liveName])
+  /** The session is live on another device: Démarrer becomes « Suivre » (captions only, no audio sent). */
+  const liveElsewhere = (name: string): boolean =>
+    name !== sentHere && name !== liveName && !!sessions?.some((x) => x.name === name && x.status === 'active')
   // Going on/off air or the stream starting/stopping changes session statuses on LinTO, a few seconds later.
   const transition = `${onAir}:${state.stream}`
   const lastTransition = useRef(transition)
@@ -170,13 +184,15 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
   const noOrg = data !== null && orgs.length === 0 && !loadError
   /** Several organisations and none chosen (e.g. the saved one is gone): nothing can be listed yet. */
   const pickOrg = !noOrg && data !== null && !settings?.orgId && orgs.length > 1
+  const follow = !!sel && !sel.pending && liveElsewhere(sel.name)
   const startHint = !settings?.orgId ? 'Choisis une organisation.'
     : !sel ? 'Choisis une session.'
-    : !settings?.audioDeviceId ? 'Choisis un micro.' : undefined
+    : !settings?.audioDeviceId && !follow ? 'Choisis un micro.' : undefined
   // 'error' = the last start failed: retrying is allowed. Any other phase means a show is starting/running.
   const idle = state.phase === 'idle' || state.phase === 'error'
   const canStart = idle && busy === null && startHint === undefined
-  const caption = onAir && reused !== null ? (reused ? 'réutilisée' : 'nouvelle')
+  const caption = onAir && state.stream === 'following' ? 'suivie — audio envoyé par un autre appareil'
+    : onAir && reused !== null ? (reused ? 'réutilisée' : 'nouvelle')
     : sel?.pending ? 'nouvelle' : null
   const watermarkTarget: WatermarkTarget = sel?.pending ? { pending: true }
     : summary ? { watermark: summary.watermark } : null
@@ -194,7 +210,9 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
       if (target.pending?.profileId !== undefined) await window.lintoLive.setup.save({ profileId: target.pending.profileId })
       // Arrêter came while the profile was being saved: the switch is dropped, it must not go live after the stop.
       if (busyRef.current !== b) return
-      const r = await window.lintoLive.live.start(target.name, ...(target.pending ? [target.pending.create] as const : []))
+      const r = target.pending ? await window.lintoLive.live.start(target.name, target.pending.create)
+        : liveElsewhere(target.name) ? await window.lintoLive.live.start(target.name, undefined, true)
+        : await window.lintoLive.live.start(target.name)
       if (r.ok) {
         setReused(r.reused)
         setSel({ name: target.name })
@@ -454,6 +472,7 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
           startedAt={state.startedAt}
           busy={busy}
           canStart={canStart}
+          follow={follow}
           startHint={startHint}
           onStart={start}
           onStop={() => void stop()}

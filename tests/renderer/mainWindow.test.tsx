@@ -276,6 +276,55 @@ describe('Démarrer', () => {
   })
 })
 
+describe('Suivre (session live on another device)', () => {
+  const followBtn = () => screen.getByRole('button', { name: 'Suivre' }) as HTMLButtonElement
+
+  it('a session active on LinTO offers Suivre and follows it without sending audio', async () => {
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: true, reused: true, canStream: true }) } })
+    await renderMain()
+    await userEvent.click(row('Plénière'))
+    expect(screen.queryByRole('button', { name: 'Démarrer' })).toBeNull()
+    await userEvent.click(followBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Plénière', undefined, true)
+    act(() => emit('live-state', live({ session: { name: 'Plénière', status: 'active' }, stream: 'following' })))
+    expect(within(toolbar()).getByText('suivie — audio envoyé par un autre appareil')).toBeTruthy()
+  })
+
+  it('a session that is not active keeps Démarrer', async () => {
+    setup()
+    await renderMain()
+    await userEvent.click(row('Conférence'))
+    expect(startBtn()).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Suivre' })).toBeNull()
+  })
+
+  it('following needs no microphone', async () => {
+    setup({}, setupData({ audioDeviceId: undefined }))
+    await renderMain()
+    await userEvent.click(row('Plénière'))
+    expect(unavailable(followBtn())).toBe(false)
+  })
+
+  it('the session this machine just sent stays Démarrer while LinTO still says active', async () => {
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: true, reused: true, canStream: true }) } })
+    await renderMain()
+    await userEvent.click(row('Plénière'))
+    act(() => emit('live-state', live({ session: { name: 'Plénière', status: 'active' }, stream: 'active' })))
+    act(() => emit('live-state', IDLE))
+    expect(startBtn()).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Suivre' })).toBeNull()
+  })
+
+  it('switching on air to a session active elsewhere follows it', async () => {
+    setup({ live: { start: vi.fn().mockResolvedValue({ ok: true, reused: true, canStream: true }) } })
+    await renderMain()
+    act(() => emit('live-state', live()))
+    await userEvent.click(row('Plénière'))
+    await userEvent.click(screen.getByRole('button', { name: 'Basculer' }))
+    expect(api.live.start).toHaveBeenCalledWith('Plénière', undefined, true)
+  })
+})
+
 describe('Nouvelle session… options', () => {
   const withTr = () => setupData({}, { profiles: [{ id: 1, name: 'Français', translations: ['en', 'de'] }] })
   it('new session sends translations and visibility on Démarrer', async () => {

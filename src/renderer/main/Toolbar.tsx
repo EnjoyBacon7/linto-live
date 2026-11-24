@@ -21,6 +21,8 @@ export interface ToolbarProps {
   canStart: boolean
   /** Why Démarrer is unavailable: the button stays focusable and announces it (aria-disabled). */
   startHint?: string
+  /** The selected session is live on another device: the start button reads « Suivre » (no audio sent). */
+  follow?: boolean
   onStart(): void
   onStop(): void
   /** OBS is attached: the output window (projector) can be opened, on or off air. */
@@ -100,7 +102,7 @@ export function Toolbar(p: ToolbarProps) {
             <Button size="large" variant="primary" icon={<PlayIcon size={12} />}
               disabled={p.busy !== null || (!p.canStart && p.startHint === undefined)}
               blockedReason={p.canStart ? undefined : p.startHint} onClick={p.onStart}>
-              {p.busy === 'start' ? 'Démarrage…' : 'Démarrer'}
+              {p.follow ? (p.busy === 'start' ? 'Connexion…' : 'Suivre') : p.busy === 'start' ? 'Démarrage…' : 'Démarrer'}
             </Button>
           </>
         )}
