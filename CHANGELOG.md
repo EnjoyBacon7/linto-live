@@ -6,6 +6,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Sécurité
+
+- **Clé de diffusion sans trousseau (Linux)** : sans GNOME Keyring ni KWallet, la clé de diffusion
+  n'est plus enregistrée sur le disque (elle n'y était que masquée, avec une clé connue) : comme la
+  connexion LinTO, elle est gardée en mémoire et à saisir de nouveau à chaque lancement.
+
 ## [0.7.1] - 2026-11-23
 
 ### Corrigé
