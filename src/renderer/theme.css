@@ -424,7 +424,7 @@ h3 {
 }
 
 .field-input::placeholder {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .field-input:disabled {

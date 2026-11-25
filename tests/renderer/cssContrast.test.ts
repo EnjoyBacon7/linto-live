@@ -17,6 +17,21 @@ describe('informational text contrast (A-009)', () => {
     expect(body).not.toContain('var(--text-3)')
     expect(body).toContain('var(--text-2)')
   })
+
+  // A-018: empty-state values carry real information ("no session", "no server", saved key hint).
+  it.each(['.toolbar-name.is-empty', '.insp-detail .inspector-path.is-empty', '.inspector-value.is-empty'])(
+    '%s uses --text-2, not --text-3 (A-018)', (sel) => {
+      const body = rule(sel)
+      expect(body).not.toContain('var(--text-3)')
+      expect(body).toContain('var(--text-2)')
+    })
+
+  it('input placeholders use --text-2, not --text-3 (A-018)', () => {
+    const m = /\.field-input::placeholder\s*\{([^}]*)\}/.exec(readFileSync(join(__dirname, '../../src/renderer/theme.css'), 'utf8'))
+    expect(m).not.toBeNull()
+    expect(m![1]).not.toContain('var(--text-3)')
+    expect(m![1]).toContain('var(--text-2)')
+  })
 })
 
 // ---- A-010 / A-017: accent fill and focus indicator, measured from the theme tokens ----

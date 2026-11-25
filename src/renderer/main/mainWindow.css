@@ -295,7 +295,7 @@
 
 .toolbar-name.is-empty {
   font-weight: 400;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .toolbar-caption {
@@ -753,7 +753,7 @@
 }
 
 .insp-detail .inspector-path.is-empty {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 .insp-small-btn {
@@ -794,7 +794,7 @@
 }
 
 .inspector-value.is-empty {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 /* The default-folder placeholder is plain text, not a cut path: let it wrap instead of widening the pane. */
