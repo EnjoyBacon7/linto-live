@@ -6,6 +6,8 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.8.3] - 2026-11-25
+
 ### Ajouté
 
 - **Sous-titres croisés en une case** : dans « Nouvelle session… », un profil qui parle deux langues
@@ -349,6 +351,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.8.3]: https://github.com/EnjoyBacon7/linto-live/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/EnjoyBacon7/linto-live/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.1...v0.8.0
