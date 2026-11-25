@@ -17,6 +17,9 @@ export const RESOURCE_DENIED_MESSAGE = 'You are not authorized to access this re
 
 /** `serverMessage` of the error raised when a 2xx answer is not the JSON LinTO should send. */
 const MSG_INVALID_RESPONSE = 'réponse invalide (JSON attendu)'
+/** Body of that error (so of its `message`, shown as is in the UI): never the raw answer, which may be a whole HTML page. */
+const BODY_INVALID_RESPONSE = "réponse inattendue (pas du JSON) — vérifiez l'adresse de l'instance et le réseau (proxy, portail captif)"
+
 
 /** The user id inside a LinTO token (`data.userId` of the JWT payload), or null. Not verified: a hint only. */
 export function tokenUserId(token: string | null): string | null {
@@ -126,7 +129,7 @@ export class LintoApi {
       return JSON.parse(text)
     } catch {
       // A 200 that is not JSON (captive portal, reverse-proxy page): a typed error, not a raw SyntaxError.
-      throw new LintoHttpError(res.status, text.slice(0, 200), MSG_INVALID_RESPONSE)
+      throw new LintoHttpError(res.status, BODY_INVALID_RESPONSE, MSG_INVALID_RESPONSE)
     }
   }
 
@@ -160,7 +163,7 @@ export class LintoApi {
 
   async transcriberProfiles(orgId: string): Promise<TranscriberProfile[]> {
     const r = await this.request(`${this.urls.api}/organizations/${orgId}/transcriber_profiles`)
-    if (!Array.isArray(r)) throw new LintoHttpError(200, JSON.stringify(r)?.slice(0, 200) ?? '', MSG_INVALID_RESPONSE)
+    if (!Array.isArray(r)) throw new LintoHttpError(200, BODY_INVALID_RESPONSE, MSG_INVALID_RESPONSE)
     return r.map((p: any) => {
       const out: TranscriberProfile = { id: p.id, name: p.config?.name ?? String(p.id) }
       if (Array.isArray(p.config?.languages)) {
