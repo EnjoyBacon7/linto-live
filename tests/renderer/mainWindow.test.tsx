@@ -1216,6 +1216,21 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(screen.queryByRole('spinbutton', { name: 'Taille de la police (px)' })).toBeNull()
   })
 
+  it('the position slider saves each step, and double-click puts the band back at the bottom', async () => {
+    setup()
+    await renderMain()
+    const slider = screen.getByRole('slider', { name: 'Position du sous-titre dans l’image' }) as HTMLInputElement
+    expect(slider.value).toBe('0')
+    expect(slider.getAttribute('aria-valuetext')).toBe('En bas')
+    fireEvent.change(slider, { target: { value: '100' } })
+    expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitlePosition: 100 })
+    expect(slider.getAttribute('aria-valuetext')).toBe('En haut')
+    fireEvent.change(slider, { target: { value: '35' } })
+    expect(slider.getAttribute('aria-valuetext')).toBe('35 %')
+    fireEvent.doubleClick(slider)
+    expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitlePosition: 0 })
+  })
+
   it('QR note when the session is not public', async () => {
     const NOTE = /Le public devra se connecter à LinTO/
     setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'organization' }])

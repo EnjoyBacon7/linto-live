@@ -840,17 +840,20 @@
   margin-top: 6px;
 }
 
-.mic-gain .field-label {
+.mic-gain .field-label,
+.band-position .field-label {
   display: flex;
   justify-content: space-between;
 }
 
-.mic-gain-value {
+.mic-gain-value,
+.band-position-value {
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
 
-.mic-gain input[type='range'] {
+.mic-gain input[type='range'],
+.band-position input[type='range'] {
   width: 100%;
   margin: 2px 0 0;
 }

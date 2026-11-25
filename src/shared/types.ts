@@ -157,6 +157,8 @@ export interface Settings {
   subtitlesVisible?: boolean
   /** Subtitle font size in px on the 1920×1080 canvas (default 48). */
   subtitleFontSize?: number
+  /** Height of the subtitle band in the video, in % of its travel: 0 = bottom edge (default), 100 = top edge. */
+  subtitlePosition?: number
   /** Language shown in the subtitle band, per session id (absent = the original language). */
   subtitleLanguages?: Record<string, string>
   /** QR code of the session's public link in the video (default: hidden). */
@@ -191,6 +193,12 @@ export interface DeviceItem { id: string; name: string }
 export const DEFAULT_SUBTITLE_FONT_SIZE = 48
 export const SUBTITLE_FONT_SIZE_MIN = 12
 export const SUBTITLE_FONT_SIZE_MAX = 96
+
+/** Position actually used for the band: the saved one if valid (0 bottom … 100 top), else the bottom. */
+export function subtitlePosition(s: Pick<Settings, 'subtitlePosition'>): number {
+  const v = s.subtitlePosition
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : 0
+}
 
 /** Micro gain range in dB (OBS's gain filter accepts -30..+30). */
 export const MIC_GAIN_MIN = -30

@@ -7,12 +7,14 @@ html, body {
 }
 /* --fs: font size in px (set by overlay.js from the app's settings). As on the LinTO page:
    line height 1.2 × font size, band 2 lines high. */
+/* --pos: share (0..1) of the band's travel left under it: 0 = bottom edge, 1 = top edge (overlay.js). */
 #band {
   --fs: 48px;
+  --pos: 0;
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: calc(var(--pos) * (1080px - 2.4 * var(--fs)));
   height: calc(2.4 * var(--fs));
   box-sizing: border-box;
   padding: 0 100px;
@@ -66,6 +68,8 @@ html, body {
   transition: opacity 0.3s ease;
   pointer-events: none;
 }
+/* Band in the upper half: the QR code leaves it the top of the picture. */
+#qr.is-low { top: auto; bottom: 40px; }
 #qr[hidden] { display: none; }
 #qr.is-shown { opacity: 1; }
 #qr svg { display: block; width: 100%; height: 100%; }
@@ -82,6 +86,7 @@ html:has(body.window), body.window {
   cursor: default;
 }
 body.window #band {
+  bottom: 0;
   height: 100vh;
   padding: 0 calc(0.5 * var(--fs));
 }

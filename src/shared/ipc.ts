@@ -289,6 +289,10 @@ export function checkSettingsPatch(raw: unknown): Partial<Settings> {
     const v = raw.properNouns
     if (!Array.isArray(v) || v.length > 1000 || !v.every((n) => typeof n === 'string' && n.length <= 200)) return bad()
   }
+  if ('subtitlePosition' in raw) {
+    const v = raw.subtitlePosition
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 100) return bad()
+  }
   if ('micGainDb' in raw) {
     const v = raw.micGainDb
     if (typeof v !== 'number' || !Number.isFinite(v) || v < MIC_GAIN_MIN || v > MIC_GAIN_MAX) return bad()

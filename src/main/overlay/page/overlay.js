@@ -1,4 +1,4 @@
-import { SubtitleModel, windowMetrics } from './layout.js'
+import { SubtitleModel, bandPlacement, windowMetrics } from './layout.js'
 import { WatermarkCycle, parseWatermark } from './watermark.js'
 
 const WIDTH = 1920 - 200 // canvas width minus the band's horizontal padding (overlay.css)
@@ -27,6 +27,11 @@ const fitsAt = (size, width = WIDTH) => {
 }
 let fontSize = 48
 let bandVisible = true
+/** Band position last applied (null before the first style message) and the empty band shown while it moves. */
+let position = null
+let peeking = false
+let peekTimer = 0
+const PEEK_MS = 2000
 let wmContent = null
 const model = new SubtitleModel(fitsAt(fontSize))
 const cycle = new WatermarkCycle((v) => band.classList.toggle('has-wm', v))
@@ -38,7 +43,7 @@ function render() {
   const [a, b] = model.lines()
   l1.textContent = a
   l2.textContent = b
-  band.hidden = !bandVisible || !model.visible
+  band.hidden = !bandVisible || !(model.visible || peeking)
 }
 
 function renderWatermark(content) {
@@ -80,6 +85,22 @@ function applyQr(q) {
   qrCycle.update(q)
 }
 
+/**
+ * Moves the band on the canvas. With no caption on screen the band is hidden: when the position changes
+ * (not on the first message, which only restores it), the empty band shows for a moment so the move is seen.
+ */
+function applyPosition(value) {
+  const { ratio, qrLow } = bandPlacement(value)
+  band.style.setProperty('--pos', String(ratio))
+  qr.classList.toggle('is-low', qrLow)
+  if (position !== null && ratio !== position) {
+    peeking = true
+    clearTimeout(peekTimer)
+    peekTimer = setTimeout(() => { peeking = false; render() }, PEEK_MS)
+  }
+  position = ratio
+}
+
 function applyStyle(m) {
   if (!windowMode && typeof m.fontSize === 'number' && m.fontSize > 0 && m.fontSize !== fontSize) {
     fontSize = m.fontSize
@@ -87,6 +108,7 @@ function applyStyle(m) {
     model.setFits(fitsAt(fontSize))
   }
   bandVisible = m.visible !== false
+  if (!windowMode) applyPosition(m.position)
   if (m.watermark) {
     renderWatermark(String(m.watermark.content ?? ''))
     cycle.update(m.watermark)

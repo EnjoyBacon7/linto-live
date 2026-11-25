@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { layoutText, SubtitleModel, windowMetrics, type Layout } from '../../src/main/overlay/page/layout.js'
+import { bandPlacement, layoutText, SubtitleModel, windowMetrics, type Layout } from '../../src/main/overlay/page/layout.js'
 
 const fits = (l: string): boolean => l.length <= 20
 const empty: Layout = { words: [], cuts: [] }
@@ -123,6 +123,32 @@ describe('caption measurement', () => {
     const cssSize = /--fs:\s*(\d+)px;/.exec(band)![1]
     expect(/let fontSize = (\d+)/.exec(js)![1]).toBe(cssSize)
     expect(/const font = size \+ 'px ([^']+)'/.exec(js)![1]).toBe(family)
+  })
+})
+
+describe('bandPlacement', () => {
+  it('0 = bottom edge, 100 = top edge, clamped; anything else is the bottom', () => {
+    expect(bandPlacement(0)).toEqual({ ratio: 0, qrLow: false })
+    expect(bandPlacement(100)).toEqual({ ratio: 1, qrLow: true })
+    expect(bandPlacement(250).ratio).toBe(1)
+    expect(bandPlacement(-3).ratio).toBe(0)
+    expect(bandPlacement(undefined)).toEqual({ ratio: 0, qrLow: false })
+    expect(bandPlacement('40')).toEqual({ ratio: 0, qrLow: false })
+  })
+  it('the QR code never overlaps the band, even with the largest font', () => {
+    const H = 1080, band = 2.4 * 96, qrTop = 40, qrSize = 240 + 2 * 16
+    for (let p = 0; p <= 100; p++) {
+      const { ratio, qrLow } = bandPlacement(p)
+      const bottom = ratio * (H - band) // CSS: bottom = --pos × (1080 − band height)
+      const bandTop = H - bottom - band
+      const bandBottom = H - bottom
+      const qrY = qrLow ? H - 40 - qrSize : qrTop
+      expect(bandBottom <= qrY || bandTop >= qrY + qrSize, `position ${p}`).toBe(true)
+    }
+  })
+  it('the stylesheet places the band from --pos over its travel', () => {
+    const css = readFileSync(join(__dirname, '../../src/main/overlay/page/overlay.css'), 'utf8')
+    expect(css).toContain('bottom: calc(var(--pos) * (1080px - 2.4 * var(--fs)));')
   })
 })
 
