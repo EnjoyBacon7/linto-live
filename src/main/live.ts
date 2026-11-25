@@ -529,7 +529,14 @@ export class LiveController extends EventEmitter {
     if (this.authLost) return
     this.authLost = true
     const live = this.state.phase === 'live' || this.state.phase === 'starting'
-    if (!live) this.d.settings.setToken(null)
+    if (!live) {
+      try {
+        this.d.settings.setToken(null)
+      } catch (e) {
+        // Called from void event handlers: a failed write must not escape; the login prompt still goes out.
+        console.error('Could not clear the token:', errMsg(e))
+      }
+    }
     this.emit('auth-required')
   }
 
@@ -660,13 +667,23 @@ export class LiveController extends EventEmitter {
    * the app run (re-applied after an OBS restart), not saved: other apps would see a camera appear on its own.
    */
   setVirtualCam(on: boolean): Promise<void> {
+    const gen = this.cancelGen
     return this.enqueue(async () => {
       const c = this.ctl
       if (on) {
         if (this.state.virtualCamBlocked) throw new Error(this.state.virtualCamBlocked)
         if (!c) throw new Error(MSG_OBS_NOT_READY)
-        const why = await this.d.virtualCam?.preflight?.()
+        // The preflight may wait on a polkit dialog (pkexec, up to 120 s): Arrêter must not queue behind it.
+        // Its pkexec child is not killed (it ends on its own timeout or when the dialog is closed); only its wait is dropped.
+        let why: string | null | undefined
+        try {
+          why = await this.abortable(gen, Promise.resolve(this.d.virtualCam?.preflight?.()))
+        } catch (e) {
+          if (e instanceof CancelledError) return
+          throw e
+        }
         if (why) throw new Error(why)
+        if (gen !== this.cancelGen) return
       }
       this.virtualCam = on
       this.setState({ virtualCam: on })
@@ -1164,7 +1181,12 @@ export class LiveController extends EventEmitter {
     if (res.kind === 'terminated') return { ok: false, message: msgTerminated(res.name) }
 
     try {
-      this.d.settings.update({ lastSessionName: res.session.name })
+      try {
+        this.d.settings.update({ lastSessionName: res.session.name })
+      } catch (e) {
+        // Convenience field only: a full or read-only disk must not stop the show.
+        console.warn('Could not save lastSessionName:', errMsg(e))
+      }
       this.setState({ phase: 'starting' })
 
       // Switching from a previous show: the old stream must be fully stopped before retargeting.

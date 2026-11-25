@@ -34,6 +34,7 @@ export function lintoErrorMessage(e: unknown, action: LintoAction): string | nul
   }
   if (e instanceof NotFoundError) return action === 'list' ? MSG_ORG_GONE : MSG_SESSION_GONE
   if (e instanceof LintoHttpError) {
+    if (e.status < 300) return `LinTO a envoyé une réponse inattendue (HTTP ${e.status}). Vérifie l'adresse de l'instance et le réseau (proxy, portail captif).`
     if (e.status >= 500) return `LinTO ne répond pas correctement (HTTP ${e.status}). Réessaie dans un instant.`
     return `LinTO a refusé la demande (HTTP ${e.status}${e.serverMessage ? ` : ${e.serverMessage}` : ''}).`
   }

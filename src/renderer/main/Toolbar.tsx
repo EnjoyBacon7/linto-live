@@ -49,12 +49,12 @@ function LivePill({ startedAt }: { startedAt?: number }) {
 /** Unified title bar/toolbar of the content area: session name + main actions. Draggable, controls excluded. */
 export function Toolbar(p: ToolbarProps) {
   const outputButton = (
-    <Button size="large" className="btn-icon" aria-label="Afficher la fenêtre de sortie" title="Afficher la fenêtre de sortie"
+    <Button key="output" size="large" className="btn-icon" aria-label="Afficher la fenêtre de sortie" title="Afficher la fenêtre de sortie"
       icon={<DisplayIcon />} disabled={!p.canShowOutput} onClick={p.onShowOutput} />
   )
   const subtitlesLabel = p.subtitlesOpen ? 'Fermer la fenêtre de sous-titres' : 'Afficher la fenêtre de sous-titres'
   const subtitlesButton = (
-    <Button size="large" className="btn-icon" aria-label={subtitlesLabel} title={subtitlesLabel}
+    <Button key="subtitles" size="large" className="btn-icon" aria-label={subtitlesLabel} title={subtitlesLabel}
       aria-pressed={p.subtitlesOpen} icon={<CaptionsIcon />} onClick={p.onToggleSubtitles} />
   )
   return (
@@ -84,13 +84,13 @@ export function Toolbar(p: ToolbarProps) {
         )}
         {p.onAir ? (
           <>
-            <LivePill startedAt={p.startedAt} />
-            <Button size="large" icon={<StopIcon size={12} />} disabled={!canInterrupt(p.busy)} onClick={p.onStop}>
+            <LivePill key="pill" startedAt={p.startedAt} />
+            <Button key="stop" size="large" icon={<StopIcon size={12} />} disabled={!canInterrupt(p.busy)} onClick={p.onStop}>
               {p.busy === 'stop' ? 'Arrêt…' : 'Arrêter'}
             </Button>
             {outputButton}
             {subtitlesButton}
-            <Button size="large" variant="destructive" disabled={p.busy !== null}
+            <Button key="terminate" size="large" variant="destructive" disabled={p.busy !== null}
               blockedReason={p.terminateBlocked} onClick={p.onTerminate}>
               {p.busy === 'terminate' ? 'Fin de session…' : 'Terminer…'}
             </Button>
@@ -99,7 +99,7 @@ export function Toolbar(p: ToolbarProps) {
           <>
             {outputButton}
             {subtitlesButton}
-            <Button size="large" variant="primary" icon={<PlayIcon size={12} />}
+            <Button key="start" size="large" variant="primary" icon={<PlayIcon size={12} />}
               disabled={p.busy !== null || (!p.canStart && p.startHint === undefined)}
               blockedReason={p.canStart ? undefined : p.startHint} onClick={p.onStart}>
               {p.follow ? (p.busy === 'start' ? 'Connexion…' : 'Suivre') : p.busy === 'start' ? 'Démarrage…' : 'Démarrer'}

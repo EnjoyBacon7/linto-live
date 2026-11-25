@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { LintoApi } from '../../src/main/linto/api'
-import { ForbiddenError, UnauthorizedError } from '../../src/shared/types'
+import { ForbiddenError, LintoHttpError, UnauthorizedError } from '../../src/shared/types'
 import type { LintoUrls } from '../../src/main/linto/instance'
 
 const urls: LintoUrls = { instance: 'https://s', api: 'https://s/api', auth: 'https://s/auth', wsUrl: 'https://s', wsPath: '/io' }
@@ -24,6 +24,23 @@ describe('LintoApi', () => {
     const { calls, api } = mk(() => json([{ id: 3, config: { name: 'Fr', languages: [{ candidate: 'fr-FR' }] } }]))
     expect(await api.transcriberProfiles('o1')).toEqual([{ id: 3, name: 'Fr', languages: ['fr-FR'] }])
     expect(calls[0].url).toBe('https://s/api/organizations/o1/transcriber_profiles')
+  })
+  it('a 2xx body that is not JSON (captive portal, proxy page) => typed LintoHttpError, not a SyntaxError', async () => {
+    const e = await mk(() => new Response('<html>login</html>')).api.organizations().catch((x) => x)
+    expect(e).toBeInstanceOf(LintoHttpError)
+    expect(e.status).toBe(200)
+    expect(e.serverMessage).toMatch(/JSON/)
+    // The message is shown as is in the UI: no trace of the page.
+    expect(String(e)).not.toMatch(/html|login/i)
+    expect(e.message).toMatch(/portail captif/)
+    expect(e.message.length).toBeLessThan(200)
+  })
+  it('transcriberProfiles with a non-array body => typed LintoHttpError, not "r.map is not a function"', async () => {
+    const e = await mk(() => json({ a: 1 })).api.transcriberProfiles('o1').catch((x) => x)
+    expect(e).toBeInstanceOf(LintoHttpError)
+    expect(e.status).toBe(200)
+    expect(e.message).toMatch(/portail captif/)
+    expect(e.message).not.toMatch(/"a"/)
   })
   it('401 => UnauthorizedError, other non-2xx => Error with status+body', async () => {
     await expect(mk(() => json({}, 401)).api.organizations()).rejects.toBeInstanceOf(UnauthorizedError)

@@ -276,5 +276,5 @@ Paquets :
 
 LinTO Live embarque **OBS Studio 32.1.0** (licence GPL-2.0), piloté comme un processus séparé via
 obs-websocket. Sur macOS, c'est le binaire officiel non modifié ; sur Linux, il est compilé depuis
-les sources avec un petit correctif. Provenance, sources et correctif :
+les sources avec trois petits correctifs. Provenance, sources et correctifs :
 [`resources/obs/SOURCE.md`](resources/obs/SOURCE.md).

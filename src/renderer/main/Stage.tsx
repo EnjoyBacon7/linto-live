@@ -85,7 +85,8 @@ const Segment = memo(function Segment({ s, prev, partial }: { s: TranscriptSegme
   const l = segmentLabels(s, prev)
   const time = clockTime(s.at)
   return (
-    <div className={l.speaker || l.lang ? 'transcript-turn is-new-turn' : 'transcript-turn'}>
+    // The partial is rewritten several times a second: hidden from the polite log so only finals are announced.
+    <div className={l.speaker || l.lang ? 'transcript-turn is-new-turn' : 'transcript-turn'} aria-hidden={partial || undefined}>
       <div className="transcript-meta">
         {l.time && <time className="transcript-time" dateTime={new Date(s.at).toISOString()}>{time}</time>}
         {l.lang && <span className="transcript-lang">{s.lang}</span>}

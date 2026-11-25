@@ -32,6 +32,8 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
   const [remember, setRemember] = useState(false)
   const typed = useRef(false) // the user typed in Email / Mot de passe: a late saved login must not overwrite it
   const prefilled = useRef(false)
+  const modifyBtn = useRef<HTMLButtonElement>(null)
+  const refocusModify = useRef(false) // Enter committed the instance: put focus back on « Modifier » (a click elsewhere keeps its own target)
 
   useEffect(() => {
     let alive = true
@@ -48,6 +50,10 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
     window.lintoLive.setup.load().then((d) => { if (!alive) return; loaded.current = norm(d.settings.instance); setInstance(d.settings.instance) }).catch(() => {}) // rejects (Unauthorized) while logged out: keep the default
     return () => { alive = false }
   }, [])
+
+  useEffect(() => {
+    if (!editingInstance && refocusModify.current) { refocusModify.current = false; modifyBtn.current?.focus() }
+  }, [editingInstance])
 
   const run = async (fn: () => Promise<void>): Promise<void> => {
     setBusy(true)
@@ -101,7 +107,7 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
             autoFocus
             onChange={(e) => setInstance(e.target.value)}
             onBlur={() => void saveInstance()}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() } }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); refocusModify.current = true; e.currentTarget.blur() } }}
           />
         ) : (
           <p className="secondary">
@@ -110,7 +116,7 @@ export function Login({ onLoggedIn, onCancel, embedded = false }: LoginProps) {
             {!embedded && (
               <>
                 {' — '}
-                <button type="button" className="login-link" onClick={() => setEditingInstance(true)}>Modifier</button>
+                <button ref={modifyBtn} type="button" className="login-link" onClick={() => setEditingInstance(true)}>Modifier</button>
               </>
             )}
           </p>

@@ -17,6 +17,21 @@ describe('informational text contrast (A-009)', () => {
     expect(body).not.toContain('var(--text-3)')
     expect(body).toContain('var(--text-2)')
   })
+
+  // A-018: empty-state values carry real information ("no session", "no server", saved key hint).
+  it.each(['.toolbar-name.is-empty', '.insp-detail .inspector-path.is-empty', '.inspector-value.is-empty'])(
+    '%s uses --text-2, not --text-3 (A-018)', (sel) => {
+      const body = rule(sel)
+      expect(body).not.toContain('var(--text-3)')
+      expect(body).toContain('var(--text-2)')
+    })
+
+  it('input placeholders use --text-2, not --text-3 (A-018)', () => {
+    const m = /\.field-input::placeholder\s*\{([^}]*)\}/.exec(readFileSync(join(__dirname, '../../src/renderer/theme.css'), 'utf8'))
+    expect(m).not.toBeNull()
+    expect(m![1]).not.toContain('var(--text-3)')
+    expect(m![1]).toContain('var(--text-2)')
+  })
 })
 
 // ---- A-010 / A-017: accent fill and focus indicator, measured from the theme tokens ----
@@ -59,6 +74,18 @@ describe.each([['light', light], ['dark', dark]] as const)('%s theme', (_, t) =>
     'focus colour is >= 3:1 against %s (A-017)', (bg) => {
       expect(ratio(c('--focus-color'), c(bg))).toBeGreaterThanOrEqual(3)
     })
+
+  it.each(['--bg-content', '--bg-stage', '--bg-inspector', '--sheet-bg'])(
+    'error text colour --bad-text is >= 4.5:1 against %s (A-019)', (bg) => {
+      expect(ratio(c('--bad-text'), c(bg))).toBeGreaterThanOrEqual(4.5)
+    })
+})
+
+describe('error text uses --bad-text, not the dot/icon --bad (A-019)', () => {
+  it.each(['theme.css', 'main/mainWindow.css', 'screens/login.css', 'screens/permissions.css'])('%s', (file) => {
+    const src = readFileSync(join(__dirname, '../../src/renderer', file), 'utf8')
+    expect(src).not.toMatch(/(^|[;{\s])color:\s*var\(--bad\)/)
+  })
 })
 
 describe('accent fill is used where text sits on it (A-010)', () => {
@@ -69,5 +96,24 @@ describe('accent fill is used where text sits on it (A-010)', () => {
   it('focus ring is opaque (no translucent halo)', () => {
     expect(light['--focus-ring']).toContain('var(--focus-color)')
     expect(light['--focus-ring']).not.toContain('transparent')
+  })
+})
+
+// ---- A-001: controls that set their own box-shadow must still show the focus ring ----
+
+describe('keyboard focus ring survives per-control box-shadow (A-001)', () => {
+  it.each(['.btn', '.btn-plain', '.popup-select', '.field-input'])('%s has a :focus-visible rule applying --focus-ring', (sel) => {
+    const escaped = sel.replace(/[.]/g, '\\.')
+    // Any rule whose selector list contains `<sel>:focus-visible` (exact class, not a longer name).
+    const re = new RegExp(`(?:^|\\n)([^{}]*${escaped}:focus-visible(?![\\w-])[^{}]*)\\{([^}]*)\\}`, 'g')
+    const bodies = [...theme.matchAll(re)].map((m) => m[2])
+    expect(bodies.length).toBeGreaterThan(0)
+    expect(bodies.join('\n')).toMatch(/box-shadow:\s*var\(--focus-ring\)/)
+  })
+
+  it('the focus rules come after the base rules so they win the cascade', () => {
+    const focusAt = theme.search(/\.field-input:focus-visible/)
+    const baseAt = theme.search(/\n\.field-input\s*\{/)
+    expect(focusAt).toBeGreaterThan(baseAt)
   })
 })

@@ -232,4 +232,11 @@ describe('SettingsStore saved login', () => {
     s.update({ instance: 'https://autre.example.org' })
     expect(s.getSavedLogin()).toBeNull()
   })
+  it('changing the instance drops the in-memory token too (no keychain)', () => {
+    const s = new SettingsStore(appPaths(dir, 'linux'), crypto, { persistSecrets: false })
+    s.update({ instance: 'https://old.example' })
+    s.setToken('OLD-INSTANCE-TOKEN')
+    s.update({ instance: 'https://new.example' })
+    expect(s.getToken()).toBeNull()
+  })
 })

@@ -118,6 +118,7 @@ export class SettingsStore {
     if (clean.instance !== undefined && clean.instance !== this.data.instance) {
       delete next.tokenEnc
       delete next.savedLoginEnc
+      this.memToken = null // no keychain: the in-memory token belongs to the old server too
     }
     if (clean.broadcastServer !== undefined && clean.broadcastServer !== this.data.broadcastServer) {
       delete next.broadcastKeyEnc
