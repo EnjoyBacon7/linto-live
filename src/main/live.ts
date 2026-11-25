@@ -529,7 +529,14 @@ export class LiveController extends EventEmitter {
     if (this.authLost) return
     this.authLost = true
     const live = this.state.phase === 'live' || this.state.phase === 'starting'
-    if (!live) this.d.settings.setToken(null)
+    if (!live) {
+      try {
+        this.d.settings.setToken(null)
+      } catch (e) {
+        // Called from void event handlers: a failed write must not escape; the login prompt still goes out.
+        console.error('Could not clear the token:', errMsg(e))
+      }
+    }
     this.emit('auth-required')
   }
 
@@ -1174,7 +1181,12 @@ export class LiveController extends EventEmitter {
     if (res.kind === 'terminated') return { ok: false, message: msgTerminated(res.name) }
 
     try {
-      this.d.settings.update({ lastSessionName: res.session.name })
+      try {
+        this.d.settings.update({ lastSessionName: res.session.name })
+      } catch (e) {
+        // Convenience field only: a full or read-only disk must not stop the show.
+        console.warn('Could not save lastSessionName:', errMsg(e))
+      }
       this.setState({ phase: 'starting' })
 
       // Switching from a previous show: the old stream must be fully stopped before retargeting.

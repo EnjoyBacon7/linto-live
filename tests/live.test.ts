@@ -639,6 +639,33 @@ describe('LiveController', () => {
     expect(t.captions.open).toHaveBeenLastCalledWith('s1', 7, 'org1')
   })
 
+  it('a failed write of lastSessionName does not abort the start', async () => {
+    const t = setup()
+    await t.live.boot()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    t.settings.update.mockImplementationOnce(() => {
+      throw new Error('EROFS: read-only file system')
+    })
+    const r = await t.live.start('Conf')
+    warn.mockRestore()
+    expect(r.ok).toBe(true)
+    expect(t.last().phase).toBe('live')
+  })
+
+  it('a failed token clear in reportUnauthorized does not throw out of the caller', async () => {
+    const t = setup()
+    await t.live.boot()
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    t.settings.setToken.mockImplementationOnce(() => {
+      throw new Error('ENOSPC')
+    })
+    const authReq = vi.fn()
+    t.live.on('auth-required', authReq)
+    expect(() => t.live.reportUnauthorized()).not.toThrow()
+    err.mockRestore()
+    expect(authReq).toHaveBeenCalled()
+  })
+
   it('unauthorized during start when not live clears token and asks for login', async () => {
     const t = setup()
     await t.live.boot()
