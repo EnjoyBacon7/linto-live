@@ -21,7 +21,7 @@ runs:
         echo "APT_CACHE_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
     # Only the .deb files: apt's root-owned lock file and partial/ directory cannot be archived.
-    - uses: actions/cache@v4
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/apt-archives/*.deb
         key: apt-${{ inputs.key }}-${{ env.APT_CACHE_IMAGE }}-${{ hashFiles('.github/workflows/*.yml', 'scripts/build-obs-linux.sh') }}
