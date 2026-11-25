@@ -204,3 +204,21 @@ describe('Login', () => {
     expect(screen.queryByText('studio.example.org')).toBeNull()
   })
 })
+
+describe('Login instance focus (A-021)', () => {
+  it('returns focus to « Modifier » after Enter commits the instance', async () => {
+    window.lintoLive = makeApi()
+    render(<Login onLoggedIn={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Modifier' }))
+    expect(document.activeElement).toBe(screen.getByLabelText('Instance LinTO'))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Modifier' })))
+  })
+  it('does not steal focus when the field is left by clicking another control', async () => {
+    window.lintoLive = makeApi()
+    render(<Login onLoggedIn={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Modifier' }))
+    await userEvent.click(screen.getByLabelText('Email'))
+    expect(document.activeElement).toBe(screen.getByLabelText('Email'))
+  })
+})
