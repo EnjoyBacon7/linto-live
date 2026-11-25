@@ -414,6 +414,15 @@ h3 {
   font-size: 13px;
 }
 
+/* These controls set their own box-shadow at the same specificity as the global
+   :focus-visible rule, so restate the focus ring here (declared after them) or it never shows. */
+.btn:focus-visible,
+.btn-plain:focus-visible,
+.popup-select:focus-visible,
+.field-input:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
 .field-input::placeholder {
   color: var(--text-3);
 }

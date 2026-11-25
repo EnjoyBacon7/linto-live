@@ -71,3 +71,22 @@ describe('accent fill is used where text sits on it (A-010)', () => {
     expect(light['--focus-ring']).not.toContain('transparent')
   })
 })
+
+// ---- A-001: controls that set their own box-shadow must still show the focus ring ----
+
+describe('keyboard focus ring survives per-control box-shadow (A-001)', () => {
+  it.each(['.btn', '.btn-plain', '.popup-select', '.field-input'])('%s has a :focus-visible rule applying --focus-ring', (sel) => {
+    const escaped = sel.replace(/[.]/g, '\\.')
+    // Any rule whose selector list contains `<sel>:focus-visible` (exact class, not a longer name).
+    const re = new RegExp(`(?:^|\\n)([^{}]*${escaped}:focus-visible(?![\\w-])[^{}]*)\\{([^}]*)\\}`, 'g')
+    const bodies = [...theme.matchAll(re)].map((m) => m[2])
+    expect(bodies.length).toBeGreaterThan(0)
+    expect(bodies.join('\n')).toMatch(/box-shadow:\s*var\(--focus-ring\)/)
+  })
+
+  it('the focus rules come after the base rules so they win the cascade', () => {
+    const focusAt = theme.search(/\.field-input:focus-visible/)
+    const baseAt = theme.search(/\n\.field-input\s*\{/)
+    expect(focusAt).toBeGreaterThan(baseAt)
+  })
+})
