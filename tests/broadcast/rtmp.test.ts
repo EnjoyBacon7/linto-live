@@ -14,6 +14,43 @@ describe('amf0', () => {
   it('throws on truncated data', () => {
     expect(() => decode(encode('abcdef').subarray(0, 4))).toThrow()
   })
+
+  const u16 = (n: number): Buffer => Buffer.from([n >> 8, n & 0xff])
+  const u32 = (n: number): Buffer => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b }
+  const f64 = (n: number): Buffer => { const b = Buffer.alloc(8); b.writeDoubleBE(n); return b }
+  const key = (k: string): Buffer => Buffer.concat([u16(k.length), Buffer.from(k)])
+  const END = Buffer.from([0, 0, 0x09])
+
+  it('decodes an ECMA array as an object (count ignored, nested values kept)', () => {
+    const b = Buffer.concat([
+      Buffer.from([0x08]), u32(2),
+      key('a'), Buffer.from([0x00]), f64(1.5),
+      key('b'), Buffer.from([0x02]), key('x'),
+      END
+    ])
+    expect(decode(b)).toEqual([{ a: 1.5, b: 'x' }])
+  })
+  it('decodes a long string (32-bit length)', () => {
+    const text = 'é'.repeat(70_000) // > 65535 bytes: cannot be a short string
+    const body = Buffer.from(text)
+    expect(decode(Buffer.concat([Buffer.from([0x0c]), u32(body.length), body, Buffer.from([0x05])]))).toEqual([text, null])
+  })
+  it('decodes a date as its millisecond timestamp and skips the timezone', () => {
+    const b = Buffer.concat([Buffer.from([0x0b]), f64(1_700_000_000_000), u16(0), Buffer.from([0x01, 0x01])])
+    expect(decode(b)).toEqual([1_700_000_000_000, true])
+  })
+  it('decodes a strict array, nested, and undefined', () => {
+    const b = Buffer.concat([
+      Buffer.from([0x0a]), u32(3), Buffer.from([0x00]), f64(7), Buffer.from([0x06]), Buffer.from([0x0a]), u32(1), Buffer.from([0x02]), key('z')
+    ])
+    expect(decode(b)).toEqual([[7, undefined, ['z']]])
+  })
+  it('throws on an unknown type, an unterminated object and a truncated long string', () => {
+    expect(() => decode(Buffer.from([0x0d]))).toThrow(/type 13/)
+    expect(() => decode(Buffer.from([0xff]))).toThrow(/type 255/)
+    expect(() => decode(Buffer.concat([Buffer.from([0x03]), key('a'), Buffer.from([0x05])]))).toThrow()
+    expect(() => decode(Buffer.concat([Buffer.from([0x0c]), u32(10), Buffer.from('abc')]))).toThrow()
+  })
 })
 
 describe('chunks', () => {
@@ -107,7 +144,10 @@ function fakeServer(reply: (cmd: Amf[], send: (streamId: number, ...v: Amf[]) =>
   return {
     commands, media, server,
     listen: () => new Promise<number>((r) => server.listen(0, '127.0.0.1', () => r((server.address() as { port: number }).port))),
-    drop: () => sock?.destroy()
+    drop: () => sock?.destroy(),
+    /** Stops reading from the client, as a slow platform would: its TCP window fills up. */
+    hold: () => sock?.pause(),
+    release: () => sock?.resume()
   }
 }
 
@@ -187,4 +227,56 @@ describe('openBroadcast (RTMP session)', () => {
     f.drop()
     expect(await closed).toBeInstanceOf(Error)
   })
+
+  const flvHeader = Buffer.from('FLV\x01\x05\x00\x00\x00\x09\x00\x00\x00\x00', 'latin1')
+  const flvTag = (type: number, body: Buffer): Buffer => {
+    const h = Buffer.alloc(11)
+    h[0] = type
+    h.writeUIntBE(body.length, 1, 3)
+    const prev = Buffer.alloc(4)
+    prev.writeUInt32BE(11 + body.length)
+    return Buffer.concat([h, body, prev])
+  }
+  const until = async (cond: () => boolean, ms: number): Promise<void> => {
+    for (const end = Date.now() + ms; Date.now() < end && !cond(); ) await new Promise((r) => setTimeout(r, 20))
+  }
+
+  it('a non-FLV first chunk destroys OBS socket and ends the platform session', async () => {
+    const f = fakeServer(accepting)
+    servers.push(f.server)
+    const port = await f.listen()
+    const s = await openBroadcast({ server: `rtmp://127.0.0.1:${port}/live2`, key: 'k' })
+    const closed = new Promise<Error | null>((r) => s.onClose(r))
+    const obs = netConnect({ path: s.url.slice('unix:'.length) })
+    const obsClosed = new Promise<void>((r) => obs.once('close', () => r()))
+    obs.on('error', () => {})
+    await new Promise((r) => obs.once('connect', r))
+    obs.write(Buffer.from('GET / HTTP/1.1\r\nHost: x\r\n\r\n'))
+    await obsClosed
+    expect(await closed).toBeNull()
+    expect(f.commands.some((c) => c[0] === 'deleteStream')).toBe(true)
+    s.close()
+  })
+
+  it('backpressure: a slow platform pauses OBS socket, and every tag is delivered once it drains', async () => {
+    const f = fakeServer(accepting)
+    servers.push(f.server)
+    const port = await f.listen()
+    const s = await openBroadcast({ server: `rtmp://127.0.0.1:${port}/live2`, key: 'k' })
+    const obs = netConnect({ path: s.url.slice('unix:'.length) })
+    obs.on('error', () => {})
+    await new Promise((r) => obs.once('connect', r))
+    f.hold()
+    const total = 300
+    const body = Buffer.alloc(128 * 1024, 1) // ~38 MB: far beyond the socket buffers
+    obs.write(flvHeader)
+    for (let i = 0; i < total; i++) obs.write(flvTag(9, body))
+    await new Promise((r) => setTimeout(r, 300))
+    expect(f.media.length).toBeLessThan(total) // the platform is not reading yet
+    f.release()
+    await until(() => f.media.length >= total, 15_000)
+    expect(f.media.length).toBe(total)
+    s.close()
+    obs.destroy()
+  }, 30_000)
 })
