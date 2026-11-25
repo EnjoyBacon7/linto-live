@@ -1,9 +1,10 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
-import { openBroadcast } from '../../src/main/broadcast/relay'
+import { openBroadcast, type BroadcastSession } from '../../src/main/broadcast/relay'
 
 const hasFfmpeg = ((): boolean => {
   try {
@@ -14,18 +15,45 @@ const hasFfmpeg = ((): boolean => {
   }
 })()
 
+/** A free TCP port, picked by the OS instead of a random guess that may collide. */
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const srv = createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address() as { port: number }
+      srv.close(() => resolve(port))
+    })
+  })
+
+/**
+ * Opens the broadcast once the RTMP server listens, retrying while the port refuses connections (ffmpeg takes
+ * a while to start). `ffmpeg -listen 1` accepts a single client, so the port is not probed with a throwaway
+ * connection: the real attempt is the probe, and only a refused connection is retried.
+ */
+async function openWhenListening(server: string, key: string, timeoutMs = 15_000): Promise<BroadcastSession> {
+  const end = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      return await openBroadcast({ server, key })
+    } catch (e) {
+      if (Date.now() >= end) throw e
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
+}
+
 /** A real RTMP server (ffmpeg -listen) receives what the relay publishes, fed by an ffmpeg FLV source. */
 describe.skipIf(!hasFfmpeg)('openBroadcast with ffmpeg on both ends', () => {
   const dir = mkdtempSync(join(tmpdir(), 'relay-'))
   afterAll(() => rmSync(dir, { recursive: true, force: true }))
 
   it('relays audio + video to the RTMP server under the stream key', async () => {
-    const port = 21000 + Math.floor(Math.random() * 2000)
+    const port = await freePort()
     const out = join(dir, 'got.flv')
     const srv = spawn('ffmpeg', ['-v', 'error', '-y', '-listen', '1', '-i', `rtmp://127.0.0.1:${port}/live2/cle-secrete`, '-c', 'copy', out], { stdio: 'ignore' })
     const srvDone = new Promise((r) => srv.once('exit', r))
-    await new Promise((r) => setTimeout(r, 700))
-    const s = await openBroadcast({ server: `rtmp://127.0.0.1:${port}/live2`, key: 'cle-secrete' })
+    const s = await openWhenListening(`rtmp://127.0.0.1:${port}/live2`, 'cle-secrete')
     expect(s.url).toMatch(/^unix:\//)
     const src = spawn('ffmpeg', [
       '-v', 'error', '-re', '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440',
