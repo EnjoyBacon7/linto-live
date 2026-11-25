@@ -1,6 +1,6 @@
 # OBS Studio bundled with LinTO Live
 
-LinTO Live ships **OBS Studio 32.1.0** (unmodified on macOS, with one small patch on
+LinTO Live ships **OBS Studio 32.1.0** (unmodified on macOS, with three small patches on
 Linux, see below) and drives it as a separate process over obs-websocket (mere aggregation;
 LinTO Live is not a derivative of OBS Studio).
 
@@ -19,11 +19,23 @@ LinTO Live is not a derivative of OBS Studio).
   `5533a277e4400203b50114c993f89878d50a27b9`, with its `obs-browser` and `obs-websocket`
   submodules) on Ubuntu 24.04 by `scripts/build-obs-linux.sh` in the LinTO Live repository.
   The exact submodule commits and build host are recorded in `BUILD-INFO.txt` next to this file.
-- Modification: one patch, shipped in `patches/` next to this file
-  (`0001-minimize-to-tray-without-tray.patch`, `frontend/widgets/OBSBasic.cpp`): with
-  `--minimize-to-tray`, the main window stays hidden even when the desktop has no system tray
-  (upstream only hides it when a tray is available). Apply it to the source below with
-  `patch -p1 < patches/0001-minimize-to-tray-without-tray.patch`.
+- Modification: three patches, shipped in `patches/` next to this file (the same files as
+  `scripts/obs-linux-patches/` in the LinTO Live repository):
+  - `0001-minimize-to-tray-without-tray.patch` (`frontend/widgets/OBSBasic.cpp`): with
+    `--minimize-to-tray`, the main window stays hidden even when the desktop has no system tray
+    (upstream only hides it when a tray is available).
+  - `0002-screencast-portal-on-ui-thread.patch` (`plugins/linux-pipewire/screencast-portal.c`):
+    the ScreenCast portal (Wayland screen capture) is always started on OBS's UI thread, the only
+    one that iterates the GLib main context delivering the portal's D-Bus replies; otherwise a
+    capture created through obs-websocket stays black.
+  - `0003-projector-fullscreen-frameless-f11.patch` (`frontend/widgets/OBSProjector.cpp`): a
+    full-screen projector drops its title bar and gets it back as a window; F11 toggles full
+    screen on the current screen, and Escape leaves full screen before closing.
+
+  The binary is built with all three applied. Apply them, in order, to the source below with
+  `git apply patches/0001-minimize-to-tray-without-tray.patch
+  patches/0002-screencast-portal-on-ui-thread.patch
+  patches/0003-projector-fullscreen-frameless-f11.patch` (or `patch -p1 < <file>` for each).
 - Configuration: Release, `CMAKE_INSTALL_PREFIX=/obs`, `ENABLE_RELOCATABLE=ON`,
   `ENABLE_BROWSER=ON`, `ENABLE_WEBSOCKET=ON`, `ENABLE_NEW_MPEGTS_OUTPUT=ON`, `ENABLE_AJA=OFF`,
   `ENABLE_WEBRTC=OFF`, `ENABLE_SCRIPTING=OFF`, `ENABLE_VLC=OFF`, `ENABLE_WHATSNEW=OFF`.
@@ -37,7 +49,7 @@ LinTO Live is not a derivative of OBS Studio).
 
 ## Corresponding source code
 
-The upstream source below, plus (Linux) the patch in `patches/`.
+The upstream source below, plus (Linux) the three patches in `patches/`.
 
 - Repository: https://github.com/obsproject/obs-studio
 - Tag: `32.1.0`
