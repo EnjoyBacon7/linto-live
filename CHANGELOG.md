@@ -6,6 +6,34 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.8.1] - 2026-11-25
+
+### Corrigé
+
+- **Caméra virtuelle (Linux)** : si la fenêtre de mot de passe qui charge `v4l2loopback` reste
+  ouverte, « Arrêter » ne bloque plus le direct pendant deux minutes. La caméra reste désactivée,
+  et il suffit de la recocher.
+- **Démarrer malgré un disque plein ou en lecture seule** : un réglage qui ne peut pas être
+  enregistré (le dernier nom de session) n'empêche plus de lancer le direct.
+- **Réponse inattendue du serveur** : derrière un proxy ou un portail captif qui renvoie une page
+  web, l'application affiche un message clair au lieu d'une erreur technique.
+
+### Accessibilité
+
+- **Focus clavier visible** : les boutons, les menus déroulants et les champs de saisie montrent de
+  nouveau l'anneau de focus quand on navigue au clavier.
+- **Contraste** : les textes d'information (« Aucune session choisie », « Aucun serveur »), les
+  textes indicatifs des champs et les messages d'erreur sont plus lisibles.
+- **Lecteurs d'écran** : la phrase en cours de transcription n'est plus relue à chaque mot ; seules
+  les phrases terminées sont annoncées.
+- **Barre d'outils et connexion** : le focus ne passe plus sur un autre bouton quand Démarrer et
+  Arrêter s'échangent, et il revient sur « Modifier » après la saisie de l'instance.
+
+### Sécurité
+
+- **Changement d'instance sans trousseau (Linux)** : la connexion gardée en mémoire est oubliée
+  quand on change d'instance LinTO, et n'est donc plus envoyée au nouveau serveur.
+
 ## [0.8.0] - 2026-11-24
 
 ### Ajouté
@@ -304,6 +332,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.8.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.6.2...v0.7.0
