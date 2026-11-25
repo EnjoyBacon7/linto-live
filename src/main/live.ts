@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, UnauthorizedError,
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, UnauthorizedError,
   type CaptureKind, type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
@@ -742,7 +742,7 @@ export class LiveController extends EventEmitter {
     return this.enqueue(async () => {
       const before = this.d.settings.get()
       this.d.settings.update(patch)
-      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined || patch.qr !== undefined) this.pushStyle()
+      if (patch.subtitlesVisible !== undefined || patch.subtitleFontSize !== undefined || patch.subtitlePosition !== undefined || patch.qr !== undefined) this.pushStyle()
       const c = this.ctl
       if (!c) return
       // 'none' (the plain LinTO client): the video source is emptied.
@@ -827,6 +827,7 @@ export class LiveController extends EventEmitter {
       type: 'style',
       visible: s.subtitlesVisible !== false,
       fontSize: subtitleFontSize(s),
+      position: subtitlePosition(s),
       watermark: this.watermark ?? resolveWatermark(undefined, cfg),
       qr: this.qrCache && qr.display ? { svg: this.qrCache.svg, ...qr } : null
     })

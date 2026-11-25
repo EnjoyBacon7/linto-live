@@ -197,6 +197,7 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { properNounsEnabled: true, properNouns: ['LINAGORA', 'Issy-les-Moulineaux'] },
       { properNouns: [] },
       { broadcastEnabled: true, recordEnabled: false },
+      { subtitlePosition: 0 }, { subtitlePosition: 100 }, { subtitlePosition: 42 },
       { micGainDb: 0 }, { micGainDb: -30 }, { micGainDb: 20 }, { micGainDb: -4.5 },
       { instance: 'https://studio.linto.ai', profileId: 2, subtitleFontSize: 40 }
     ]
@@ -233,6 +234,7 @@ describe('checkSettingsPatch (setup.save patch)', () => {
       { broadcastEnabled: 'yes' },
       { broadcastServer: 'rtmp://a.rtmp.youtube.com/live2' }, // only with its key, via setup.setBroadcast
       { broadcastKeySet: true },
+      { subtitlePosition: '50' }, { subtitlePosition: -1 }, { subtitlePosition: 101 }, { subtitlePosition: NaN },
       { micGainDb: '6' }, { micGainDb: 21 }, { micGainDb: -31 }, { micGainDb: NaN }, { micGainDb: null },
       { permissionsOnboarded: true } // set by permissions.finish only
     ]

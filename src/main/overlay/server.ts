@@ -12,6 +12,8 @@ export interface OverlayStyle {
   visible: boolean
   /** Font size in px on the 1920×1080 canvas. */
   fontSize: number
+  /** Where the band sits on the canvas: 0 = bottom edge, 100 = top edge. */
+  position: number
   watermark: Watermark
   /** QR code of the session (SVG markup) and its own show/hide cycle; null when there is none. */
   qr: { svg: string; display: boolean; pinned: boolean; frequency: number; duration: number } | null

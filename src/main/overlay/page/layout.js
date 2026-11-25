@@ -103,3 +103,14 @@ export function windowMetrics(width, height) {
   const fontSize = height / 2.4
   return { fontSize, lineWidth: Math.max(1, width - fontSize) }
 }
+
+/**
+ * Where the band sits on the canvas, from the app's setting (0 = bottom edge … 100 = top edge):
+ * `ratio` is the share of its travel (canvas height minus band height) left under it. `qrLow`: the band
+ * is in the upper half, so the QR code (top-right by default) goes to the bottom-right corner; with
+ * the largest font the two never overlap either way.
+ */
+export function bandPlacement(position) {
+  const p = typeof position === 'number' && Number.isFinite(position) ? Math.min(100, Math.max(0, position)) : 0
+  return { ratio: p / 100, qrLow: p > 50 }
+}

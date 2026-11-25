@@ -6,6 +6,16 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.8.2] - 2026-11-25
+
+### Ajouté
+
+- **Position des sous-titres dans l'image** : un curseur « Position », dans la section Sous-titres
+  du panneau de droite, déplace la bande de sous-titres du bas jusqu'en haut de l'image projetée,
+  enregistrée et diffusée. L'aperçu suit pendant le réglage : sans sous-titre à l'écran, la bande
+  vide s'affiche un instant pour montrer où elle se pose. Un double-clic la remet en bas. Quand la
+  bande est dans la moitié haute, le QR code passe en bas à droite pour ne pas la recouvrir.
+
 ## [0.8.1] - 2026-11-25
 
 ### Corrigé

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -176,6 +176,27 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
           onBlur={() => { if (valid(draft) === null) setDraft(String(value)) }} />
         <span className="insp-unit" aria-hidden="true">px</span>
       </span>
+    </label>
+  )
+}
+
+const formatPosition = (v: number): string => (v === 0 ? 'En bas' : v === 100 ? 'En haut' : `${v} %`)
+
+/** Height of the subtitle band in the video (0 bottom … 100 top): each step is applied at once, the preview follows. */
+function BandPosition({ value, disabled, onChange }: { value: number; disabled: boolean; onChange(v: number): void }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  return (
+    <label className="field band-position">
+      <span className="field-label">Position <span className="band-position-value">{formatPosition(draft)}</span></span>
+      <input type="range" min={0} max={100} step={1} value={draft} disabled={disabled}
+        aria-label="Position du sous-titre dans l’image" aria-valuetext={formatPosition(draft)} title="Double-clic : en bas"
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          setDraft(n)
+          if (n !== value) onChange(n)
+        }}
+        onDoubleClick={() => { setDraft(0); if (value !== 0) onChange(0) }} />
     </label>
   )
 }
@@ -371,6 +392,7 @@ export function Inspector(p: InspectorProps) {
             </label>
             {!data?.watermarkEnabled && wmPending && <p className="inspector-note">{PENDING_NOTE}</p>}
             <FontSize value={fontSize} disabled={!settings} onChange={(v) => onChange({ subtitleFontSize: v })} />
+            <BandPosition value={subtitlePosition(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitlePosition: v })} />
           </>
         )}
         <Check label="Corriger les noms propres" checked={settings?.properNounsEnabled === true} disabled={!settings}
