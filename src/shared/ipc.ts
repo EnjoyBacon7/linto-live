@@ -104,8 +104,10 @@ export interface LintoLiveApi {
     setWatermark(sessionId: string, w: Watermark): Promise<void>
   }
   live: {
-    /** `create`: options of the session created when none has this name (ignored when one is reused). */
-    /** `follow`: the session is sent from another device; show its captions without sending audio. */
+    /**
+     * `create`: options of the session created when none has this name (ignored when one is reused).
+     * `follow`: the session is sent from another device; show its captions without sending audio.
+     */
     start(sessionName: string, create?: NewSessionOptions, follow?: boolean): Promise<StartResult>
     /** Saves the language shown in the subtitle band for this session; the band switches now if it is on air. */
     setSubtitleLanguage(sessionId: string, choice: string): Promise<void>
