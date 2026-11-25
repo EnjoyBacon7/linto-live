@@ -74,6 +74,18 @@ describe.each([['light', light], ['dark', dark]] as const)('%s theme', (_, t) =>
     'focus colour is >= 3:1 against %s (A-017)', (bg) => {
       expect(ratio(c('--focus-color'), c(bg))).toBeGreaterThanOrEqual(3)
     })
+
+  it.each(['--bg-content', '--bg-stage', '--bg-inspector', '--sheet-bg'])(
+    'error text colour --bad-text is >= 4.5:1 against %s (A-019)', (bg) => {
+      expect(ratio(c('--bad-text'), c(bg))).toBeGreaterThanOrEqual(4.5)
+    })
+})
+
+describe('error text uses --bad-text, not the dot/icon --bad (A-019)', () => {
+  it.each(['theme.css', 'main/mainWindow.css', 'screens/login.css', 'screens/permissions.css'])('%s', (file) => {
+    const src = readFileSync(join(__dirname, '../../src/renderer', file), 'utf8')
+    expect(src).not.toMatch(/(^|[;{\s])color:\s*var\(--bad\)/)
+  })
 })
 
 describe('accent fill is used where text sits on it (A-010)', () => {

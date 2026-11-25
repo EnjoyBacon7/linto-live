@@ -20,6 +20,7 @@
   --ok: #28a745;
   --warn: #c77c02;
   --bad: #e0332a;
+  --bad-text: #c62a22; /* >= 4.5:1 on the sheet/stage greys; --bad stays for dots */
 
   --text: rgba(0, 0, 0, 0.85);
   --text-2: rgba(0, 0, 0, 0.55);
@@ -69,6 +70,7 @@
     --ok: #32d74b;
     --warn: #ffb340;
     --bad: #ff6961;
+    --bad-text: var(--bad);
 
     --text: rgba(255, 255, 255, 0.86);
     --text-2: rgba(255, 255, 255, 0.55);
@@ -302,7 +304,7 @@ h3 {
 }
 
 .btn-destructive {
-  color: var(--bad);
+  color: var(--bad-text);
 }
 
 .btn-plain {
@@ -508,7 +510,7 @@ h3 {
 }
 
 .banner-bad .banner-icon {
-  color: var(--bad);
+  color: var(--bad-text);
 }
 
 .banner-text {

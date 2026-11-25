@@ -85,7 +85,7 @@
 
 .login-error {
   margin: 0;
-  color: var(--bad);
+  color: var(--bad-text);
   font-size: 12px;
 }
 
