@@ -6,6 +6,13 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Ajouté
+
+- **Sous-titres croisés en une case** : dans « Nouvelle session… », un profil qui parle deux langues
+  propose « Sous-titres croisés ». La case coche d'elle-même les deux traductions nécessaires, et la
+  bande de la session créée démarre directement dans ce mode : chaque phrase s'affiche dans l'autre
+  langue (dite en français, affichée en anglais, et inversement).
+
 ## [0.8.2] - 2026-11-25
 
 ### Ajouté

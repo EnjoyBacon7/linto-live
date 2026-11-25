@@ -69,7 +69,13 @@ export interface TranslationEvent {
   locutor?: string | null
 }
 /** Options of a new session: translation targets and who may see it (`password`: public + a password). */
-export interface NewSessionOptions { translations: string[]; visibility: SessionVisibility | 'password'; password?: string }
+export interface NewSessionOptions {
+  translations: string[]
+  visibility: SessionVisibility | 'password'
+  password?: string
+  /** The band of the session created starts in cross subtitles (each sentence in the other spoken language). */
+  crossSubtitles?: boolean
+}
 export interface AuthMethod { path: string; from: string; name: string }
 /** LinTO rejected the token (expired, revoked…): logging in again is the fix. */
 export class UnauthorizedError extends Error {

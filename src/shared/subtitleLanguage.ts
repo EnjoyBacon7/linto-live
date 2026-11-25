@@ -23,6 +23,19 @@ export function isQualifiedForCrossSubtitles(languages: string[] | undefined, tr
   return languages.every((l) => targets.includes(base(l)))
 }
 
+/**
+ * The two translations a session needs for cross subtitles with this profile (one per spoken language, as the
+ * profile names them), or null when the profile cannot do them: not exactly two spoken languages of
+ * different base codes, or a translation to one of them is not offered.
+ */
+export function crossSubtitleTranslations(languages: string[] | undefined, available: string[] | undefined): [string, string] | null {
+  if (languages?.length !== 2 || !available || base(languages[0]) === base(languages[1])) return null
+  const pick = (l: string): string | undefined => available.find((t) => t === base(l)) ?? available.find((t) => base(t) === base(l))
+  const a = pick(languages[0]!)
+  const b = pick(languages[1]!)
+  return a !== undefined && b !== undefined ? [a, b] : null
+}
+
 export function subtitleLanguageOptions(
   channel: Pick<Channel, 'languages' | 'translations'>,
   locale = 'fr'

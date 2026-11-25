@@ -5,7 +5,7 @@ import {
   type CaptureKind, type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
-import { ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
+import { CROSS, ORIGINAL, routeOriginal, routeTranslation, subtitleLanguageOptions, type Routed } from '../shared/subtitleLanguage'
 import type { ObsConnection, ObsProcess } from './obs/process'
 import { recordBaseName, type ObsController, type StreamState } from './obs/controller'
 import { isBroadcastServer } from '../shared/broadcast'
@@ -1209,6 +1209,15 @@ export class LiveController extends EventEmitter {
       const cur: Current = {
         orgId: s.orgId, session: res.session, channel: res.channel, service: res.canStream && !follow ? service : null,
         languageChoices: new Set(languages.map((o) => o.value))
+      }
+      // « Sous-titres croisés » ticked in « Nouvelle session » : the session just created starts in that mode,
+      // if LinTO did give it the two translations. A reused session keeps the language chosen for it.
+      if (res.kind === 'created' && create?.crossSubtitles && cur.languageChoices.has(CROSS)) {
+        try {
+          this.d.settings.update({ subtitleLanguages: { ...this.d.settings.get().subtitleLanguages, [res.session.id]: CROSS } })
+        } catch (e) {
+          console.warn('Could not save the cross subtitles choice:', errMsg(e)) // the show starts in the original language
+        }
       }
       this.current = cur
       this.watermark = resolveWatermark(res.session.meta, this.d.watermarkConfig?.())

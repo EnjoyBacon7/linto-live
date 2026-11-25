@@ -250,6 +250,10 @@ export function checkNewSessionOptions(raw: unknown): NewSessionOptions | undefi
     if (typeof o.password !== 'string' || !o.password) return bad()
     out.password = o.password
   }
+  if ('crossSubtitles' in o && o.crossSubtitles !== undefined) {
+    if (typeof o.crossSubtitles !== 'boolean') return bad()
+    if (o.crossSubtitles) out.crossSubtitles = true
+  }
   return out
 }
 

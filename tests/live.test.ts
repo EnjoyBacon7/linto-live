@@ -1794,6 +1794,34 @@ describe('subtitle language', () => {
     expect(t.overlay.push).not.toHaveBeenCalled()
   })
 
+  it('« Sous-titres croisés » at creation: the new session starts in cross subtitles', async () => {
+    const created: Session = {
+      ...session({ id: 'new', name: 'Nouvelle' }),
+      channels: [{ id: 7, name: 'Nouvelle', streamEndpoints: { srt: SRT_A }, languages: ['fr-FR', 'en-US'], translations: ['en', 'fr'] }]
+    }
+    const t = setup({ sessions: [] })
+    t.api.getSession.mockResolvedValue(created)
+    await t.live.boot()
+    await t.live.start('Nouvelle', { translations: ['en', 'fr'], visibility: 'organization', crossSubtitles: true })
+    expect(t.settings.get().subtitleLanguages).toEqual({ new: 'crossSubtitles' })
+    t.overlay.push.mockClear()
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour', lang: 'fr-FR' })
+    t.captions.emit('translation', { segmentId: 1, text: 'Hello', sourceLang: 'fr-FR', targetLang: 'en', final: true })
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'final', text: 'Hello' }]])
+  })
+
+  it('« Sous-titres croisés » is not set when LinTO did not give the session both translations', async () => {
+    const created: Session = {
+      ...session({ id: 'new', name: 'Nouvelle' }),
+      channels: [{ id: 7, name: 'Nouvelle', streamEndpoints: { srt: SRT_A }, languages: ['fr-FR', 'en-US'], translations: ['en'] }]
+    }
+    const t = setup({ sessions: [] })
+    t.api.getSession.mockResolvedValue(created)
+    await t.live.boot()
+    await t.live.start('Nouvelle', { translations: ['en', 'fr'], visibility: 'organization', crossSubtitles: true })
+    expect(t.settings.get().subtitleLanguages).toBeUndefined()
+  })
+
   it('start passes create options to createSession', async () => {
     const t = setup({ sessions: [] })
     await t.live.boot()

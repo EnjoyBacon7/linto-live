@@ -215,6 +215,12 @@ export function MainWindow({ state, authRequired, onReauthenticated, onLoggedOut
         : await window.lintoLive.live.start(target.name)
       if (r.ok) {
         setReused(r.reused)
+        // Main chose « Sous-titres croisés » for the session it just created: the Langue menu must show it.
+        if (target.pending?.create.crossSubtitles) {
+          void window.lintoLive.setup.load()
+            .then((d) => setSettings((s) => (s ? { ...s, subtitleLanguages: d.settings.subtitleLanguages } : s)))
+            .catch(() => {})
+        }
         setSel({ name: target.name })
       } else if (!r.cancelled) setError(r.message)
     } catch (e) {
