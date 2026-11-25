@@ -342,6 +342,7 @@ temps réel incrustés, sur un second écran ou un vidéoprojecteur. OBS Studio 
 invisible. Paquets pour macOS (Apple Silicon) et Linux (.deb pour Ubuntu 24.04+ / Debian 13+,
 AppImage pour les autres distributions x86_64).
 
+[0.8.2]: https://github.com/EnjoyBacon7/linto-live/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/EnjoyBacon7/linto-live/compare/v0.7.0...v0.7.1
