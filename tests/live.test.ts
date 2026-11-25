@@ -326,6 +326,22 @@ describe('LiveController', () => {
     expect(t.last().audioMonitor).toBe(false)
   })
 
+  it('stop() is not blocked by a pending vcam preflight', async () => {
+    let release!: (v: string | null) => void
+    const t = setup({ vcamPreflight: () => new Promise((r) => { release = r }) })
+    await t.live.boot()
+    const v = t.live.setVirtualCam(true).catch(() => {})
+    await flush()
+    let stopped = false
+    const s = t.live.stop().then(() => (stopped = true))
+    await flush(); await flush()
+    expect(stopped).toBe(true) // the polkit dialog is still open
+    await s
+    release(null)
+    await v
+    expect(t.live.getState().virtualCam).toBeFalsy()
+  })
+
   it('virtual camera toggles on the attached OBS and is never saved', async () => {
     const t = setup()
     await t.live.boot()

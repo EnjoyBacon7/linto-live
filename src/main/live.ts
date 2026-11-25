@@ -660,13 +660,23 @@ export class LiveController extends EventEmitter {
    * the app run (re-applied after an OBS restart), not saved: other apps would see a camera appear on its own.
    */
   setVirtualCam(on: boolean): Promise<void> {
+    const gen = this.cancelGen
     return this.enqueue(async () => {
       const c = this.ctl
       if (on) {
         if (this.state.virtualCamBlocked) throw new Error(this.state.virtualCamBlocked)
         if (!c) throw new Error(MSG_OBS_NOT_READY)
-        const why = await this.d.virtualCam?.preflight?.()
+        // The preflight may wait on a polkit dialog (pkexec, up to 120 s): Arrêter must not queue behind it.
+        // Its pkexec child is not killed (it ends on its own timeout or when the dialog is closed); only its wait is dropped.
+        let why: string | null | undefined
+        try {
+          why = await this.abortable(gen, Promise.resolve(this.d.virtualCam?.preflight?.()))
+        } catch (e) {
+          if (e instanceof CancelledError) return
+          throw e
+        }
         if (why) throw new Error(why)
+        if (gen !== this.cancelGen) return
       }
       this.virtualCam = on
       this.setState({ virtualCam: on })
