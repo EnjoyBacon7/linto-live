@@ -173,6 +173,11 @@ describe('checkNewSessionOptions (live.start create options)', () => {
       .toEqual({ translations: [], visibility: 'password', password: 'secret' })
   })
   it('rejects invalid options', () => {
+    expect(checkNewSessionOptions({ translations: ['en', 'fr'], visibility: 'public', crossSubtitles: true }))
+      .toEqual({ translations: ['en', 'fr'], visibility: 'public', crossSubtitles: true })
+    expect(checkNewSessionOptions({ translations: [], visibility: 'public', crossSubtitles: false }))
+      .toEqual({ translations: [], visibility: 'public' })
+    expect(() => checkNewSessionOptions({ translations: [], visibility: 'public', crossSubtitles: 'yes' })).toThrow()
     expect(() => checkNewSessionOptions({ translations: [], visibility: 'x' })).toThrow()
     expect(() => checkNewSessionOptions({ translations: 'en', visibility: 'public' })).toThrow()
     expect(() => checkNewSessionOptions({ translations: [1], visibility: 'public' })).toThrow()

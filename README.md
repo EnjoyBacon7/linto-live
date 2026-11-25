@@ -161,7 +161,8 @@ l'application pendant un direct revient à cliquer sur Arrêter.
 ### Langues, QR code, source de secours, enregistrement
 
 - **Langues des sous-titres** : le panneau de droite propose, pour la session choisie, la langue
-  affichée sur la vidéo (originale ou une traduction de la session). Le choix est gardé par
+  affichée sur la vidéo (originale ou une traduction de la session). Avec un profil bilingue, cocher
+  **Sous-titres croisés** dans « Nouvelle session… » suffit : chaque phrase s'affiche dans l'autre langue. Le choix est gardé par
   session. Le lien public (QR code) n'est utilisable que si la session est **publique** sur LinTO ;
   sinon une note le rappelle (rendre la session publique dans LinTO Studio).
 - **QR code** : « Afficher le QR code » place un QR code vers la session sur la vidéo ; « Épingler »

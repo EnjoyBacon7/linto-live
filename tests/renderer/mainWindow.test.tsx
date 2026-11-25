@@ -340,6 +340,35 @@ describe('Nouvelle session… options', () => {
     expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: ['en'], visibility: 'public' })
   })
 
+  it('« Sous-titres croisés » ticks the two translations it needs and is sent with them', async () => {
+    setup({}, setupData({}, { profiles: [
+      { id: 1, name: 'Bilingue', languages: ['fr-FR', 'en-US'], translations: ['en', 'fr', 'de'] },
+      { id: 2, name: 'Français', languages: ['fr-FR'], translations: ['en'] }
+    ] }))
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    await userEvent.type(within(sheet).getByLabelText('Nom'), 'Débat')
+    const cross = within(sheet).getByRole('checkbox', { name: 'Sous-titres croisés' }) as HTMLInputElement
+    expect(cross.checked).toBe(false)
+    await userEvent.click(cross)
+    const en = within(sheet).getByRole('checkbox', { name: 'Anglais' }) as HTMLInputElement
+    expect(en.checked).toBe(true)
+    expect(en.disabled).toBe(true)
+    await userEvent.click(within(sheet).getByRole('checkbox', { name: 'Allemand' }))
+    await userEvent.click(within(sheet).getByRole('button', { name: 'OK' }))
+    await userEvent.click(startBtn())
+    expect(api.live.start).toHaveBeenCalledWith('Débat', { translations: ['de', 'fr', 'en'], visibility: 'organization', crossSubtitles: true })
+  })
+
+  it('no « Sous-titres croisés » for a single-language profile', async () => {
+    setup({}, setupData({}, { profiles: [{ id: 2, name: 'Français', languages: ['fr-FR'], translations: ['en'] }] }))
+    await renderMain()
+    await userEvent.click(screen.getByRole('button', { name: 'Nouvelle session…' }))
+    const sheet = screen.getByRole('dialog', { name: 'Nouvelle session' })
+    expect(within(sheet).queryByRole('checkbox', { name: 'Sous-titres croisés' })).toBeNull()
+  })
+
   it('password visibility needs a password', async () => {
     setup({}, withTr())
     await renderMain()

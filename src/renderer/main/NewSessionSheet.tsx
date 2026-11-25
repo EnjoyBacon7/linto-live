@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { languageLabel } from '../../shared/subtitleLanguage'
+import { crossSubtitleTranslations, languageLabel } from '../../shared/subtitleLanguage'
 import type { NewSessionOptions, Organization, TranscriberProfile } from '../../shared/types'
 import { Button } from '../ui/Button'
 import { PopUp } from '../ui/PopUp'
@@ -23,6 +23,7 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
   const [name, setName] = useState('')
   const [profile, setProfile] = useState<number | undefined>(p.profileId)
   const [translations, setTranslations] = useState<string[]>([])
+  const [cross, setCross] = useState(false)
   const [visibility, setVisibility] = useState<NewSessionOptions['visibility']>('organization')
   const [password, setPassword] = useState('')
   useEffect(() => {
@@ -33,7 +34,7 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
     setPassword('')
   }, [p.open])
   // Translations belong to the profile: none ticked on open or when the profile changes.
-  useEffect(() => setTranslations([]), [p.open, profile])
+  useEffect(() => { setTranslations([]); setCross(false) }, [p.open, profile])
   // The profile list changes with the organisation: keep a valid choice.
   useEffect(() => {
     if (p.profiles.length > 0 && !p.profiles.some((x) => x.id === profile)) setProfile(p.profileId ?? p.profiles[0]!.id)
@@ -41,11 +42,16 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
 
   // A session cannot be created without a profile: none listed means the role or the organisation offers none.
   const current = p.profiles.find((x) => x.id === profile)
+  // Two spoken languages, each offered as a translation: one tick sets up LinTO's cross subtitles.
+  const crossCodes = crossSubtitleTranslations(current?.languages, current?.translations)
+  const crossOn = cross && crossCodes !== null
+  const needed = (code: string): boolean => crossOn && crossCodes.includes(code)
   const ok = name.trim() !== '' && current !== undefined && (visibility !== 'password' || password.trim() !== '')
   const submit = (e?: FormEvent | KeyboardEvent): void => {
     e?.preventDefault()
     if (!ok) return
-    const opts: NewSessionOptions = { translations, visibility }
+    const opts: NewSessionOptions = { translations: crossOn ? [...new Set([...translations, ...crossCodes])] : translations, visibility }
+    if (crossOn) opts.crossSubtitles = true
     if (visibility === 'password') opts.password = password
     p.onSubmit(name.trim(), profile, opts)
   }
@@ -84,11 +90,20 @@ export function NewSessionSheet(p: NewSessionSheetProps) {
           <TextField label="Mot de passe" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(e) }} />
         )}
+        {crossCodes && (
+          <div className="field sheet-checks">
+            <Check label="Sous-titres croisés" checked={cross} onChange={setCross} />
+            <p className="sheet-detail">
+              Chaque phrase s’affiche dans l’autre langue ({crossCodes.map((c) => languageLabel(c).toLocaleLowerCase('fr')).join(' ↔ ')}).
+            </p>
+          </div>
+        )}
         {current?.translations && current.translations.length > 0 && (
           <fieldset className="field sheet-checks">
             <legend className="field-label">Traductions</legend>
             {current.translations.map((code) => (
-              <Check key={code} label={languageLabel(code)} checked={translations.includes(code)}
+              <Check key={code} label={languageLabel(code)} checked={needed(code) || translations.includes(code)}
+                {...(needed(code) ? { blockedReason: 'Nécessaire aux sous-titres croisés' } : {})}
                 onChange={(v) => setTranslations((t) => v ? [...t, code] : t.filter((c) => c !== code))} />
             ))}
           </fieldset>

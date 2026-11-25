@@ -1,11 +1,26 @@
 import { describe, it, expect } from 'vitest'
 import {
-  subtitleLanguageOptions, isQualifiedForCrossSubtitles, routeOriginal, routeTranslation, languageLabel
+  subtitleLanguageOptions, isQualifiedForCrossSubtitles, crossSubtitleTranslations, routeOriginal, routeTranslation, languageLabel
 } from '../src/shared/subtitleLanguage'
 import type { TranslationEvent } from '../src/shared/types'
 
 const ev = (o: Partial<TranslationEvent>): TranslationEvent =>
   ({ segmentId: 1, text: 'b', targetLang: 'en', final: false, ...o })
+
+describe('crossSubtitleTranslations', () => {
+  it('picks one translation per spoken language, as the profile names them', () => {
+    expect(crossSubtitleTranslations(['fr-FR', 'en-US'], ['de', 'en', 'fr'])).toEqual(['fr', 'en'])
+    expect(crossSubtitleTranslations(['fr-FR', 'en-US'], ['fr-FR', 'en-GB'])).toEqual(['fr-FR', 'en-GB'])
+  })
+  it('null when the profile cannot do cross subtitles', () => {
+    expect(crossSubtitleTranslations(['fr-FR'], ['en'])).toBeNull()
+    expect(crossSubtitleTranslations(['fr-FR', 'en-US', 'de-DE'], ['fr', 'en', 'de'])).toBeNull()
+    expect(crossSubtitleTranslations(['fr-FR', 'fr-CA'], ['fr'])).toBeNull()
+    expect(crossSubtitleTranslations(['fr-FR', 'en-US'], ['en'])).toBeNull()
+    expect(crossSubtitleTranslations(['fr-FR', 'en-US'], undefined)).toBeNull()
+    expect(crossSubtitleTranslations(undefined, ['fr', 'en'])).toBeNull()
+  })
+})
 
 describe('subtitleLanguageOptions', () => {
   it('lists original, cross and translations sorted by French label', () => {
