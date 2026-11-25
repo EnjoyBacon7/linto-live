@@ -1,6 +1,6 @@
-# Linux build (AppImage with OBS built from source)
+# Linux build (AppImage, .deb and Flatpak with OBS built from source)
 
-LinTO Live for Linux ships as an AppImage and a `.deb` (x86_64), both containing the Electron app
+LinTO Live for Linux ships as an AppImage, a `.deb` and a Flatpak (x86_64), each containing the Electron app
 and its own OBS Studio 32.1.0, built from source with the browser source and obs-websocket. Nothing is installed
 system-wide; OBS runs hidden with its configuration under the app's `userData`.
 
@@ -115,7 +115,7 @@ In the packaged app, the tree lands in `<AppImage>/resources/obs/`, and the app 
 `resources/obs/bin/obs` (`src/main/obs/locate.ts`). Unlike macOS, there is no copy out of the
 package: OBS runs directly from the AppImage's read-only FUSE mount.
 
-## Verification checklist (Task 17 Step 4: to run by hand)
+## Verification checklist (to run by hand)
 
 Run on a clean Ubuntu 24.04 desktop VM, X11 session ("Ubuntu on Xorg" at the login screen), with
 a webcam or capture card and a microphone attached if available. Use the AppImage artifact from CI
@@ -193,8 +193,8 @@ LINTO_LIVE_IT=1 LINTO_LIVE_OBS="$PWD/../squashfs-root/resources/obs/bin/obs" npm
 
 ### 5. Uninstall
 
-- [ ] In-app uninstall: afterwards the AppImage file itself is gone (moved to the trash, per
-      Task 15), and so is every Task 15 Linux path: `~/.config/LinTO Live` (userData, includes
+- [ ] In-app uninstall: afterwards the AppImage file itself is gone (moved to the trash),
+      and so is every Linux path the app creates: `~/.config/LinTO Live` (userData, includes
       `obs-home`), `~/.cache/LinTO Live`, and `~/.local/share/applications/*linto-live*.desktop` / `*ai.linto.live*.desktop`
       if a desktop integration created one.
 - [ ] No OBS process remains (`pgrep -f resources/obs/bin/obs` is empty), `~/.config/obs-studio`
