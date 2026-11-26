@@ -4,12 +4,14 @@ import { CaptionSmoother, type BandCaption } from '../src/main/captionSmoother'
 describe('CaptionSmoother', () => {
   let out: BandCaption[]
   let delay: number
+  let wps: number
   let s: CaptionSmoother
   beforeEach(() => {
     vi.useFakeTimers()
     out = []
     delay = 1000
-    s = new CaptionSmoother((m) => out.push(m), () => delay)
+    wps = 0
+    s = new CaptionSmoother((m) => out.push(m), () => delay, () => wps)
   })
   afterEach(() => vi.useRealTimers())
   const last = (): BandCaption | undefined => out[out.length - 1]
@@ -148,5 +150,63 @@ describe('CaptionSmoother', () => {
     s.caption({ type: 'partial', text: 'euh' })
     s.caption({ type: 'final', text: '' })
     expect(out).toEqual([{ type: 'final', text: '' }])
+  })
+
+  describe('max words per second', () => {
+    /** Times (ms from now) at which each message comes out, over `ms`. */
+    const run = (ms: number): number[] => {
+      const t0 = Date.now()
+      const times: number[] = []
+      let seen = out.length
+      for (let t = 0; t <= ms; t += 10) {
+        while (out.length > seen) { times.push(Date.now() - t0); seen++ }
+        vi.advanceTimersByTime(10)
+      }
+      return times
+    }
+
+    it('caps the catch-up pace of a burst (a whole translated sentence at once)', () => {
+      wps = 2
+      const words = Array.from({ length: 10 }, (_, i) => `m${i}`).join(' ')
+      s.caption({ type: 'final', text: words })
+      const times = [0, ...run(6000)]
+      expect(last()).toEqual({ type: 'final', text: words })
+      expect(times.length).toBe(10) // 9 partials + the final (the first partial came out at once)
+      for (let i = 1; i < times.length; i++) expect(times[i]! - times[i - 1]!).toBeGreaterThanOrEqual(500)
+    })
+
+    it('paces words even without smoothing delay', () => {
+      delay = 0
+      wps = 4
+      s.caption({ type: 'final', text: 'un deux trois' })
+      expect(out).toEqual([{ type: 'partial', text: 'un' }])
+      vi.advanceTimersByTime(249)
+      expect(out.length).toBe(1)
+      vi.advanceTimersByTime(1)
+      expect(last()).toEqual({ type: 'partial', text: 'un deux' })
+      vi.advanceTimersByTime(250)
+      expect(last()).toEqual({ type: 'final', text: 'un deux trois' })
+    })
+
+    it('without delay, a partial is shown at once when the pace allows it', () => {
+      delay = 0
+      wps = 4
+      s.caption({ type: 'partial', text: 'bonjour' })
+      expect(out).toEqual([{ type: 'partial', text: 'bonjour' }])
+      vi.advanceTimersByTime(1000)
+      s.caption({ type: 'partial', text: 'bonjour à' })
+      expect(last()).toEqual({ type: 'partial', text: 'bonjour à' })
+    })
+
+    it('no limit and no delay passes through; removing the limit flushes the queue', () => {
+      delay = 0
+      wps = 1
+      s.caption({ type: 'final', text: 'un deux trois' })
+      wps = 0
+      vi.advanceTimersByTime(1000)
+      expect(last()).toEqual({ type: 'final', text: 'un deux trois' })
+      s.caption({ type: 'partial', text: 'quatre cinq' })
+      expect(last()).toEqual({ type: 'partial', text: 'quatre cinq' })
+    })
   })
 })

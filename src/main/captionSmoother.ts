@@ -24,7 +24,8 @@ const split = (text: string): string[] => {
  * same for the delay (all of them when the segment is final); admitted words come out one at a time, at
  * BASE_INTERVAL_MS or faster so each is shown within the delay of its admission. The band gets the same
  * messages as without smoothing: `partial` = words shown so far, `final` = whole segment once all are shown.
- * At a delay of 0 captions pass straight through.
+ * `maxWordsPerSecond` (0 = none) caps that pace, catching up included: a burst (LinTO sends a translation a whole
+ * sentence at once) is read out at most that fast, at a delay of 0 too. With neither, captions pass straight through.
  */
 export class CaptionSmoother {
   private segs: Segment[] = []
@@ -33,11 +34,26 @@ export class CaptionSmoother {
   private nextAt = 0
   private timer: ReturnType<typeof setTimeout> | undefined
 
-  constructor(private readonly sink: (m: BandCaption) => void, private readonly delayMs: () => number) {}
+  constructor(
+    private readonly sink: (m: BandCaption) => void,
+    private readonly delayMs: () => number,
+    private readonly maxWordsPerSecond: () => number = () => 0
+  ) {}
+
+  /** Shortest time between two words (0 = no limit). */
+  private minInterval(): number {
+    const wps = this.maxWordsPerSecond()
+    return wps > 0 ? 1000 / wps : 0
+  }
+
+  /** Captions pass straight through: neither a delay nor a pace limit. */
+  private passThrough(): boolean {
+    return this.delayMs() <= 0 && this.minInterval() <= 0
+  }
 
   caption(m: BandCaption): void {
     const now = Date.now()
-    if (this.delayMs() <= 0) {
+    if (this.passThrough()) {
       this.flush()
       this.sink(m)
       return
@@ -68,7 +84,7 @@ export class CaptionSmoother {
     this.nextAt = 0
   }
 
-  /** Shows at once everything received (the delay went to 0). */
+  /** Shows at once everything received (the delay and the pace limit went to 0). */
   private flush(): void {
     const segs = this.segs
     this.clear()
@@ -104,8 +120,9 @@ export class CaptionSmoother {
   private pump(): void {
     clearTimeout(this.timer)
     this.timer = undefined
-    const delay = this.delayMs()
-    if (delay <= 0) return this.flush()
+    if (this.passThrough()) return this.flush()
+    const delay = Math.max(0, this.delayMs())
+    const minInterval = this.minInterval()
     const now = Date.now()
     this.admit(now, delay)
     for (;;) {
@@ -121,7 +138,9 @@ export class CaptionSmoother {
       if (now < this.nextAt) break
       this.shown++
       const { waiting, lastAdmitted } = this.queued()
-      const interval = waiting > 0 ? Math.min(BASE_INTERVAL_MS, Math.max(0, lastAdmitted + delay - now) / waiting) : BASE_INTERVAL_MS
+      const catchUp = waiting > 0 ? Math.min(BASE_INTERVAL_MS, Math.max(0, lastAdmitted + delay - now) / waiting) : BASE_INTERVAL_MS
+      // Without a delay, the limit alone sets the pace (words come out as soon as it allows).
+      const interval = delay > 0 ? Math.max(minInterval, catchUp) : minInterval
       this.nextAt = now + interval
       if (!(head.final && this.shown >= head.words.length)) {
         this.sink({ type: 'partial', text: head.words.slice(0, this.shown).join(' ') })

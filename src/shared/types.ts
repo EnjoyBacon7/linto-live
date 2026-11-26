@@ -167,6 +167,8 @@ export interface Settings {
   subtitlePosition?: number
   /** Delay in ms the subtitle band trades for calm reading (0 = shown at once, default); see subtitleSmoothingMs. */
   subtitleSmoothingMs?: number
+  /** Fastest pace of the words in the subtitle band, in words/s (0 = no limit, default); see subtitleMaxWordsPerSecond. */
+  subtitleMaxWordsPerSecond?: number
   /** Number of caption lines in the band of the video (1..3, default 2). */
   subtitleLines?: number
   /** Language shown in the subtitle band, per session id (absent = the original language). */
@@ -218,6 +220,19 @@ export function subtitleSmoothingMs(s: Pick<Settings, 'subtitleSmoothingMs'>): n
   const v = s.subtitleSmoothingMs
   if (typeof v !== 'number' || !Number.isFinite(v)) return 0
   return Math.min(SUBTITLE_SMOOTHING_MAX, Math.max(0, Math.round(v / SUBTITLE_SMOOTHING_STEP) * SUBTITLE_SMOOTHING_STEP))
+}
+
+export const SUBTITLE_MAX_WPS_MAX = 8
+export const SUBTITLE_MAX_WPS_STEP = 0.5
+
+/**
+ * Pace limit actually used, in words/s: the saved one on a 0.5 step within 0..8, else 0 (no limit). Caps how
+ * fast the band catches up when a burst arrives (LinTO's translations come a whole sentence at once).
+ */
+export function subtitleMaxWordsPerSecond(s: Pick<Settings, 'subtitleMaxWordsPerSecond'>): number {
+  const v = s.subtitleMaxWordsPerSecond
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 0
+  return Math.min(SUBTITLE_MAX_WPS_MAX, Math.max(0, Math.round(v / SUBTITLE_MAX_WPS_STEP) * SUBTITLE_MAX_WPS_STEP))
 }
 
 /** Caption lines in the band of the video: 3 at most, so the band never meets the QR code (layout.test.ts). */

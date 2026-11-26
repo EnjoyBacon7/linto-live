@@ -8,7 +8,7 @@ import { checkWatermark, resolveWatermark, WATERMARK_META_KEY } from '../src/mai
 import { LintoApi } from '../src/main/linto/api'
 import { toSessionSummaries } from '../src/main/setupData'
 import { LiveController, subtitleFontSize, type LiveDeps } from '../src/main/live'
-import { ForbiddenError, subtitleLines, subtitlePosition, subtitleSmoothingMs, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
+import { ForbiddenError, subtitleLines, subtitlePosition, subtitleSmoothingMs, subtitleMaxWordsPerSecond, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
 
 const CFG: WatermarkConfig = { enabled: true, content: 'Par $linto', frequency: 30, duration: 5 }
 const WM: Watermark = { display: true, pinned: false, content: 'Hello $linto', frequency: 60, duration: 8 }
@@ -260,5 +260,21 @@ describe('subtitle smoothing setting', () => {
     expect(checkSettingsPatch({ subtitleSmoothingMs: 10000 })).toEqual({ subtitleSmoothingMs: 10000 })
     expect(() => checkSettingsPatch({ subtitleSmoothingMs: 10001 })).toThrow(/invalides/)
     expect(() => checkSettingsPatch({ subtitleSmoothingMs: '1000' })).toThrow(/invalides/)
+  })
+})
+
+describe('subtitle max words per second setting', () => {
+  it('uses the saved pace on a 0.5 step within 0..8, else 0 (no limit)', () => {
+    expect(subtitleMaxWordsPerSecond({})).toBe(0)
+    expect(subtitleMaxWordsPerSecond({ subtitleMaxWordsPerSecond: 3 })).toBe(3)
+    expect(subtitleMaxWordsPerSecond({ subtitleMaxWordsPerSecond: 2.6 })).toBe(2.5)
+    expect(subtitleMaxWordsPerSecond({ subtitleMaxWordsPerSecond: 20 })).toBe(8)
+    expect(subtitleMaxWordsPerSecond({ subtitleMaxWordsPerSecond: -1 })).toBe(0)
+    expect(subtitleMaxWordsPerSecond({ subtitleMaxWordsPerSecond: NaN })).toBe(0)
+  })
+  it('is checked when saved from the renderer', () => {
+    expect(checkSettingsPatch({ subtitleMaxWordsPerSecond: 8 })).toEqual({ subtitleMaxWordsPerSecond: 8 })
+    expect(() => checkSettingsPatch({ subtitleMaxWordsPerSecond: 8.5 })).toThrow(/invalides/)
+    expect(() => checkSettingsPatch({ subtitleMaxWordsPerSecond: '3' })).toThrow(/invalides/)
   })
 })
