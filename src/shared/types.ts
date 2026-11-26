@@ -165,6 +165,8 @@ export interface Settings {
   subtitleFontSize?: number
   /** Height of the subtitle band in the video, in % of its travel: 0 = bottom edge (default), 100 = top edge. */
   subtitlePosition?: number
+  /** Delay in ms the subtitle band trades for calm reading (0 = shown at once, default); see subtitleSmoothingMs. */
+  subtitleSmoothingMs?: number
   /** Language shown in the subtitle band, per session id (absent = the original language). */
   subtitleLanguages?: Record<string, string>
   /** QR code of the session's public link in the video (default: hidden). */
@@ -204,6 +206,16 @@ export const SUBTITLE_FONT_SIZE_MAX = 96
 export function subtitlePosition(s: Pick<Settings, 'subtitlePosition'>): number {
   const v = s.subtitlePosition
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(100, Math.max(0, Math.round(v))) : 0
+}
+
+export const SUBTITLE_SMOOTHING_MAX = 10000
+export const SUBTITLE_SMOOTHING_STEP = 250
+
+/** Smoothing delay actually used: the saved one on a 250 ms step within 0..10 s, else 0. */
+export function subtitleSmoothingMs(s: Pick<Settings, 'subtitleSmoothingMs'>): number {
+  const v = s.subtitleSmoothingMs
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 0
+  return Math.min(SUBTITLE_SMOOTHING_MAX, Math.max(0, Math.round(v / SUBTITLE_SMOOTHING_STEP) * SUBTITLE_SMOOTHING_STEP))
 }
 
 /** Micro gain range in dB (OBS's gain filter accepts -30..+30). */

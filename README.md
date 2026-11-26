@@ -127,6 +127,8 @@ Conseils :
    fenêtre d'une application, par exemple une présentation), **micro** (c'est ce son qui est transcrit ; **Écouter le retour
    audio** le fait entendre, au casque, tel qu'il part vers LinTO et est enregistré), taille des sous-titres,
    **position** de la bande de sous-titres dans l'image (curseur, du bas jusqu'en haut),
+   **lissage** des sous-titres (curseur, de « Direct » à 10 s : plus de retard, mais des mots qui ne
+   bougent plus et des lignes qui défilent régulièrement),
    affichage des sous-titres et du filigrane.
    Avec une caméra, son aperçu s'affiche en haut du centre de la fenêtre. En dessous, la
    transcription au fil de la parole, avec tout ce qui a été dit depuis le démarrage (elle reste lisible après Arrêter, jusqu'au prochain Démarrer). Remonter

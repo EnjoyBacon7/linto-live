@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, UnauthorizedError,
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, subtitleSmoothingMs, UnauthorizedError,
   type CaptureKind, type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
@@ -19,6 +19,7 @@ import { cleanNames, type NameCorrector } from './linto/properNouns'
 import { resolveSession } from './linto/sessionResolver'
 import { lintoErrorMessage } from './linto/accessMessages'
 import { TranscriptLog } from './linto/transcript'
+import { CaptionSmoother } from './captionSmoother'
 import { TRANSCRIPT_LOG_MAX_SEGMENTS } from '../shared/transcript'
 import type { OverlayServer } from './overlay/server'
 import { resolveWatermark, sameWatermark } from './linto/watermark'
@@ -296,9 +297,12 @@ export class LiveController extends EventEmitter {
   private virtualCam = false
   /** Waiting for OBS's « stopped » recording event (StopRecord may answer before the output has stopped). */
   private recordStopWaiters: (() => void)[] = []
+  /** Captions on their way to the band, held back by the « Lissage » setting (read live). */
+  private readonly smoother: CaptionSmoother
 
   constructor(private readonly d: LiveDeps) {
     super()
+    this.smoother = new CaptionSmoother((m) => d.overlay.push(m), () => subtitleSmoothingMs(d.settings.get()))
     d.obs.on('ready', (c: ObsConnection) => {
       if (this.shuttingDown) return
       this.enqueue(() => this.attach(c)).catch((e) => this.setState({ warning: `OBS : ${errMsg(e)}` }))
@@ -321,7 +325,7 @@ export class LiveController extends EventEmitter {
         this.watermark = null
         this.qrCache = null
         this.pushStyle()
-        this.d.overlay.push({ type: 'reset' })
+        this.resetBand()
       }
       this.setState({
         obs: 'down',
@@ -488,6 +492,7 @@ export class LiveController extends EventEmitter {
     this.dropController()
     await c?.disconnect().catch(() => {})
     await this.d.obs.stop().catch(() => {})
+    this.smoother.clear()
     await this.d.overlay.stop().catch(() => {})
     this.setState({ obs: 'down' })
   }
@@ -563,7 +568,7 @@ export class LiveController extends EventEmitter {
   /** The on-air session's transcript was cleared on LinTO: empties the band and the transcript (the show goes on). */
   private transcriptCleared(): void {
     if (!this.current) return
-    this.d.overlay.push({ type: 'reset' })
+    this.resetBand()
     const { sessionName, startedAt } = this.transcript.snapshot()
     this.transcriptGen++
     this.sendTranscript(this.transcript.reset(sessionName, startedAt))
@@ -623,7 +628,7 @@ export class LiveController extends EventEmitter {
     if ((saved?.[sessionId] ?? ORIGINAL) === choice) return
     const subtitleLanguages = { ...saved, [sessionId]: choice }
     this.d.settings.update({ subtitleLanguages })
-    if (this.current?.session.id === sessionId) this.d.overlay.push({ type: 'reset' })
+    if (this.current?.session.id === sessionId) this.resetBand()
   }
 
   /** A session's watermark was saved or re-read from LinTO: the overlay follows if that session is on air. */
@@ -815,7 +820,13 @@ export class LiveController extends EventEmitter {
   }
 
   private pushCaption(r: Routed): void {
-    if (r) this.d.overlay.push({ type: r.kind, text: r.text })
+    if (r) this.smoother.caption({ type: r.kind, text: r.text })
+  }
+
+  /** Empties the band, dropping the captions still held back by the smoothing. */
+  private resetBand(): void {
+    this.smoother.clear()
+    this.d.overlay.push({ type: 'reset' })
   }
 
   /** Sends the band's look (local settings + the on-air session's watermark) to the overlay. */
@@ -1064,7 +1075,7 @@ export class LiveController extends EventEmitter {
   private async captionsStale(): Promise<void> {
     const cur = this.current
     if (!cur || this.state.phase !== 'live' || this.state.captions === 'live' || this.captionsAuthLost) return
-    this.d.overlay.push({ type: 'reset' }) // hide the frozen box; the next caption restores it
+    this.resetBand() // hide the frozen box; the next caption restores it
     const p = await this.probeSession(cur)
     if (cur !== this.current) return
     switch (p.kind) {
@@ -1226,7 +1237,7 @@ export class LiveController extends EventEmitter {
       this.qrCache = this.qrCache?.url === url ? this.qrCache
         : await this.d.qrSvg(url).then((svg) => ({ url, svg }), () => null)
       this.pushStyle()
-      this.d.overlay.push({ type: 'reset' })
+      this.resetBand()
       const startedAt = Date.now()
       this.setState({
         phase: 'live',
@@ -1277,7 +1288,7 @@ export class LiveController extends EventEmitter {
     this.watermark = null
     this.qrCache = null
     this.pushStyle()
-    this.d.overlay.push({ type: 'reset' })
+    this.resetBand()
     this.setState({
       phase: 'idle',
       session: undefined,

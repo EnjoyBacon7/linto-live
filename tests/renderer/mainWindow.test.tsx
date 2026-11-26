@@ -1260,6 +1260,21 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitlePosition: 0 })
   })
 
+  it('the smoothing slider saves the delay, shown in seconds, and double-click goes back to « Direct »', async () => {
+    setup()
+    await renderMain()
+    const slider = screen.getByRole('slider', { name: 'Lissage des sous-titres' }) as HTMLInputElement
+    expect(slider.value).toBe('0')
+    expect(slider.getAttribute('aria-valuetext')).toBe('Direct')
+    fireEvent.change(slider, { target: { value: '1500' } })
+    expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitleSmoothingMs: 1500 })
+    expect(slider.getAttribute('aria-valuetext')).toBe('1,5 s')
+    fireEvent.change(slider, { target: { value: '10000' } })
+    expect(slider.getAttribute('aria-valuetext')).toBe('10 s')
+    fireEvent.doubleClick(slider)
+    expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitleSmoothingMs: 0 })
+  })
+
   it('QR note when the session is not public', async () => {
     const NOTE = /Le public devra se connecter à LinTO/
     setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'organization' }])
