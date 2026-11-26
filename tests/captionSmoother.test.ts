@@ -127,6 +127,23 @@ describe('CaptionSmoother', () => {
     expect(out.slice(0, iFirst).every((m) => !m.text.startsWith('e'))).toBe(true)
   })
 
+  it('keeps no timer once every word of the open segment is shown', () => {
+    s.caption({ type: 'partial', text: 'un deux' })
+    vi.advanceTimersByTime(2000)
+    expect(last()).toEqual({ type: 'partial', text: 'un deux' })
+    expect(vi.getTimerCount()).toBe(0)
+    // a word arriving after the idle spell still waits the whole delay to settle
+    s.caption({ type: 'partial', text: 'un deux troi' })
+    vi.advanceTimersByTime(600)
+    s.caption({ type: 'partial', text: 'un deux trois' })
+    vi.advanceTimersByTime(999)
+    expect(last()).toEqual({ type: 'partial', text: 'un deux' })
+    vi.advanceTimersByTime(1)
+    expect(last()).toEqual({ type: 'partial', text: 'un deux trois' })
+    expect(out.some((m) => m.text.includes('troi '))).toBe(false)
+    expect(out.some((m) => m.text.endsWith('troi'))).toBe(false)
+  })
+
   it('an empty final still closes the segment', () => {
     s.caption({ type: 'partial', text: 'euh' })
     s.caption({ type: 'final', text: '' })

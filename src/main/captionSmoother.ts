@@ -135,7 +135,8 @@ export class CaptionSmoother {
     if (!head) return
     let at: number
     if (head.admittedAt[this.shown] !== undefined) at = this.nextAt
-    else at = head.since[this.shown]! + delay // head is open: its next word becomes stable then
+    else if (this.shown < head.words.length) at = head.since[this.shown]! + delay // head is open: its next word becomes stable then
+    else return // every word of the open head is shown: the next caption pumps again
     this.timer = setTimeout(() => this.pump(), Math.max(0, at - Date.now()))
   }
 }
