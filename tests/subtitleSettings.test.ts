@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { checkSettingsPatch } from '../src/shared/ipc'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -7,7 +8,7 @@ import { checkWatermark, resolveWatermark, WATERMARK_META_KEY } from '../src/mai
 import { LintoApi } from '../src/main/linto/api'
 import { toSessionSummaries } from '../src/main/setupData'
 import { LiveController, subtitleFontSize, type LiveDeps } from '../src/main/live'
-import { ForbiddenError, subtitlePosition, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
+import { ForbiddenError, subtitlePosition, subtitleSmoothingMs, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
 
 const CFG: WatermarkConfig = { enabled: true, content: 'Par $linto', frequency: 30, duration: 5 }
 const WM: Watermark = { display: true, pinned: false, content: 'Hello $linto', frequency: 60, duration: 8 }
@@ -230,5 +231,21 @@ describe('LiveController subtitle style', () => {
     expect(t.api.clearSession).not.toHaveBeenCalled()
     t.captions.emit('final', { segmentId: 2, text: 'Reprise' })
     expect(t.live.getTranscript().finals).toMatchObject([{ id: 2, text: 'Reprise' }])
+  })
+})
+
+describe('subtitle smoothing setting', () => {
+  it('uses the saved delay on a 250 ms step within 0..10 s, else 0', () => {
+    expect(subtitleSmoothingMs({})).toBe(0)
+    expect(subtitleSmoothingMs({ subtitleSmoothingMs: 1500 })).toBe(1500)
+    expect(subtitleSmoothingMs({ subtitleSmoothingMs: 1600 })).toBe(1500)
+    expect(subtitleSmoothingMs({ subtitleSmoothingMs: 20000 })).toBe(10000)
+    expect(subtitleSmoothingMs({ subtitleSmoothingMs: -5 })).toBe(0)
+    expect(subtitleSmoothingMs({ subtitleSmoothingMs: NaN })).toBe(0)
+  })
+  it('is checked when saved from the renderer', () => {
+    expect(checkSettingsPatch({ subtitleSmoothingMs: 10000 })).toEqual({ subtitleSmoothingMs: 10000 })
+    expect(() => checkSettingsPatch({ subtitleSmoothingMs: 10001 })).toThrow(/invalides/)
+    expect(() => checkSettingsPatch({ subtitleSmoothingMs: '1000' })).toThrow(/invalides/)
   })
 })

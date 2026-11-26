@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, SUBTITLE_SMOOTHING_MAX, SUBTITLE_SMOOTHING_STEP, subtitleSmoothingMs, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -191,6 +191,29 @@ function BandPosition({ value, disabled, onChange }: { value: number; disabled: 
       <span className="field-label">Position <span className="band-position-value">{formatPosition(draft)}</span></span>
       <input type="range" min={0} max={100} step={1} value={draft} disabled={disabled}
         aria-label="Position du sous-titre dans l’image" aria-valuetext={formatPosition(draft)} title="Double-clic : en bas"
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          setDraft(n)
+          if (n !== value) onChange(n)
+        }}
+        onDoubleClick={() => { setDraft(0); if (value !== 0) onChange(0) }} />
+    </label>
+  )
+}
+
+const formatSmoothing = (ms: number): string =>
+  ms === 0 ? 'Direct' : `${(ms / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} s`
+
+/** Delay the band trades for calm reading (words shown once stable, at an even pace); 0 = shown at once. */
+function Smoothing({ value, disabled, onChange }: { value: number; disabled: boolean; onChange(v: number): void }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  return (
+    <label className="field band-position">
+      <span className="field-label">Lissage <span className="band-position-value">{formatSmoothing(draft)}</span></span>
+      <input type="range" min={0} max={SUBTITLE_SMOOTHING_MAX} step={SUBTITLE_SMOOTHING_STEP} value={draft} disabled={disabled}
+        aria-label="Lissage des sous-titres" aria-valuetext={formatSmoothing(draft)}
+        title="Plus de retard, lecture plus calme. Double-clic : direct"
         onChange={(e) => {
           const n = Number(e.target.value)
           setDraft(n)
@@ -393,6 +416,7 @@ export function Inspector(p: InspectorProps) {
             {!data?.watermarkEnabled && wmPending && <p className="inspector-note">{PENDING_NOTE}</p>}
             <FontSize value={fontSize} disabled={!settings} onChange={(v) => onChange({ subtitleFontSize: v })} />
             <BandPosition value={subtitlePosition(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitlePosition: v })} />
+            <Smoothing value={subtitleSmoothingMs(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitleSmoothingMs: v })} />
           </>
         )}
         <Check label="Corriger les noms propres" checked={settings?.properNounsEnabled === true} disabled={!settings}

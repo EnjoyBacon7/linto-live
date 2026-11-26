@@ -1734,6 +1734,23 @@ describe('subtitle language', () => {
     expect(t.overlay.push.mock.calls).toEqual([[{ type: 'reset' }], [{ type: 'final', text: 'Hello everyone' }]])
   })
 
+  it('smoothing holds captions back until stable; a language switch drops what is queued', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
+    const t = setup({ sessions: [bilingual()], settings: { subtitleSmoothingMs: 1000 } })
+    await t.live.boot()
+    await t.live.start('Conf')
+    t.overlay.push.mockClear()
+    t.captions.emit('partial', { segmentId: 1, text: 'Bonjour' })
+    expect(t.overlay.push).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(t.overlay.push).toHaveBeenLastCalledWith({ type: 'partial', text: 'Bonjour' })
+    t.captions.emit('final', { segmentId: 1, text: 'Bonjour à tous les amis' })
+    t.overlay.push.mockClear()
+    await t.live.setSubtitleLanguage('s1', 'en')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(t.overlay.push.mock.calls).toEqual([[{ type: 'reset' }]])
+  })
+
   it('choosing the language of a session not on air only saves it', async () => {
     const t = setup()
     await t.live.boot()

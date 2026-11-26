@@ -6,6 +6,14 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Ajouté
+
+- **Lissage des sous-titres** : un curseur « Lissage » (section Sous-titres de l'inspecteur, de
+  « Direct » à 10 s) échange un peu de retard contre une lecture plus calme. Un mot n'apparaît dans la
+  bande qu'une fois que LinTO ne le change plus (les mots traduits ne bougent plus à l'écran), et les
+  mots sortent à un rythme régulier : les lignes défilent sans à-coups. Vaut pour l'image de sortie et la
+  fenêtre sous-titres ; la transcription de l'application reste en direct.
+
 ## [0.8.3] - 2026-11-25
 
 ### Ajouté
