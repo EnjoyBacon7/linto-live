@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, SUBTITLE_LINES_MAX, SUBTITLE_LINES_MIN, subtitleLines, subtitlePosition, SUBTITLE_SMOOTHING_MAX, SUBTITLE_SMOOTHING_STEP, subtitleSmoothingMs, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, SUBTITLE_LINES_MAX, SUBTITLE_LINES_MIN, subtitleLines, subtitlePosition, SUBTITLE_MAX_WPS_MAX, SUBTITLE_MAX_WPS_STEP, subtitleMaxWordsPerSecond, SUBTITLE_SMOOTHING_MAX, SUBTITLE_SMOOTHING_STEP, subtitleSmoothingMs, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -229,6 +229,29 @@ function Smoothing({ value, disabled, onChange }: { value: number; disabled: boo
   )
 }
 
+const formatWps = (wps: number): string =>
+  wps === 0 ? 'Illimité' : `${wps.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} mots/s`
+
+/** Fastest pace of the words in the band, catching up included (a translation comes a sentence at once); 0 = no limit. */
+function MaxWordsPerSecond({ value, disabled, onChange }: { value: number; disabled: boolean; onChange(v: number): void }) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => setDraft(value), [value])
+  return (
+    <label className="field band-position">
+      <span className="field-label">Vitesse max. <span className="band-position-value">{formatWps(draft)}</span></span>
+      <input type="range" min={0} max={SUBTITLE_MAX_WPS_MAX} step={SUBTITLE_MAX_WPS_STEP} value={draft} disabled={disabled}
+        aria-label="Vitesse maximale des sous-titres, en mots par seconde" aria-valuetext={formatWps(draft)}
+        title="Les mots n’arrivent jamais plus vite, même pour rattraper un retard. Double-clic : illimité"
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          setDraft(n)
+          if (n !== value) onChange(n)
+        }}
+        onDoubleClick={() => { setDraft(0); if (value !== 0) onChange(0) }} />
+    </label>
+  )
+}
+
 const formatDb = (db: number): string => `${db > 0 ? '+' : db < 0 ? '−' : ''}${Math.abs(db)} dB`
 
 /** Micro gain slider: each step is applied (and saved) at once, so the level meter shows its effect while dragging. */
@@ -427,6 +450,7 @@ export function Inspector(p: InspectorProps) {
             </label>
             <BandPosition value={subtitlePosition(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitlePosition: v })} />
             <Smoothing value={subtitleSmoothingMs(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitleSmoothingMs: v })} />
+            <MaxWordsPerSecond value={subtitleMaxWordsPerSecond(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitleMaxWordsPerSecond: v })} />
           </>
         )}
         <Check label="Corriger les noms propres" checked={settings?.properNounsEnabled === true} disabled={!settings}

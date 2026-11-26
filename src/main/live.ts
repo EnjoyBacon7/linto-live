@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import type { LiveState, StartResult } from '../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitleLines, subtitlePosition, subtitleSmoothingMs, UnauthorizedError,
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, ForbiddenError, micGainDb, NotFoundError, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitleLines, subtitlePosition, subtitleMaxWordsPerSecond, subtitleSmoothingMs, UnauthorizedError,
   type CaptureKind, type Channel, type DeviceItem, type NewSessionOptions, type Session, type SessionSummary, type Settings, type Transcript, type TranscriptUpdate,
   type TranslationEvent, type VideoSource, type Watermark, type WatermarkConfig
 } from '../shared/types'
@@ -302,7 +302,11 @@ export class LiveController extends EventEmitter {
 
   constructor(private readonly d: LiveDeps) {
     super()
-    this.smoother = new CaptionSmoother((m) => d.overlay.push(m), () => subtitleSmoothingMs(d.settings.get()))
+    this.smoother = new CaptionSmoother(
+      (m) => d.overlay.push(m),
+      () => subtitleSmoothingMs(d.settings.get()),
+      () => subtitleMaxWordsPerSecond(d.settings.get())
+    )
     d.obs.on('ready', (c: ObsConnection) => {
       if (this.shuttingDown) return
       this.enqueue(() => this.attach(c)).catch((e) => this.setState({ warning: `OBS : ${errMsg(e)}` }))
