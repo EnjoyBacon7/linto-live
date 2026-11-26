@@ -6,6 +6,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Corrigé
+
+- **Lissage des sous-titres** : une fois tous les mots de la phrase en cours affichés, l'application ne
+  se réveille plus toutes les millisecondes en attendant la suite (charge processeur inutile pendant
+  le direct). Chaque nouveau mot attend toujours tout le délai de lissage avant d'apparaître.
+
 ## [0.9.0] - 2026-11-26
 
 ### Ajouté
