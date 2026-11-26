@@ -1,4 +1,4 @@
-import { MIC_GAIN_MAX, MIC_GAIN_MIN, SUBTITLE_SMOOTHING_MAX } from './types'
+import { MIC_GAIN_MAX, MIC_GAIN_MIN, SUBTITLE_LINES_MAX, SUBTITLE_LINES_MIN, SUBTITLE_SMOOTHING_MAX } from './types'
 import type {
   AuthMethod, CaptureKind, CaptureTargets, DeviceItem, NewSessionOptions, SavedLogin, Organization, Session, SessionLookup, SessionStatus, SessionSummary, Settings,
   MediaAccess, MediaPermission, PermissionsStatus, QrSettings, SubtitleLanguageOption, TranscriberProfile, Transcript, TranscriptExportFormat, TranscriptUpdate, VideoSource, Watermark
@@ -300,6 +300,10 @@ export function checkSettingsPatch(raw: unknown): Partial<Settings> {
   if ('subtitleSmoothingMs' in raw) {
     const v = raw.subtitleSmoothingMs
     if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > SUBTITLE_SMOOTHING_MAX) return bad()
+  }
+  if ('subtitleLines' in raw) {
+    const v = raw.subtitleLines
+    if (!Number.isInteger(v) || (v as number) < SUBTITLE_LINES_MIN || (v as number) > SUBTITLE_LINES_MAX) return bad()
   }
   if ('micGainDb' in raw) {
     const v = raw.micGainDb

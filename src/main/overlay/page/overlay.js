@@ -1,4 +1,4 @@
-import { SubtitleModel, bandPlacement, windowMetrics } from './layout.js'
+import { SubtitleModel, bandLines, bandPlacement, windowMetrics } from './layout.js'
 import { WatermarkCycle, parseWatermark } from './watermark.js'
 
 const WIDTH = 1920 - 200 // canvas width minus the band's horizontal padding (overlay.css)
@@ -12,8 +12,7 @@ const key = params.get('k') || ''
 /** Subtitle window of the app (not the OBS source): the band fills the window, no QR code. */
 const windowMode = params.get('mode') === 'window'
 const band = document.getElementById('band')
-const l1 = document.getElementById('l1')
-const l2 = document.getElementById('l2')
+const linesBox = document.getElementById('lines')
 const wm = document.getElementById('wm')
 const qr = document.getElementById('qr')
 
@@ -27,6 +26,9 @@ const fitsAt = (size, width = WIDTH) => {
 }
 let fontSize = 48
 let bandVisible = true
+/** Caption lines in the band (the subtitle window keeps 2) and their elements. */
+let lineCount = 0
+let lineEls = []
 /** Band position last applied (null before the first style message) and the empty band shown while it moves. */
 let position = null
 let peeking = false
@@ -39,10 +41,22 @@ const qrCycle = new WatermarkCycle((v) => qr.classList.toggle('is-shown', v))
 let qrSvg = null
 let qrHideTimer = 0
 
+function setLineCount(n) {
+  if (n === lineCount) return
+  lineCount = n
+  lineEls = Array.from({ length: n }, () => {
+    const el = document.createElement('div')
+    el.className = 'line'
+    return el
+  })
+  linesBox.replaceChildren(...lineEls)
+  band.style.setProperty('--lines', String(n))
+  band.dataset.lines = String(n)
+}
+setLineCount(2)
+
 function render() {
-  const [a, b] = model.lines()
-  l1.textContent = a
-  l2.textContent = b
+  model.lines(lineCount).forEach((text, i) => { lineEls[i].textContent = text })
   band.hidden = !bandVisible || !(model.visible || peeking)
 }
 
@@ -93,12 +107,16 @@ function applyPosition(value) {
   const { ratio, qrLow } = bandPlacement(value)
   band.style.setProperty('--pos', String(ratio))
   qr.classList.toggle('is-low', qrLow)
-  if (position !== null && ratio !== position) {
-    peeking = true
-    clearTimeout(peekTimer)
-    peekTimer = setTimeout(() => { peeking = false; render() }, PEEK_MS)
-  }
+  if (position !== null && ratio !== position) peek()
   position = ratio
+}
+
+/** Shows the band, even empty, for a moment (not before the first style message, which only restores the look). */
+function peek() {
+  if (position === null) return
+  peeking = true
+  clearTimeout(peekTimer)
+  peekTimer = setTimeout(() => { peeking = false; render() }, PEEK_MS)
 }
 
 function applyStyle(m) {
@@ -108,7 +126,14 @@ function applyStyle(m) {
     model.setFits(fitsAt(fontSize))
   }
   bandVisible = m.visible !== false
-  if (!windowMode) applyPosition(m.position)
+  if (!windowMode) {
+    const n = bandLines(m.lines)
+    if (n !== lineCount) {
+      setLineCount(n)
+      peek() // the band's height changed: show it for a moment even with no caption
+    }
+    applyPosition(m.position)
+  }
   if (m.watermark) {
     renderWatermark(String(m.watermark.content ?? ''))
     cycle.update(m.watermark)

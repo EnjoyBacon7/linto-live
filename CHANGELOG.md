@@ -13,6 +13,10 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
   bande qu'une fois que LinTO ne le change plus (les mots traduits ne bougent plus à l'écran), et les
   mots sortent à un rythme régulier : les lignes défilent sans à-coups. Vaut pour l'image de sortie et la
   fenêtre sous-titres ; la transcription de l'application reste en direct.
+- **Nombre de lignes des sous-titres** : un menu « Lignes », dans la section Sous-titres du panneau
+  de droite, choisit 1, 2 (par défaut, comme avant) ou 3 lignes pour la bande de sous-titres de
+  l'image projetée, enregistrée et diffusée. Avec une seule ligne, la bande est plus fine et ne montre
+  que la fin de ce qui se dit. La fenêtre « sous-titres seuls » garde ses 2 lignes.
 
 ## [0.8.3] - 2026-11-25
 

@@ -14,6 +14,8 @@ export interface OverlayStyle {
   fontSize: number
   /** Where the band sits on the canvas: 0 = bottom edge, 100 = top edge. */
   position: number
+  /** Caption lines in the band (1..3). */
+  lines: number
   watermark: Watermark
   /** QR code of the session (SVG markup) and its own show/hide cycle; null when there is none. */
   qr: { svg: string; display: boolean; pinned: boolean; frequency: number; duration: number } | null

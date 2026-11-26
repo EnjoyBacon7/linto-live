@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { bandPlacement, layoutText, SubtitleModel, windowMetrics, type Layout } from '../../src/main/overlay/page/layout.js'
+import { bandLines, bandPlacement, layoutText, SubtitleModel, windowMetrics, type Layout } from '../../src/main/overlay/page/layout.js'
 
 const fits = (l: string): boolean => l.length <= 20
 const empty: Layout = { words: [], cuts: [] }
@@ -112,6 +112,43 @@ describe('SubtitleModel', () => {
   })
 })
 
+describe('SubtitleModel.lines(n)', () => {
+  it('1 line: the text being spoken, else the end of the previous one', () => {
+    const m = new SubtitleModel(fits)
+    expect(m.lines(1)).toEqual([''])
+    m.partial('un deux trois quatre cinq six')
+    expect(m.lines(1)).toEqual(['cinq six'])
+    m.final('un deux trois quatre cinq six sept')
+    expect(m.lines(1)).toEqual(['cinq six sept'])
+    m.partial('suite')
+    expect(m.lines(1)).toEqual(['suite'])
+  })
+  it('2 lines (default) as before', () => {
+    const m = new SubtitleModel(fits)
+    m.final('bonjour à tous')
+    m.partial('suite')
+    expect(m.lines(2)).toEqual(m.lines())
+    expect(m.lines()).toEqual(['bonjour à tous', 'suite'])
+  })
+  it('3 lines: the previous text fills the lines above the current one', () => {
+    const m = new SubtitleModel(fits)
+    expect(m.lines(3)).toEqual(['', '', ''])
+    m.final('un deux trois quatre cinq six sept huit')
+    expect(m.lines(3)).toEqual(['un deux trois quatre', 'cinq six sept huit', ''])
+    m.partial('suite')
+    expect(m.lines(3)).toEqual(['un deux trois quatre', 'cinq six sept huit', 'suite'])
+    m.partial('un deux trois quatre cinq six sept huit neuf dix onze douze')
+    expect(m.lines(3)).toEqual(['un deux trois quatre', 'cinq six sept huit', 'neuf dix onze douze'])
+  })
+})
+
+describe('bandLines', () => {
+  it('1..3, anything else is 2', () => {
+    expect([1, 2, 3].map(bandLines)).toEqual([1, 2, 3])
+    expect([0, 4, 1.5, '1', undefined].map(bandLines)).toEqual([2, 2, 2, 2, 2])
+  })
+})
+
 describe('caption measurement', () => {
   it('measures with the font the band is drawn with (default size and family stack)', () => {
     const dir = join(__dirname, '../../src/main/overlay/page')
@@ -135,8 +172,8 @@ describe('bandPlacement', () => {
     expect(bandPlacement(undefined)).toEqual({ ratio: 0, qrLow: false })
     expect(bandPlacement('40')).toEqual({ ratio: 0, qrLow: false })
   })
-  it('the QR code never overlaps the band, even with the largest font', () => {
-    const H = 1080, band = 2.4 * 96, qrTop = 40, qrSize = 240 + 2 * 16
+  it('the QR code never overlaps the band, even with the largest font and the most lines', () => {
+    const H = 1080, band = 1.2 * 3 * 96, qrTop = 40, qrSize = 240 + 2 * 16
     for (let p = 0; p <= 100; p++) {
       const { ratio, qrLow } = bandPlacement(p)
       const bottom = ratio * (H - band) // CSS: bottom = --pos × (1080 − band height)
@@ -148,7 +185,8 @@ describe('bandPlacement', () => {
   })
   it('the stylesheet places the band from --pos over its travel', () => {
     const css = readFileSync(join(__dirname, '../../src/main/overlay/page/overlay.css'), 'utf8')
-    expect(css).toContain('bottom: calc(var(--pos) * (1080px - 2.4 * var(--fs)));')
+    expect(css).toContain('bottom: calc(var(--pos) * (1080px - 1.2 * var(--lines) * var(--fs)));')
+    expect(css).toContain('height: calc(1.2 * var(--lines) * var(--fs));')
   })
 })
 
