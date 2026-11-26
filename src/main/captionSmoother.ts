@@ -1,15 +1,10 @@
 /** Caption message of the subtitle band (the overlay page's `partial` / `final`). */
 export type BandCaption = { type: 'partial' | 'final'; text: string }
 
-/** Pace of the words when nothing piles up (~4 words/s, a speaking rate). */
-const BASE_INTERVAL_MS = 250
-
 interface Segment {
   words: string[]
-  /** When each word took its current value (same word at the same rank). */
+  /** When each word took its current value (same word at the same rank): it comes out the delay later. */
   since: number[]
-  /** When each word was admitted to the queue (undefined = not yet). */
-  admittedAt: (number | undefined)[]
   final: boolean
   text: string
 }
@@ -20,17 +15,22 @@ const split = (text: string): string[] => {
 }
 
 /**
- * Trades latency for a calmer subtitle band. A word of the open segment is admitted once it has stayed the
- * same for the delay (all of them when the segment is final); admitted words come out one at a time, at
- * BASE_INTERVAL_MS or faster so each is shown within the delay of its admission. The band gets the same
- * messages as without smoothing: `partial` = words shown so far, `final` = whole segment once all are shown.
- * `maxWordsPerSecond` (0 = none) caps that pace, catching up included: a burst (LinTO sends a translation a whole
- * sentence at once) is read out at most that fast, at a delay of 0 too. With neither, captions pass straight through.
+ * Shows LinTO's captions a fixed delay late, minus what LinTO rewrote meanwhile: a word comes out the delay
+ * after it took its current value, so the band follows the speech at its own rhythm, always the delay behind,
+ * and a word LinTO corrects within the delay never shows. A word already shown stays shown: a later correction
+ * replaces it in place. A final does not skip the delay (its words keep their time).
+ * `maxWordsPerSecond` (0 = none) caps the pace on top: a burst (LinTO sends a translation a whole sentence at
+ * once) is read out at most that fast, at a delay of 0 too; the lag then grows past the delay while it lasts.
+ * The band gets the same messages as without smoothing: `partial` = words shown so far, `final` = whole segment
+ * once all are shown. With neither a delay nor a cap, captions pass straight through.
  */
 export class CaptionSmoother {
   private segs: Segment[] = []
-  /** Words of segs[0] already shown. */
+  /** Words of segs[0] shown. */
   private shown = 0
+  /** Text of segs[0] last sent to the band. */
+  private sent = ''
+  /** Earliest time of the next word under the pace cap. */
   private nextAt = 0
   private timer: ReturnType<typeof setTimeout> | undefined
 
@@ -52,26 +52,24 @@ export class CaptionSmoother {
   }
 
   caption(m: BandCaption): void {
-    const now = Date.now()
     if (this.passThrough()) {
       this.flush()
       this.sink(m)
       return
     }
+    const now = Date.now()
     const words = split(m.text)
     let seg = this.segs[this.segs.length - 1]
     if (!seg || seg.final) {
-      seg = { words: [], since: [], admittedAt: [], final: false, text: '' }
+      seg = { words: [], since: [], final: false, text: '' }
       this.segs.push(seg)
     }
     let k = 0
     while (k < words.length && k < seg.words.length && words[k] === seg.words[k]) k++
     seg.since = [...seg.since.slice(0, k), ...words.slice(k).map(() => now)]
-    seg.admittedAt = seg.admittedAt.slice(0, k)
     seg.words = words
     seg.text = m.text
     if (m.type === 'final') seg.final = true
-    if (seg === this.segs[0]) this.shown = Math.min(this.shown, words.length)
     this.pump()
   }
 
@@ -81,6 +79,7 @@ export class CaptionSmoother {
     this.timer = undefined
     this.segs = []
     this.shown = 0
+    this.sent = ''
     this.nextAt = 0
   }
 
@@ -91,32 +90,6 @@ export class CaptionSmoother {
     for (const s of segs) this.sink({ type: s.final ? 'final' : 'partial', text: s.text })
   }
 
-  private admit(now: number, delay: number): void {
-    for (const s of this.segs) {
-      for (let i = 0; i < s.words.length; i++) {
-        if (s.admittedAt[i] !== undefined) continue
-        if (s.final) s.admittedAt[i] = now
-        else if (now - s.since[i]! >= delay) s.admittedAt[i] = s.since[i]! + delay
-        else break
-      }
-    }
-  }
-
-  /** Admitted words not shown yet, and the latest of their admission times. */
-  private queued(): { waiting: number; lastAdmitted: number } {
-    let waiting = 0
-    let lastAdmitted = 0
-    this.segs.forEach((s, j) => {
-      for (let i = j === 0 ? this.shown : 0; i < s.words.length; i++) {
-        const a = s.admittedAt[i]
-        if (a === undefined) break
-        waiting++
-        lastAdmitted = Math.max(lastAdmitted, a)
-      }
-    })
-    return { waiting, lastAdmitted }
-  }
-
   private pump(): void {
     clearTimeout(this.timer)
     this.timer = undefined
@@ -124,38 +97,44 @@ export class CaptionSmoother {
     const delay = Math.max(0, this.delayMs())
     const minInterval = this.minInterval()
     const now = Date.now()
-    this.admit(now, delay)
+    const due = (s: Segment, i: number): boolean => s.since[i]! + delay <= now
     for (;;) {
       const head = this.segs[0]
       if (!head) return
-      if (head.final && this.shown >= head.words.length) {
+      const n = head.words.length
+      this.shown = Math.min(this.shown, n)
+      if (head.final && this.shown >= n) {
         this.sink({ type: 'final', text: head.text })
         this.segs.shift()
         this.shown = 0
+        this.sent = ''
         continue
       }
-      if (head.admittedAt[this.shown] === undefined) break
-      if (now < this.nextAt) break
-      this.shown++
-      const { waiting, lastAdmitted } = this.queued()
-      const catchUp = waiting > 0 ? Math.min(BASE_INTERVAL_MS, Math.max(0, lastAdmitted + delay - now) / waiting) : BASE_INTERVAL_MS
-      // Without a delay, the limit alone sets the pace (words come out as soon as it allows).
-      const interval = delay > 0 ? Math.max(minInterval, catchUp) : minInterval
-      this.nextAt = now + interval
-      if (!(head.final && this.shown >= head.words.length)) {
-        this.sink({ type: 'partial', text: head.words.slice(0, this.shown).join(' ') })
+      if (this.shown < n && due(head, this.shown)) {
+        if (minInterval <= 0) {
+          while (this.shown < n && due(head, this.shown)) this.shown++
+        } else if (now >= this.nextAt) {
+          this.shown++
+          this.nextAt = now + minInterval
+        }
+        if (head.final && this.shown >= n) continue
       }
+      // Also carries a correction of words already shown.
+      const text = head.words.slice(0, this.shown).join(' ')
+      if (this.shown > 0 && text !== this.sent) {
+        this.sink({ type: 'partial', text })
+        this.sent = text
+      }
+      break
     }
-    this.schedule(delay)
+    this.schedule(delay, minInterval)
   }
 
-  private schedule(delay: number): void {
+  private schedule(delay: number, minInterval: number): void {
     const head = this.segs[0]
-    if (!head) return
-    let at: number
-    if (head.admittedAt[this.shown] !== undefined) at = this.nextAt
-    else if (this.shown < head.words.length) at = head.since[this.shown]! + delay // head is open: its next word becomes stable then
-    else return // every word of the open head is shown: the next caption pumps again
+    if (!head || this.shown >= head.words.length) return // all shown: the next caption pumps again
+    let at = head.since[this.shown]! + delay
+    if (minInterval > 0) at = Math.max(at, this.nextAt)
     this.timer = setTimeout(() => this.pump(), Math.max(0, at - Date.now()))
   }
 }

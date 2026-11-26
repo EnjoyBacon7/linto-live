@@ -32,8 +32,12 @@ plus calme : défilement régulier des lignes, mots traduits qui ne bougent plus
 - Le lisseur s'applique au flux routé (original, traduction, sous-titres croisés) avant `overlay.push` ;
   les finals restent seuls à porter les corrections de noms propres, comme aujourd'hui.
 - Stabilité : un mot du partiel courant n'est admis qu'après être resté identique (même mot, même rang)
-  pendant le délai ; un final admet tout son texte d'un coup.
-- Rythme : les mots admis sortent un par un à intervalle régulier ; si la file s'allonge, l'intervalle se
+  pendant le délai ; un final ferme le segment sans raccourcir le délai de ses mots.
+- *Révisé le 2026-11-26 :* rythme : la bande est une ligne à retard. Chaque mot sort exactement le délai
+  après avoir pris sa valeur (un final ne raccourcit pas le délai) : la bande suit le rythme de la parole,
+  toujours le délai en retard, sans file ni rattrapage. Un mot déjà affiché le reste ; une correction
+  ultérieure le remplace sur place. La vitesse max. (curseur séparé) borne ce rythme en plus.
+- *Remplacé :* les mots admis sortaient un par un à intervalle régulier ; si la file s'allongeait, l'intervalle se
   raccourcit pour que la file se vide dans le délai — le retard reste borné par le réglage.
 
 ## Choix du constructeur (à relire)

@@ -209,7 +209,7 @@ function BandPosition({ value, disabled, onChange }: { value: number; disabled: 
 const formatSmoothing = (ms: number): string =>
   ms === 0 ? 'Direct' : `${(ms / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} s`
 
-/** Delay the band trades for calm reading (words shown once stable, at an even pace); 0 = shown at once. */
+/** Delay the band runs behind LinTO, hiding the words LinTO rewrites within it; 0 = shown at once. */
 function Smoothing({ value, disabled, onChange }: { value: number; disabled: boolean; onChange(v: number): void }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => setDraft(value), [value])
