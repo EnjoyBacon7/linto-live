@@ -126,7 +126,8 @@ Conseils :
    pour n'envoyer que le son ; « Écran… » ou « Fenêtre… » diffusent à la place un écran ou la
    fenêtre d'une application, par exemple une présentation), **micro** (c'est ce son qui est transcrit ; **Écouter le retour
    audio** le fait entendre, au casque, tel qu'il part vers LinTO et est enregistré), taille des sous-titres,
-   **position** de la bande de sous-titres dans l'image (curseur, du bas jusqu'en haut),
+   **nombre de lignes** des sous-titres (1, 2 ou 3), **position** de la bande de sous-titres dans
+   l'image (curseur, du bas jusqu'en haut),
    **lissage** des sous-titres (curseur, de « Direct » à 10 s : plus de retard, mais des mots qui ne
    bougent plus et des lignes qui défilent régulièrement),
    affichage des sous-titres et du filigrane.

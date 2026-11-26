@@ -6,16 +6,17 @@ html, body {
   overflow: hidden;
 }
 /* --fs: font size in px (set by overlay.js from the app's settings). As on the LinTO page:
-   line height 1.2 × font size, band 2 lines high. */
+   line height 1.2 × font size. --lines: caption lines in the band (1..3, 2 by default as on LinTO). */
 /* --pos: share (0..1) of the band's travel left under it: 0 = bottom edge, 1 = top edge (overlay.js). */
 #band {
   --fs: 48px;
   --pos: 0;
+  --lines: 2;
   position: absolute;
   left: 0;
   right: 0;
-  bottom: calc(var(--pos) * (1080px - 2.4 * var(--fs)));
-  height: calc(2.4 * var(--fs));
+  bottom: calc(var(--pos) * (1080px - 1.2 * var(--lines) * var(--fs)));
+  height: calc(1.2 * var(--lines) * var(--fs));
   box-sizing: border-box;
   padding: 0 100px;
   overflow: hidden;
@@ -31,7 +32,10 @@ html, body {
   transform-origin: top center;
 }
 /* Watermark shown: the text shrinks to make room, as on the LinTO page. */
-#band.has-wm #lines { transform: scale(0.8) translateY(-8%); }
+/* The shift is in font units (-8 % of two lines): with 3 lines the top one is not cut off. */
+#band.has-wm #lines { transform: scale(0.8) translateY(calc(-0.192 * var(--fs))); }
+/* A single line leaves less room under it for the watermark: it shrinks a little more. */
+#band.has-wm[data-lines="1"] #lines { transform: scale(0.7) translateY(calc(-0.144 * var(--fs))); }
 #band .line {
   height: calc(1.2 * var(--fs));
   white-space: nowrap;

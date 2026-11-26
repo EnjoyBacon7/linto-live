@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { SetupData } from '../../shared/ipc'
 import {
-  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, subtitlePosition, SUBTITLE_SMOOTHING_MAX, SUBTITLE_SMOOTHING_STEP, subtitleSmoothingMs, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
+  DEFAULT_QR, DEFAULT_SUBTITLE_FONT_SIZE, MIC_GAIN_MAX, MIC_GAIN_MIN, micGainDb, SUBTITLE_FONT_SIZE_MAX, SUBTITLE_FONT_SIZE_MIN, SUBTITLE_LINES_MAX, SUBTITLE_LINES_MIN, subtitleLines, subtitlePosition, SUBTITLE_SMOOTHING_MAX, SUBTITLE_SMOOTHING_STEP, subtitleSmoothingMs, type SessionVisibility, type Settings, type SubtitleLanguageOption, type VideoSource, type CaptureKind, type Watermark
 } from '../../shared/types'
 import { VuMeter } from '../components/VuMeter'
 import { Button } from '../ui/Button'
@@ -179,6 +179,11 @@ function FontSize({ value, disabled, onChange }: { value: number; disabled: bool
     </label>
   )
 }
+
+const LINE_OPTIONS = Array.from({ length: SUBTITLE_LINES_MAX - SUBTITLE_LINES_MIN + 1 }, (_, i) => {
+  const n = SUBTITLE_LINES_MIN + i
+  return { value: String(n), label: n === 1 ? '1 ligne' : `${n} lignes` }
+})
 
 const formatPosition = (v: number): string => (v === 0 ? 'En bas' : v === 100 ? 'En haut' : `${v} %`)
 
@@ -415,6 +420,11 @@ export function Inspector(p: InspectorProps) {
             </label>
             {!data?.watermarkEnabled && wmPending && <p className="inspector-note">{PENDING_NOTE}</p>}
             <FontSize value={fontSize} disabled={!settings} onChange={(v) => onChange({ subtitleFontSize: v })} />
+            <label className="insp-row">
+              <span className="insp-row-label">Lignes</span>
+              <PopUp label="Nombre de lignes du sous-titre" className="inspector-control" value={String(subtitleLines(settings ?? {}))}
+                options={LINE_OPTIONS} disabled={!settings} onChange={(v) => onChange({ subtitleLines: Number(v) })} />
+            </label>
             <BandPosition value={subtitlePosition(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitlePosition: v })} />
             <Smoothing value={subtitleSmoothingMs(settings ?? {})} disabled={!settings} onChange={(v) => onChange({ subtitleSmoothingMs: v })} />
           </>

@@ -8,7 +8,7 @@ import { checkWatermark, resolveWatermark, WATERMARK_META_KEY } from '../src/mai
 import { LintoApi } from '../src/main/linto/api'
 import { toSessionSummaries } from '../src/main/setupData'
 import { LiveController, subtitleFontSize, type LiveDeps } from '../src/main/live'
-import { ForbiddenError, subtitlePosition, subtitleSmoothingMs, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
+import { ForbiddenError, subtitleLines, subtitlePosition, subtitleSmoothingMs, type Session, type Settings, type Watermark, type WatermarkConfig } from '../src/shared/types'
 
 const CFG: WatermarkConfig = { enabled: true, content: 'Par $linto', frequency: 30, duration: 5 }
 const WM: Watermark = { display: true, pinned: false, content: 'Hello $linto', frequency: 60, duration: 8 }
@@ -79,6 +79,17 @@ describe('subtitlePosition', () => {
   })
 })
 
+describe('subtitleLines', () => {
+  it('defaults to 2 lines, keeps 1..3 only', () => {
+    expect(subtitleLines({})).toBe(2)
+    expect(subtitleLines({ subtitleLines: 1 })).toBe(1)
+    expect(subtitleLines({ subtitleLines: 3 })).toBe(3)
+    expect(subtitleLines({ subtitleLines: 0 })).toBe(2)
+    expect(subtitleLines({ subtitleLines: 4 })).toBe(2)
+    expect(subtitleLines({ subtitleLines: 1.5 })).toBe(2)
+  })
+})
+
 describe('subtitleFontSize', () => {
   it('clamps and defaults', () => {
     expect(subtitleFontSize({})).toBe(48)
@@ -138,7 +149,7 @@ describe('LiveController subtitle style', () => {
   it('boot sends the local settings with no watermark', async () => {
     const t = setup()
     await t.live.boot()
-    expect(t.styles()).toEqual([{ type: 'style', visible: true, fontSize: 48, position: 0, watermark: resolveWatermark(undefined, CFG), qr: null }])
+    expect(t.styles()).toEqual([{ type: 'style', visible: true, fontSize: 48, position: 0, lines: 2, watermark: resolveWatermark(undefined, CFG), qr: null }])
   })
 
   it('start uses the session watermark (before the reset), stop drops it', async () => {
@@ -147,7 +158,7 @@ describe('LiveController subtitle style', () => {
     t.overlay.push.mockClear()
     await t.live.start('Conf')
     const msgs = t.overlay.push.mock.calls.map((c) => c[0])
-    expect(msgs[0]).toEqual({ type: 'style', visible: true, fontSize: 48, position: 0, watermark: WM, qr: null })
+    expect(msgs[0]).toEqual({ type: 'style', visible: true, fontSize: 48, position: 0, lines: 2, watermark: WM, qr: null })
     expect(msgs[1]).toEqual({ type: 'reset' })
     const stopped = t.live.stop()
     await vi.advanceTimersByTimeAsync(10_000) // the fake OBS never reports the stream stopped
@@ -162,6 +173,8 @@ describe('LiveController subtitle style', () => {
     expect(t.styles().at(-1)).toMatchObject({ visible: false, fontSize: 60 })
     await t.live.saveSettings({ subtitlePosition: 70 })
     expect(t.styles().at(-1)).toMatchObject({ position: 70 })
+    await t.live.saveSettings({ subtitleLines: 1 })
+    expect(t.styles().at(-1)).toMatchObject({ lines: 1 })
     const n = t.styles().length
     await t.live.saveSettings({ primarySource: { kind: 'device', id: 'v2' } })
     expect(t.styles().length).toBe(n)

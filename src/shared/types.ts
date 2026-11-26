@@ -167,6 +167,8 @@ export interface Settings {
   subtitlePosition?: number
   /** Delay in ms the subtitle band trades for calm reading (0 = shown at once, default); see subtitleSmoothingMs. */
   subtitleSmoothingMs?: number
+  /** Number of caption lines in the band of the video (1..3, default 2). */
+  subtitleLines?: number
   /** Language shown in the subtitle band, per session id (absent = the original language). */
   subtitleLanguages?: Record<string, string>
   /** QR code of the session's public link in the video (default: hidden). */
@@ -216,6 +218,17 @@ export function subtitleSmoothingMs(s: Pick<Settings, 'subtitleSmoothingMs'>): n
   const v = s.subtitleSmoothingMs
   if (typeof v !== 'number' || !Number.isFinite(v)) return 0
   return Math.min(SUBTITLE_SMOOTHING_MAX, Math.max(0, Math.round(v / SUBTITLE_SMOOTHING_STEP) * SUBTITLE_SMOOTHING_STEP))
+}
+
+/** Caption lines in the band of the video: 3 at most, so the band never meets the QR code (layout.test.ts). */
+export const DEFAULT_SUBTITLE_LINES = 2
+export const SUBTITLE_LINES_MIN = 1
+export const SUBTITLE_LINES_MAX = 3
+
+/** Line count actually used for the band: the saved one if valid, else 2. */
+export function subtitleLines(s: Pick<Settings, 'subtitleLines'>): number {
+  const v = s.subtitleLines
+  return Number.isInteger(v) && v! >= SUBTITLE_LINES_MIN && v! <= SUBTITLE_LINES_MAX ? v! : DEFAULT_SUBTITLE_LINES
 }
 
 /** Micro gain range in dB (OBS's gain filter accepts -30..+30). */

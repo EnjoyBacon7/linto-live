@@ -82,12 +82,18 @@ export class SubtitleModel {
     this._visible = false
   }
 
-  lines() {
-    if (this.current.cuts.length === 0) {
-      return [lastLine(this.previous), lastLine(this.current)]
-    }
-    const n = this.current.cuts.length
-    return [lineText(this.current, n - 1), lineText(this.current, n)]
+  /**
+   * The `n` lines shown, top to bottom ('' when absent). The text being spoken takes the lower lines
+   * (at least one, possibly empty right after a final, except with a single line); the end of the
+   * previous text fills the lines above it.
+   */
+  lines(n = 2) {
+    const all = (l) => Array.from({ length: l.cuts.length + 1 }, (_, i) => lineText(l, i))
+    const current = this.current.words.length ? all(this.current) : n === 1 ? [] : ['']
+    const previous = this.previous.words.length ? all(this.previous) : []
+    const shown = [...previous.slice(Math.max(0, previous.length - (n - current.length))), ...current].slice(-n)
+    while (shown.length < n) shown.unshift('')
+    return shown
   }
 
   get visible() {
@@ -113,4 +119,9 @@ export function windowMetrics(width, height) {
 export function bandPlacement(position) {
   const p = typeof position === 'number' && Number.isFinite(position) ? Math.min(100, Math.max(0, position)) : 0
   return { ratio: p / 100, qrLow: p > 50 }
+}
+
+/** Caption lines in the band from the app's setting: 1..3, anything else is 2. */
+export function bandLines(lines) {
+  return Number.isInteger(lines) && lines >= 1 && lines <= 3 ? lines : 2
 }

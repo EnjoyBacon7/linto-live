@@ -1275,6 +1275,16 @@ describe('Inspector: subtitles (LinTO Studio settings)', () => {
     expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitleSmoothingMs: 0 })
   })
 
+  it('the line count menu saves 1, 2 or 3 lines (2 by default)', async () => {
+    setup()
+    await renderMain()
+    const menu = screen.getByRole('combobox', { name: 'Nombre de lignes du sous-titre' }) as HTMLSelectElement
+    expect(menu.value).toBe('2')
+    expect(Array.from(menu.options).map((o) => o.text)).toEqual(['1 ligne', '2 lignes', '3 lignes'])
+    fireEvent.change(menu, { target: { value: '1' } })
+    expect(fn(api.setup.save)).toHaveBeenLastCalledWith({ subtitleLines: 1 })
+  })
+
   it('QR note when the session is not public', async () => {
     const NOTE = /Le public devra se connecter à LinTO/
     setup({}, setupData(), [{ ...SESSIONS[0], visibility: 'organization' }])

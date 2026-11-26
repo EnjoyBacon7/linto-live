@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     visible: true,
     fontSize: 48,
     position: Number(process.env.POSITION ?? 0), // 0 = bottom … 100 = top
+    lines: Number(process.env.LINES ?? 2), // caption lines in the band: 1..3
     watermark: { display: true, pinned: false, content: 'LinTO Live $linto', frequency: 5, duration: 4 },
     qr: { svg, display: true, pinned: false, frequency: 8, duration: 6 }
   })
