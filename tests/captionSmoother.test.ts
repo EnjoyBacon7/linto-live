@@ -43,41 +43,75 @@ describe('CaptionSmoother', () => {
     expect(last()).toEqual({ type: 'partial', text: "il c'est" })
   })
 
-  it('a final admits all its words, released one by one, then the final', () => {
-    s.caption({ type: 'final', text: 'un deux trois' })
-    expect(out).toEqual([{ type: 'partial', text: 'un' }])
-    vi.advanceTimersByTime(1000)
-    expect(out).toEqual([
-      { type: 'partial', text: 'un' },
-      { type: 'partial', text: 'un deux' },
-      { type: 'final', text: 'un deux trois' }
+  /** Messages that came out over `ms`, with their time (ms from now). */
+  const timeline = (ms: number): [number, BandCaption][] => {
+    const t0 = Date.now()
+    const got: [number, BandCaption][] = []
+    let seen = out.length
+    for (let t = 0; t <= ms; t += 10) {
+      while (out.length > seen) got.push([Date.now() - t0, out[seen++]!])
+      vi.advanceTimersByTime(10)
+    }
+    return got
+  }
+
+  it('words come out at the rhythm they arrived, exactly the delay later', () => {
+    s.caption({ type: 'partial', text: 'a' })
+    vi.advanceTimersByTime(300)
+    s.caption({ type: 'partial', text: 'a b' })
+    vi.advanceTimersByTime(600)
+    s.caption({ type: 'partial', text: 'a b c' })
+    // now = 900
+    expect(timeline(1100)).toEqual([
+      [100, { type: 'partial', text: 'a' }],
+      [400, { type: 'partial', text: 'a b' }],
+      [1000, { type: 'partial', text: 'a b c' }]
     ])
   })
 
-  it('releases at an even pace, faster when words pile up, within the delay', () => {
-    const words = Array.from({ length: 20 }, (_, i) => `m${i}`).join(' ')
-    s.caption({ type: 'final', text: words })
-    const times: number[] = []
-    const t0 = Date.now()
-    const n = (): number => out.length
-    let seen = 0
-    for (let t = 0; t <= 1000; t += 10) {
-      if (n() > seen) { times.push(Date.now() - t0); seen = n() }
-      vi.advanceTimersByTime(10)
-    }
-    expect(last()).toEqual({ type: 'final', text: words })
-    // spread out, not one burst
-    expect(times.length).toBeGreaterThan(10)
+  it('a final keeps the delay: its words come out the delay after they took their value', () => {
+    s.caption({ type: 'partial', text: 'un deux' })
+    vi.advanceTimersByTime(500)
+    s.caption({ type: 'final', text: 'un deux trois' })
+    expect(out).toEqual([])
+    expect(timeline(1100)).toEqual([
+      [500, { type: 'partial', text: 'un deux' }],
+      [1000, { type: 'final', text: 'un deux trois' }]
+    ])
   })
 
-  it('paces at 250 ms a word when nothing piles up', () => {
-    delay = 3000
-    s.caption({ type: 'final', text: 'a b' })
-    expect(out).toEqual([{ type: 'partial', text: 'a' }])
-    vi.advanceTimersByTime(249)
-    expect(out.length).toBe(1)
+  it('a whole sentence at once comes out at once, the delay later (no pace of its own)', () => {
+    s.caption({ type: 'final', text: 'un deux trois' })
+    vi.advanceTimersByTime(999)
+    expect(out).toEqual([])
     vi.advanceTimersByTime(1)
-    expect(last()).toEqual({ type: 'final', text: 'a b' })
+    expect(out).toEqual([{ type: 'final', text: 'un deux trois' }])
+  })
+
+  it('the lag stays the delay however long the speech', () => {
+    let text = ''
+    for (let i = 0; i < 100; i++) {
+      text += (i ? ' ' : '') + `m${i}`
+      s.caption({ type: 'partial', text })
+      vi.advanceTimersByTime(100) // 10 words/s, faster than the old even pace
+    }
+    // m99 arrived 100 ms ago: shown 900 ms from now, not later
+    vi.advanceTimersByTime(899)
+    expect(last()!.text.endsWith('m98')).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(last()).toEqual({ type: 'partial', text })
+  })
+
+  it('a word corrected after it is shown is replaced in place, never hidden', () => {
+    s.caption({ type: 'partial', text: 'il ces' })
+    vi.advanceTimersByTime(1000)
+    expect(last()).toEqual({ type: 'partial', text: 'il ces' })
+    s.caption({ type: 'partial', text: "il c'est vrai" })
+    expect(last()).toEqual({ type: 'partial', text: "il c'est" })
+    expect(out.every((m) => m.text.startsWith('il'))).toBe(true)
+    expect(out.some((m) => m.text === 'il')).toBe(false)
+    vi.advanceTimersByTime(1000)
+    expect(last()).toEqual({ type: 'partial', text: "il c'est vrai" })
   })
 
   it('setting the delay to 0 flushes what is queued', () => {
@@ -95,10 +129,13 @@ describe('CaptionSmoother', () => {
   })
 
   it('setting the delay to 0 flushes on the next tick even without a new caption', () => {
-    s.caption({ type: 'final', text: 'un deux trois' })
+    s.caption({ type: 'partial', text: 'un deux' })
+    vi.advanceTimersByTime(500)
+    s.caption({ type: 'partial', text: 'un deux trois quatre' })
+    vi.advanceTimersByTime(500) // 'un deux' out; the next tick is 'trois' at 1500
     delay = 0
-    vi.advanceTimersByTime(300)
-    expect(last()).toEqual({ type: 'final', text: 'un deux trois' })
+    vi.advanceTimersByTime(500)
+    expect(last()).toEqual({ type: 'partial', text: 'un deux trois quatre' })
   })
 
   it('clear drops everything queued', () => {
@@ -165,13 +202,14 @@ describe('CaptionSmoother', () => {
       return times
     }
 
-    it('caps the catch-up pace of a burst (a whole translated sentence at once)', () => {
+    it('caps the pace of a burst (a whole translated sentence at once)', () => {
       wps = 2
       const words = Array.from({ length: 10 }, (_, i) => `m${i}`).join(' ')
       s.caption({ type: 'final', text: words })
-      const times = [0, ...run(6000)]
+      const times = run(6000)
       expect(last()).toEqual({ type: 'final', text: words })
-      expect(times.length).toBe(10) // 9 partials + the final (the first partial came out at once)
+      expect(times.length).toBe(10) // 9 partials + the final
+      expect(times[0]).toBe(1000) // the first word after the delay
       for (let i = 1; i < times.length; i++) expect(times[i]! - times[i - 1]!).toBeGreaterThanOrEqual(500)
     })
 

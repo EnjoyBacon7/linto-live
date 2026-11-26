@@ -6,6 +6,15 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+### Modifié
+
+- **Lissage des sous-titres** : la bande suit désormais LinTO avec un retard fixe, égal au réglage, au
+  rythme même de la parole. Un mot sort exactement le délai après s'être stabilisé, et les mots que LinTO
+  réécrit pendant ce délai ne s'affichent jamais. Fini le défilement mot à mot à cadence imposée et les
+  rattrapages : le retard ne grossit plus et les traductions ne prennent plus de retard sur le site
+  LinTO. Un mot déjà affiché ne disparaît plus : une correction tardive le remplace sur place. Le
+  curseur « Vitesse max. » est conservé et borne toujours le rythme des mots.
+
 ## [0.9.2] - 2026-11-26
 
 ### Ajouté
