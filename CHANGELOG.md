@@ -6,6 +6,17 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Non publié]
 
+## [0.9.2] - 2026-11-26
+
+### Ajouté
+
+- **Vitesse maximale des sous-titres** : un curseur « Vitesse max. » (section Sous-titres de
+  l'inspecteur, sous « Lissage », de « Illimité » à 8 mots par seconde) borne le rythme des mots dans
+  la bande, rattrapage compris, même sans lissage. LinTO envoie une traduction phrase par phrase : la
+  bande traduite restait figée plusieurs secondes puis affichait toute la phrase d'un coup ; elle la
+  déroule désormais à une vitesse lisible. Si l'orateur parle longtemps plus vite que la vitesse choisie,
+  le retard s'accumule jusqu'à la prochaine pause.
+
 ## [0.9.1] - 2026-11-26
 
 ### Corrigé
